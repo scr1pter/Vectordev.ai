@@ -45,25 +45,8 @@ export function createComputerOnboarding(
   }
   const platform = (view = state): ComputerOnboarding.Platform =>
     view.backend === "local-windows" ? "windows" : "macos"
-  const blocked = (view = state): CopyKey | undefined => {
-    if (!computer.supported) return "computer.status.linux"
-    if (!view.settings || !view.status || !view.backend) return "computer.onboarding.checkFailed"
-    if (!view.settings.policy.enabled || view.status.reason === "policy_disabled")
-      return "computer.availability.company"
-    if (view.settings.locked.includes("enabled") || view.settings.locked.includes("consentedAt"))
-      return "computer.settings.managed"
-    if (view.backend !== "local-macos" && view.backend !== "local-windows") return "computer.availability.desktop"
-    if ((view.backend === "local-windows") !== !!view.permissions?.windows) return "computer.onboarding.checkFailed"
-    if (view.status.reason === "elevated") return "computer.availability.elevated"
-    if (view.status.reason === "blocked_by_os") return "computer.onboarding.windows.captureBlocked"
-    if (view.status.reason === "unsupported_os")
-      return view.backend === "local-macos" ? "computer.availability.macos" : "computer.availability.desktop"
-    if (["helper_missing", "helper_incompatible", "responsible_missing"].includes(view.status.reason ?? ""))
-      return "computer.onboarding.helperFailed"
-    if (!view.status.available && view.status.reason !== "permissions") return "computer.onboarding.checkFailed"
-  }
-  const ready = (view = state) =>
-    !blocked(view) && ComputerOnboarding.canFinish(view.permissions, view.settings?.prefs.consentedAt)
+  const blocked = (view = state): CopyKey | undefined => ComputerOnboarding.setupBlocked(view, computer.supported)
+  const ready = (view = state) => ComputerOnboarding.setupReady(view, computer.supported)
 
   const settings = async () => {
     const [settings, status, snapshot] = await Promise.all([computer.prefs(), computer.status(), computer.state()])

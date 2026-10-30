@@ -20,7 +20,7 @@ export function SettingsComputerStatus(props: { computer: Computer.ComputerPlatf
     if (!mounted) return
     return showComputerOnboarding(dialog, {
       computer: props.computer,
-      onTry: (text) => requestComposerPrompt({ text, send: false }),
+      onTry: (text) => requestComposerPrompt({ text, send: false, mention: "computer" }),
     })
   }
   const [store, setStore] = createStore<{

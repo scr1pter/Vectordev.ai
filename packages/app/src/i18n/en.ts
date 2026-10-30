@@ -1178,6 +1178,8 @@ export const dict = {
   "computer.availability.wsl": "{{name}} needs Vector's engine to run on Windows, not inside WSL.",
   "computer.availability.permissions": "{{name}} needs permission. Open Settings › {{name}} to finish setup.",
   "computer.availability.disabled": "{{name}} is turned off for this conversation.",
+  "computer.availability.engine":
+    "{{name}} is not available on this engine. Open this repository with the current desktop engine, or remove the mention.",
   "computer.availability.reader":
     "{{model}} can't see the screen, so {{name}} will read app controls instead. That works in fewer apps. A model that can see images works best.",
 
@@ -1226,6 +1228,8 @@ export const dict = {
   "computer.mention.off": "Off — set it up",
   "computer.mention.companyDenied": "Your company doesn't allow this app",
   "computer.mention.setupFirst": "Set up {{name}} first",
+  "computer.mention.shell": "Shell commands can't use {{name}}. Remove the mention to run this command.",
+  "computer.mention.command": "Slash commands can't use {{name}}. Remove the mention to run this command.",
 
   "computer.ask.app.title": "Allow {{name}} to use {{app}}?",
   "computer.ask.app.body":

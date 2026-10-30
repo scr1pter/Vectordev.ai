@@ -24,6 +24,8 @@ export interface FakeComputerScript {
   recheck?: PermissionSequence
   reset?: PermissionSequence
   apps?: App[]
+  /** Each apps() answer waits for releaseApps(), so a browser test can act before an app lookup lands. */
+  holdApps?: boolean
   removedScreenshots?: number
   /** Fixed timestamp for newly blocked apps; defaults to zero so runs are deterministic. */
   now?: number
@@ -45,6 +47,8 @@ export interface FakeComputer extends Computer.ComputerPlatform {
   emit(state: Computer.ComputerState): void
   /** A detached snapshot; callers cannot edit the recorded calls. Read methods are not logged. */
   readonly calls: readonly FakeComputerCall[]
+  /** Answers the apps() calls held by `holdApps`; later calls answer at once. */
+  releaseApps(): void
 }
 
 export function createFakeComputer(script: FakeComputerScript = {}): FakeComputer {
@@ -137,6 +141,8 @@ export function createFakeComputer(script: FakeComputerScript = {}): FakeCompute
     recheck: sequence(seed.recheck),
     reset: sequence(seed.reset),
   }
+  let releaseApps = () => {}
+  const held = seed.holdApps ? new Promise<void>((resolve) => (releaseApps = resolve)) : undefined
   const permissionView = (method: keyof typeof sequences) => {
     current.permissions = sequences[method]() ?? current.permissions
     return structuredClone(current.permissions)
@@ -187,8 +193,10 @@ export function createFakeComputer(script: FakeComputerScript = {}): FakeCompute
       log.push({ method: "reset", id })
       return permissionView("reset")
     },
-    apps: async (query) =>
-      structuredClone(
+    releaseApps: () => releaseApps(),
+    apps: async (query) => {
+      await held
+      return structuredClone(
         current.apps
           .filter((app) => !query || app.name.toLowerCase().includes(query.toLowerCase()))
           .map((app) =>
@@ -198,7 +206,8 @@ export function createFakeComputer(script: FakeComputerScript = {}): FakeCompute
               ? { ...app, rule: "blocked" as const }
               : app,
           ),
-      ),
+      )
+    },
     removeAlways: async (key) => {
       log.push({ method: "removeAlways", key })
       settings.always = settings.always.filter((app) => app.key !== key)

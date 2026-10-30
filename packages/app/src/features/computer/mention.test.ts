@@ -43,6 +43,13 @@ describe("computer mention options", () => {
       ready: false,
       description: "computer.mention.off",
     })
+    // What setup cannot fix shows its fixed sentence instead of offering setup.
+    expect(
+      ComputerMention.featureOption({ supported: true, ready: false, blocked: "computer.availability.company" }),
+    ).toMatchObject({ ready: false, description: "computer.availability.company" })
+    expect(
+      ComputerMention.featureOption({ supported: true, ready: true, blocked: "computer.availability.company" }),
+    ).toMatchObject({ ready: true, description: "computer.mention.description" })
   })
 
   test("never and blocked apps stay absent even when company policy allows their keys", () => {
@@ -171,5 +178,37 @@ describe("computer mention markers", () => {
     expect(ComputerMention.marker({ app: { key, name: `No\u202etes${"x".repeat(300)}` } })).toEqual({
       [Hands.MARKER]: { kind: "app", key, name: `Notes${"x".repeat(251)}` },
     })
+  })
+})
+
+describe("computer mention examples", () => {
+  const resolve = (template: string, params: Record<string, string>) =>
+    template.replace(/{{(\w+)}}/g, (_, key: string) => params[key] ?? "")
+
+  test("a leading exact @Hands becomes one feature pill with the rest as text at the right offsets", () => {
+    const text = resolve(dict["computer.onboarding.example.receipts"], { mention: Hands.MENTION, app: "Numbers" })
+    const parts = ComputerMention.examplePrompt(text)
+    const mention = `@${Hands.MENTION}`
+    expect(parts).toEqual([
+      { type: "computer", content: mention, start: 0, end: mention.length },
+      { type: "text", content: text.slice(mention.length), start: mention.length, end: text.length },
+    ])
+    expect(parts.map((part) => ("content" in part ? part.content : "")).join("")).toBe(text)
+    expect(parts.some((part) => part.type === "computer" && "app" in part)).toBe(false)
+    expect(ComputerMention.examplePrompt(mention)).toEqual([
+      { type: "computer", content: mention, start: 0, end: mention.length },
+    ])
+  })
+
+  test("app names, other words and a mention that is not leading stay plain text", () => {
+    for (const text of [
+      resolve(dict["computer.onboarding.example.chart"], { app: "Excel", destinationApp: "PowerPoint" }),
+      `@${Hands.MENTION}ome open Numbers`,
+      `@${Hands.MENTION}_x open Numbers`,
+      `@${Hands.MENTION.toLowerCase()} open Numbers`,
+      `please @${Hands.MENTION} open Numbers`,
+      "",
+    ])
+      expect(ComputerMention.examplePrompt(text)).toEqual([{ type: "text", content: text, start: 0, end: text.length }])
   })
 })

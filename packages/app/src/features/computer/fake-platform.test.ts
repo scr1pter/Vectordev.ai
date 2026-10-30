@@ -272,4 +272,18 @@ describe("fake computer platform", () => {
     await fake.unblock("app:macos:com.apple.mail")
     expect((await fake.apps()).map((app) => app.rule)).toEqual(["never", "company-deny"])
   })
+
+  test("held app answers wait for releaseApps, and later lookups answer at once", async () => {
+    const fake = createFakeComputer({ holdApps: true, apps: [{ key, name: "Notes", running: true }] })
+    const answers: string[] = []
+    const first = fake.apps("No").then((apps) => answers.push(`first:${apps.length}`))
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(answers).toEqual([])
+    fake.releaseApps()
+    await first
+    expect(answers).toEqual(["first:1"])
+    expect(await fake.apps("Zz")).toEqual([])
+    // Without the option, an answer never waits.
+    expect(await createFakeComputer({ apps: [{ key, name: "Notes", running: true }] }).apps()).toHaveLength(1)
+  })
 })

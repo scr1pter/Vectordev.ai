@@ -52,6 +52,12 @@ import {
   setRangeEdge,
 } from "./prompt-input/editor-dom"
 import { createPromptAttachments } from "./prompt-input/attachments"
+import { appendPromptText } from "./prompt-input/append-text"
+import { ComputerMention } from "@/features/computer/mention"
+import { ComputerMentionLookup } from "@/features/computer/mention-lookup"
+import { ComputerSendGate } from "@/features/computer/send-gate"
+import { Hands } from "@vectordevai/schema/hands"
+import { openComputerSetup } from "@/features/computer/open-setup"
 import { ACCEPTED_FILE_TYPES, pickAttachmentFiles } from "./prompt-input/files"
 import {
   canNavigateHistoryAtCursor,
@@ -454,20 +460,13 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
   let dictation: DictationHandle | undefined
   let dictationStarting = false
   let voiceDisposed = false
-  const appendPromptText = (text: string) => {
-    const addition = text.trim()
-    if (!addition) return
-    const current = prompt.current()
-    const currentText = current
-      .map((part) => ("content" in part ? part.content : ""))
-      .join("")
-      .trimEnd()
-    const nextText = currentText ? `${currentText} ${addition}` : addition
-    const images = current.filter((part): part is ImageAttachmentPart => part.type === "image")
-    prompt.set([{ type: "text", content: nextText, start: 0, end: nextText.length }, ...images], nextText.length)
+  const appendTranscript = (text: string) => {
+    const next = appendPromptText(prompt.current(), text)
+    if (!next) return
+    prompt.set(next.prompt, next.cursor)
     requestAnimationFrame(() => {
       editorRef?.focus()
-      if (editorRef) setCursorPosition(editorRef, nextText.length)
+      if (editorRef) setCursorPosition(editorRef, next.cursor)
     })
   }
   const micAvailable = createMemo(() => dictationAvailable())
@@ -496,7 +495,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
         onFinal: (text) => {
           dictation = undefined
           setRecordingLevel(0)
-          if (!voiceDisposed) appendPromptText(text)
+          if (!voiceDisposed) appendTranscript(text)
         },
         onError: (message) => {
           dictation = undefined
@@ -834,6 +833,8 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
   ])
 
   const closePopover = () => setStore("popover", null)
+  // One file search per @ query while the popover is open.
+  let fileSearch: { query: string; paths: Promise<string[]> } | undefined
 
   const resetHistoryNavigation = (force = false) => {
     if (!force && (store.historyIndex < 0 || store.applyingHistory)) return
@@ -967,8 +968,72 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     ),
   )
 
+  // The Computer group exists only on a desktop that supports Hands. Its rows come from a debounced lookup that the
+  // popover drives; nothing is read until the popover opens.
+  const computer = platform.computer?.supported ? platform.computer : undefined
+  const [computerRows, setComputerRows] = createStore<ComputerMentionLookup.State>({ apps: [] })
+  let computerDisposed = false
+  const mentionLookup = computer
+    ? ComputerMentionLookup.create({
+        computer,
+        publish: (state) => setComputerRows({ readiness: state.readiness, apps: state.apps }),
+      })
+    : undefined
+  onCleanup(() => {
+    computerDisposed = true
+    mentionLookup?.dispose()
+  })
+  // However the popover closes, late app answers are dropped and the next opening starts fresh.
+  createEffect(
+    on(
+      () => store.popover,
+      (popover) => {
+        if (popover === "at") return
+        mentionLookup?.close()
+        fileSearch = undefined
+      },
+    ),
+  )
+  // The row's label waits for this composer's first readiness read, so it never shows the wrong one. What setup cannot
+  // fix shows its own sentence instead of "Off — set it up".
+  const computerList = createMemo((): AtOption[] => {
+    const readiness = computerRows.readiness
+    if (!computer || !readiness) return []
+    const option = ComputerMention.featureOption({
+      ready: readiness.ready,
+      supported: true,
+      blocked: ComputerSendGate.needsSetup(readiness) ? undefined : readiness.blocked,
+    })
+    return option ? [option] : []
+  })
+  const appList = createMemo((): AtOption[] => (computer ? computerRows.apps : []))
+  const setupComputer = computer
+    ? () =>
+        void openComputerSetup(dialog, computer, {
+          active: () => !computerDisposed,
+          onFinished: () => void mentionLookup?.refresh(),
+        })
+    : undefined
+
   const handleAtSelect = (option: AtOption | undefined) => {
     if (!option) return
+    // Enter, Tab and a click all arrive here: a company-denied app is never inserted.
+    if (option.type === "app" && option.disabled) return
+    if (option.type === "computer" || option.type === "app") {
+      addPart({
+        type: "computer",
+        content: option.display,
+        start: 0,
+        end: 0,
+        ...(option.type === "app" ? { app: { key: option.key, name: option.name } } : {}),
+      })
+      // A pill is a hint, never permission. When onboarding can make Hands ready, it opens and the draft stays; what it
+      // cannot fix keeps the row's sentence, and the send gate refuses with it.
+      void mentionLookup?.refresh().then((readiness) => {
+        if (ComputerSendGate.needsSetup(readiness) && !computerDisposed) setupComputer?.()
+      })
+      return
+    }
     if (option.type === "agent") {
       addPart({ type: "agent", name: option.name, content: "@" + option.name, start: 0, end: 0 })
       return
@@ -1009,6 +1074,8 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
 
   const atKey = (x: AtOption | undefined) => {
     if (!x) return ""
+    if (x.type === "computer") return "computer:feature"
+    if (x.type === "app") return `app:${x.key}`
     if (x.type === "agent") return `agent:${x.name}`
     if (x.type === "reference") return `reference:${x.name}`
     if (x.type === "resource") return `resource:${x.client}:${x.uri}`
@@ -1023,36 +1090,50 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     onKeyDown: atOnKeyDown,
   } = useFilteredList<AtOption>({
     items: async (query) => {
+      // Everything read before the first await is tracked, so computer rows arriving later refresh the list.
       const references = referenceList()
       const agents = agentList()
+      const feature = computerList()
+      const apps = appList()
       const mcpResources = mcpResourceList()
       const open = recent()
       const seen = new Set(open)
       const pinned: AtOption[] = open.map((path) => ({ type: "file", path, display: path, recent: true }))
-      if (!query.trim()) return [...references, ...agents, ...mcpResources, ...pinned]
-      const paths = await files.searchFilesAndDirectories(query)
+      if (!query.trim()) return [...references, ...agents, ...feature, ...apps, ...mcpResources, ...pinned]
+      // That refresh reuses this query's file search instead of searching again.
+      if (fileSearch?.query !== query) fileSearch = { query, paths: files.searchFilesAndDirectories(query) }
+      const paths = await fileSearch.paths
       const fileOptions: AtOption[] = paths
         .filter((path) => !seen.has(path))
         .map((path) => ({ type: "file", path, display: path }))
-      return [...references, ...agents, ...mcpResources, ...pinned, ...fileOptions]
+      // The popover shows ten rows and the Computer group ranks above files: while the query finds files, at most three
+      // apps show, so short queries that match many apps still leave the files in view.
+      const shown = paths.length ? apps.slice(0, 3) : apps
+      return [...references, ...agents, ...feature, ...shown, ...mcpResources, ...pinned, ...fileOptions]
     },
     key: atKey,
-    filterKeys: ["display"],
+    // App rows and readiness land after the files; they never move a row the user already arrowed or pointed to.
+    keepActive: true,
+    filterKeys: ["display", "search"],
     skipFilter: (item) => item.type === "file" && !item.recent,
     groupBy: (item) => {
       if (item.type === "reference") return "reference"
       if (item.type === "agent") return "agent"
+      if (item.type === "computer" || item.type === "app") return "computer"
       if (item.type === "resource") return "resource"
-      if (item.recent) return "recent"
+      if (item.type === "file" && item.recent) return "recent"
       return "file"
     },
+    // The @Hands row leads its group whatever an app's match score; every other group keeps its order.
+    sortBy: (a, b) => Number(b.type === "computer") - Number(a.type === "computer"),
     sortGroupsBy: (a, b) => {
       const rank = (category: string) => {
         if (category === "reference") return 0
         if (category === "agent") return 1
-        if (category === "resource") return 2
-        if (category === "recent") return 3
-        return 4
+        if (category === "computer") return 2
+        if (category === "resource") return 3
+        if (category === "recent") return 4
+        return 5
       }
       return rank(a.category) - rank(b.category)
     },
@@ -1216,6 +1297,8 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
       const slashMatch = rawText.match(/^\/(\S*)$/)
 
       if (atMatch) {
+        if (store.popover !== "at") mentionLookup?.open()
+        mentionLookup?.query(atMatch[1])
         atOnInput(atMatch[1])
         setStore("popover", "at")
       } else if (slashMatch) {
@@ -1562,6 +1645,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
       autoModelRouting: settings.general.autoModelRouting,
       connectProvider: () => setModelStartNudge((count) => count + 1),
       localMode: () => localMode.status()?.policy.enabled === true,
+      openComputerSetup: setupComputer,
       confirmFreeModelTraining: (model) => {
         const client = sdk().client
         return freeModelTrainingGate({
@@ -1865,7 +1949,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
         commandKeybind={command.keybind}
         commandKeybindParts={command.keybindParts}
         newLayoutDesigns={props.controls.newLayoutDesigns}
-        t={(key) => language.t(key as Parameters<typeof language.t>[0])}
+        t={(key) => language.t(key as Parameters<typeof language.t>[0], { name: Hands.NAME, mention: Hands.MENTION })}
       />
       <Show when={needsModel()}>
         <FreeModelStart directory={sdk().directory} nudge={modelStartNudge()} />

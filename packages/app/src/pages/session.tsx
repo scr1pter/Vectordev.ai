@@ -58,7 +58,9 @@ import { useSync } from "@/context/sync"
 import { useTabs } from "@/context/tabs"
 import { TerminalProvider, useTerminal } from "@/context/terminal"
 import { PromptInput } from "@/components/prompt-input"
-import { type FollowupDraft, sendFollowupDraft } from "@/components/prompt-input/submit"
+import { type FollowupDraft, sendFollowupDraft, showComputerRefusal } from "@/components/prompt-input/submit"
+import { ComputerSendGate } from "@/features/computer/send-gate"
+import { openComputerSetup } from "@/features/computer/open-setup"
 import {
   createPromptInputController,
   createSessionComposerController,
@@ -103,7 +105,7 @@ import { isInternalSession } from "@/utils/internal-sessions"
 import { createSessionOwnership } from "./session/session-ownership"
 import { createSessionLineage } from "./session/session-lineage"
 import { enqueueSessionFollowup, SESSION_FOLLOWUP_LIMIT } from "./session/followup-queue"
-import { composerTakes, onComposerPrompt } from "@/utils/composer-handoff"
+import { composerTakes, handoffPrompt, onComposerPrompt } from "@/utils/composer-handoff"
 
 type FollowupItem = FollowupDraft & { id: string }
 const emptyFollowups: FollowupItem[] = []
@@ -616,7 +618,7 @@ export default function Page() {
     onComposerPrompt((request) => {
       const open = !isChildSession() && !composer.blocked()
       if (!composerTakes({ dirty: prompt.dirty(), context: prompt.context.items(), open })) return false
-      prompt.set([{ type: "text", content: request.text, start: 0, end: request.text.length }], request.text.length)
+      prompt.set(handoffPrompt(request), request.text.length)
       if (request.send) setHandoff({ session: params.id, text: request.text })
       return true
     }),
@@ -1835,6 +1837,12 @@ export default function Page() {
   }
 
   const fail = (err: unknown) => {
+    // A queued computer mention refused at dispatch stays queued; [Set up] opens onboarding without touching it.
+    if (err instanceof ComputerSendGate.Refusal) {
+      const computer = platform.computer
+      showComputerRefusal(err, language.t, computer ? () => void openComputerSetup(dialog, computer) : undefined)
+      return
+    }
     showToast({
       variant: "error",
       title: language.t("common.requestFailed"),
@@ -1872,6 +1880,7 @@ export default function Page() {
         sync: sync(),
         serverSync: serverSync(),
         draft: item,
+        computer: platform.computer,
         optimisticBusy: item.sessionDirectory === sdk().directory,
       }).catch((err) => {
         setFollowup("failed", input.sessionID, input.id)
@@ -1898,7 +1907,9 @@ export default function Page() {
   const queueEnabled = createMemo(() => {
     const id = params.id
     if (!id) return false
-    return !isChildSession() && (composer.computerPending() || (busy(id) && !composer.blocked()))
+    // A queued message still being checked and sent has not marked the session busy yet, but a newer message must
+    // still queue behind it, or it would be sent first.
+    return !isChildSession() && (composer.computerPending() || ((busy(id) || followupBusy(id)) && !composer.blocked()))
   })
 
   const followupText = (item: FollowupDraft) => {

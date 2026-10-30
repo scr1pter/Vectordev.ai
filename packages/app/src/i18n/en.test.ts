@@ -17,6 +17,7 @@ const featureNames = [
   "computer.availability.wsl",
   "computer.availability.permissions",
   "computer.availability.disabled",
+  "computer.availability.engine",
   "computer.availability.reader",
   "computer.onboarding.description",
   "computer.onboarding.turnOn",
@@ -27,6 +28,8 @@ const featureNames = [
   "computer.onboarding.helperFailed",
   "computer.onboarding.windows.description",
   "computer.mention.setupFirst",
+  "computer.mention.shell",
+  "computer.mention.command",
   "computer.ask.app.title",
   "computer.ask.category.browser",
   "computer.ask.category.developer",
@@ -143,6 +146,10 @@ describe("computer English copy", () => {
       ["computer.availability.reader", "A model that can see images works best"],
       ["computer.status.linux", "Not available on Linux yet"],
       ["computer.mention.off", "Off — set it up"],
+      ["computer.availability.engine", "not available on this engine"],
+      ["computer.availability.engine", "current desktop engine, or remove the mention"],
+      ["computer.mention.shell", "Shell commands can't use {{name}}"],
+      ["computer.mention.command", "Slash commands can't use {{name}}"],
     ] as const
     for (const [key, text] of required) expect(dict[key]).toContain(text)
   })

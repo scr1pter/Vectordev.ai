@@ -191,3 +191,116 @@ describe("computer onboarding steps and rows", () => {
     expect(ComputerOnboarding.rowsFor(undefined, {})).toEqual([])
   })
 })
+
+describe("computer setup readiness", () => {
+  const settings = (
+    prefs: Partial<Computer.ComputerPrefs> = {},
+    policy: Partial<Computer.ComputerPolicy> = {},
+    locked: Computer.ResolvedComputerSettings["locked"] = [],
+  ): Computer.ResolvedComputerSettings => ({
+    prefs: {
+      enabled: false,
+      consentedAt,
+      mode: "foreground",
+      pointer: "ask",
+      blocked: [],
+      unblocked: [],
+      retention: "7d",
+      stopChord: "Command+Shift+Escape",
+      keepAwake: true,
+      notify: true,
+      reduceMotion: false,
+      ...prefs,
+    },
+    policy: {
+      managed: false,
+      enabled: true,
+      defaultAccess: "ask",
+      allowAlways: true,
+      background: true,
+      keepAwake: true,
+      apps: new Map(),
+      ignored: [],
+      ...policy,
+    },
+    always: [],
+    builtins: [],
+    locked,
+  })
+  const view = (patch: Partial<ComputerOnboarding.View> = {}): ComputerOnboarding.View => ({
+    settings: settings(),
+    status: { available: true, backend: "fake" },
+    backend: "local-macos",
+    permissions: mac,
+    ...patch,
+  })
+
+  test("each situation that setup cannot fix reports its own fixed sentence, without reading permissions", () => {
+    const cases: [ComputerOnboarding.View, boolean, ComputerOnboarding.BlockedKey][] = [
+      [view(), false, "computer.status.linux"],
+      [view({ settings: undefined }), true, "computer.onboarding.checkFailed"],
+      [view({ backend: undefined }), true, "computer.onboarding.checkFailed"],
+      [view({ settings: settings({}, { enabled: false }) }), true, "computer.availability.company"],
+      [
+        view({ status: { available: false, reason: "policy_disabled", backend: "fake" } }),
+        true,
+        "computer.availability.company",
+      ],
+      [view({ settings: settings({}, {}, ["enabled"]) }), true, "computer.settings.managed"],
+      [view({ backend: "remote" }), true, "computer.availability.desktop"],
+      [
+        view({ backend: "local-windows", status: { available: false, reason: "elevated", backend: "fake" } }),
+        true,
+        "computer.availability.elevated",
+      ],
+      [
+        view({ status: { available: false, reason: "unsupported_os", backend: "fake" } }),
+        true,
+        "computer.availability.macos",
+      ],
+      [
+        view({ backend: "local-windows", status: { available: false, reason: "unsupported_os", backend: "fake" } }),
+        true,
+        "computer.availability.desktop",
+      ],
+      [
+        view({ status: { available: false, reason: "helper_missing", backend: "fake" } }),
+        true,
+        "computer.onboarding.helperFailed",
+      ],
+      [view({ status: { available: false, backend: "fake" } }), true, "computer.onboarding.checkFailed"],
+    ]
+    for (const [input, supported, key] of cases) {
+      const { permissions, ...status } = input
+      expect(ComputerOnboarding.blocked(status, supported)).toBe(key)
+      expect(ComputerOnboarding.setupBlocked(input, supported)).toBe(key)
+      expect(dict[key]).toBeDefined()
+    }
+    // Missing grants are not a blocker: onboarding is where they are fixed.
+    expect(
+      ComputerOnboarding.blocked(view({ status: { available: false, reason: "permissions", backend: "fake" } }), true),
+    ).toBeUndefined()
+  })
+
+  test("setup readiness also needs a permission view that agrees with the backend, consent and every grant", () => {
+    expect(ComputerOnboarding.setupReady(view(), true)).toBe(true)
+    expect(ComputerOnboarding.setupReady(view({ backend: "local-windows", permissions: windows }), true)).toBe(true)
+    expect(ComputerOnboarding.setupBlocked(view({ backend: "local-windows", permissions: mac }), true)).toBe(
+      "computer.onboarding.checkFailed",
+    )
+    expect(ComputerOnboarding.setupBlocked(view({ permissions: windows }), true)).toBe(
+      "computer.onboarding.checkFailed",
+    )
+    expect(ComputerOnboarding.blocked(view({ backend: "local-windows", permissions: mac }), true)).toBeUndefined()
+    expect(ComputerOnboarding.setupReady(view({ permissions: undefined }), true)).toBe(false)
+    expect(ComputerOnboarding.setupReady(view({ settings: settings({ consentedAt: undefined }) }), true)).toBe(false)
+    expect(
+      ComputerOnboarding.setupReady(
+        view({ permissions: { ...mac, rows: [mac.rows[0], { ...mac.rows[1], status: "denied" }] } }),
+        true,
+      ),
+    ).toBe(false)
+    for (const value of [undefined, 0, -1, 1.5, "1", NaN]) expect(ComputerOnboarding.consented(value)).toBe(false)
+    expect(ComputerOnboarding.consented(consentedAt)).toBe(true)
+  })
+})

@@ -10,6 +10,24 @@ export type CopyKey = Extract<
   `computer.onboarding.${string}` | "computer.availability.elevated" | "computer.status.preview"
 >
 export type StepDescriptor = { id: Step; title: CopyKey; description: CopyKey[] }
+export type BlockedKey = Extract<
+  keyof typeof dict,
+  | "computer.status.linux"
+  | "computer.onboarding.checkFailed"
+  | "computer.availability.company"
+  | "computer.settings.managed"
+  | "computer.availability.desktop"
+  | "computer.availability.elevated"
+  | "computer.onboarding.windows.captureBlocked"
+  | "computer.availability.macos"
+  | "computer.onboarding.helperFailed"
+>
+export type View = {
+  settings?: Computer.ResolvedComputerSettings
+  status?: Awaited<ReturnType<Computer.ComputerPlatform["status"]>>
+  backend?: Computer.ComputerState["backend"]
+  permissions?: Computer.PermissionsView
+}
 type Permission = Computer.PermissionsView["rows"][number]["id"]
 type Status = Computer.PermissionsView["rows"][number]["status"]
 export type Row = {
@@ -109,7 +127,43 @@ export function rowsFor(
 
 /** Consent is an explicit timestamp, not a preference default. The dialog also freshly checks status and policy. */
 export function canFinish(permissions: Computer.PermissionsView | undefined, consentedAt?: number): boolean {
-  return typeof consentedAt === "number" && Number.isSafeInteger(consentedAt) && consentedAt > 0 && ready(permissions)
+  return consented(consentedAt) && ready(permissions)
+}
+
+export function consented(consentedAt: unknown): boolean {
+  return typeof consentedAt === "number" && Number.isSafeInteger(consentedAt) && consentedAt > 0
+}
+
+/**
+ * What stops setup or use, read from the desktop's status, state and policy alone, so reading it never starts a
+ * permission probe. Each key is the fixed sentence for that situation.
+ */
+export function blocked(view: Omit<View, "permissions">, supported: boolean): BlockedKey | undefined {
+  if (!supported) return "computer.status.linux"
+  if (!view.settings || !view.status || !view.backend) return "computer.onboarding.checkFailed"
+  if (!view.settings.policy.enabled || view.status.reason === "policy_disabled") return "computer.availability.company"
+  if (view.settings.locked.includes("enabled") || view.settings.locked.includes("consentedAt"))
+    return "computer.settings.managed"
+  if (view.backend !== "local-macos" && view.backend !== "local-windows") return "computer.availability.desktop"
+  if (view.status.reason === "elevated") return "computer.availability.elevated"
+  if (view.status.reason === "blocked_by_os") return "computer.onboarding.windows.captureBlocked"
+  if (view.status.reason === "unsupported_os")
+    return view.backend === "local-macos" ? "computer.availability.macos" : "computer.availability.desktop"
+  if (["helper_missing", "helper_incompatible", "responsible_missing"].includes(view.status.reason ?? ""))
+    return "computer.onboarding.helperFailed"
+  if (!view.status.available && view.status.reason !== "permissions") return "computer.onboarding.checkFailed"
+}
+
+/** blocked(), plus a permission view that disagrees with the desktop's backend. */
+export function setupBlocked(view: View, supported: boolean): BlockedKey | undefined {
+  const key = blocked(view, supported)
+  if (key) return key
+  if ((view.backend === "local-windows") !== !!view.permissions?.windows) return "computer.onboarding.checkFailed"
+}
+
+/** Setup is complete apart from enabling: nothing blocks it, consent is recorded and every grant reads granted. */
+export function setupReady(view: View, supported: boolean): boolean {
+  return !setupBlocked(view, supported) && canFinish(view.permissions, view.settings?.prefs.consentedAt)
 }
 
 function ready(permissions: Computer.PermissionsView | undefined): boolean {
