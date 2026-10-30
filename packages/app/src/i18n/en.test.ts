@@ -313,6 +313,17 @@ describe("computer English copy", () => {
     expect(dict["settings.permissions.tool.computer_sensitive.description"]).toContain("apply once and are never saved")
   })
 
+  test("the Tasks card counts one action in the singular and links asks to the conversation", () => {
+    expect(resolveTemplate(dict["computer.tasks.action"], { count: 1 })).toBe("1 action")
+    expect(resolveTemplate(dict["computer.tasks.actions"], { count: 23 })).toBe("23 actions")
+    expect(dict["computer.tasks.reviewAsk"]).toBe("Review in the conversation")
+    expect(resolveTemplate(dict["computer.tasks.waiting"], { title: "Receipts" })).toBe(
+      "Waiting for the computer: Receipts is using it",
+    )
+    expect(resolveTemplate(dict["computer.working.app"], { app: "Numbers" })).toBe("Using Numbers")
+    expect(dict["computer.working.waiting"]).toBe("Waiting for the computer")
+  })
+
   test("feature copy and permission descriptions do not reintroduce the old feature name", () => {
     const copy = [
       ...Object.entries(dict).filter(([key]) => key.startsWith("computer.")),

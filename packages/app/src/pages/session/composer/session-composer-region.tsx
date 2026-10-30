@@ -11,6 +11,9 @@ import { SessionRevertDock } from "@/pages/session/composer/session-revert-dock"
 import { SessionWorkingStatus } from "@/pages/session/composer/session-working-status"
 import { SessionTodoDock } from "@/pages/session/composer/session-todo-dock"
 import { useBackgroundTasks } from "@/features/background-tasks/use-background-tasks"
+import { workingLine } from "@/features/background-tasks/computer-card-model"
+import { useComputerState } from "@/features/computer/use-computer-state"
+import { Hands } from "@vectordevai/schema/hands"
 import type { SessionComposerRegionController } from "./session-composer-region-controller"
 
 export function SessionComposerRegion(props: {
@@ -28,6 +31,12 @@ export function SessionComposerRegion(props: {
   // The same count as the header's Tasks button, so the two never disagree.
   const backgroundTasks = useBackgroundTasks()
   const runningTasks = () => backgroundTasks?.runningCount() ?? controller.runningTasks()
+  // "Using Numbers" while this conversation holds the computer, "Waiting for the computer" while it is queued.
+  const computerState = useComputerState()
+  const computer = () => {
+    const line = workingLine(computerState?.state(), controller.sessionID())
+    return line && language.t(line.key, { name: Hands.NAME, ...line.params })
+  }
   const rolled = () => {
     const revert = controller.revert()
     return revert?.items.length ? revert : undefined
@@ -54,6 +63,7 @@ export function SessionComposerRegion(props: {
           startedAt={controller.startedAt}
           tokens={controller.tokens}
           runningTasks={runningTasks}
+          computer={computer}
           phrase={controller.phrase}
         />
 

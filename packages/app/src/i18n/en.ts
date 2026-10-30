@@ -1331,9 +1331,11 @@ export const dict = {
   "computer.timeline.screenshotRemoved": "Screenshot removed",
   "computer.tasks.title": "{{name}}",
   "computer.tasks.waiting": "Waiting for the computer: {{title}} is using it",
+  "computer.tasks.action": "{{count}} action",
   "computer.tasks.actions": "{{count}} actions",
   "computer.tasks.elapsed": "{{duration}}",
   "computer.tasks.waitingCount": "+{{count}} waiting",
+  "computer.tasks.reviewAsk": "Review in the conversation",
 
   "computer.settings.use": "Use {{name}}",
   "computer.settings.whileWorking": "While it works",

@@ -59,6 +59,7 @@ import { HelpButton } from "@/components/help-button"
 import { Titlebar } from "@/components/titlebar"
 import { useDirectoryPicker } from "@/components/directory-picker"
 import { ServerConnection, useServer } from "@/context/server"
+import { desktopOwns, rendererNotifies } from "./layout-computer-notify"
 import { useLanguage } from "@/context/language"
 import { pathKey } from "@/utils/path-key"
 import {
@@ -388,17 +389,20 @@ export default function LegacyLayout(props: ParentProps) {
         if (now - lastAlerted < cooldownMs) return
         alertedAtBySession.set(sessionKey, now)
 
+        // When the desktop owns a Hands run, it sends its own "needs you" notification for computer asks and handoffs.
+        const notifies = rendererNotifies(e.details, desktopOwns(platform.computer, serverSDK().scope))
+
         if (e.details.type === "permission.asked") {
           if (settings.sounds.permissionsEnabled()) {
             void playSoundById(settings.sounds.permissions())
           }
-          if (settings.notifications.permissions()) {
+          if (settings.notifications.permissions() && notifies) {
             void platform.notify(title, description, href)
           }
         }
 
         if (e.details.type === "question.asked") {
-          if (settings.notifications.agent()) {
+          if (settings.notifications.agent() && notifies) {
             void platform.notify(title, description, href)
           }
         }
