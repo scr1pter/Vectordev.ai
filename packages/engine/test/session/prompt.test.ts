@@ -74,7 +74,7 @@ import { ModelV2 } from "@vectordevai/core/model"
 import { LocationServiceMap, locationServiceMapLayer } from "@vectordevai/core/location-services"
 import { WorkspaceTrust } from "@vectordevai/core/workspace-trust/workspace-trust"
 import { Global } from "@vectordevai/core/global"
-import { codiumGateway, codiumModel } from "../../../core/test/fixture/codium-gateway"
+import { codiumCatalogV2, codiumGateway, codiumModel } from "../../../core/test/fixture/codium-gateway"
 
 const summary = Layer.succeed(
   SessionSummary.Service,
@@ -404,7 +404,8 @@ const codiumPrompts = testEffect(
       Layer.succeed(ModelPlans.Service, {
         catalog: (token) =>
           Effect.succeed(
-            token === codiumToken ? { enabled: true, models: [codiumModel] } : { enabled: false, models: [] },
+            // The v2 catalog names Codium Auto, whose floor is the helper model titles use (A19).
+            token === codiumToken ? codiumCatalogV2 : { enabled: false, models: [] },
           ),
         request: gateway.forward,
       }),

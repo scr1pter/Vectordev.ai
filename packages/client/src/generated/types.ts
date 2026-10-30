@@ -1063,6 +1063,7 @@ export type SessionsContextOutput = {
               readonly type: "codium"
               readonly action: "credits" | "sign-in" | "unavailable"
               readonly message: string
+              readonly code?: string
             }
       }
     | {
@@ -1298,6 +1299,7 @@ export type SessionsHistoryOutput = {
                       readonly type: "codium"
                       readonly action: "credits" | "sign-in" | "unavailable"
                       readonly message: string
+                      readonly code?: string
                     }
               }
             | {
@@ -1547,6 +1549,7 @@ export type SessionsHistoryOutput = {
                 readonly type: "codium"
                 readonly action: "credits" | "sign-in" | "unavailable"
                 readonly message: string
+                readonly code?: string
               }
         }
       }
@@ -2054,6 +2057,7 @@ export type SessionsEventsOutput =
                     readonly type: "codium"
                     readonly action: "credits" | "sign-in" | "unavailable"
                     readonly message: string
+                    readonly code?: string
                   }
             }
           | {
@@ -2303,6 +2307,7 @@ export type SessionsEventsOutput =
               readonly type: "codium"
               readonly action: "credits" | "sign-in" | "unavailable"
               readonly message: string
+              readonly code?: string
             }
       }
     }
@@ -2760,6 +2765,7 @@ export type SessionsMessageOutput = {
               readonly type: "codium"
               readonly action: "credits" | "sign-in" | "unavailable"
               readonly message: string
+              readonly code?: string
             }
       }
     | {
@@ -2955,6 +2961,7 @@ export type MessagesListOutput = {
               readonly type: "codium"
               readonly action: "credits" | "sign-in" | "unavailable"
               readonly message: string
+              readonly code?: string
             }
       }
     | {
@@ -3038,6 +3045,14 @@ export type ModelsListOutput = {
     readonly status: "alpha" | "beta" | "deprecated" | "active"
     readonly enabled: boolean
     readonly limit: { readonly context: number; readonly input?: number; readonly output: number }
+    readonly codium?: {
+      readonly lab?: string
+      readonly role?: "floor" | "default" | "ceiling"
+      readonly manualOnly?: boolean
+      readonly locked?: { readonly plan: string; readonly name: string; readonly previewUntil?: number }
+      readonly preview?: { readonly until: number }
+      readonly auto?: { readonly floor: string; readonly default: string; readonly ceiling: string }
+    }
   }>
 }
 

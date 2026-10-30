@@ -24,6 +24,7 @@ import { ProviderV2 } from "@vectordevai/core/provider"
 import { ModelV2 } from "@vectordevai/core/model"
 import { buildPrompt } from "@vectordevai/core/session/compaction"
 import { SessionCompactionEvent } from "@vectordevai/schema/session-compaction-event"
+import { SessionCodiumAuto } from "./codium-auto"
 
 export const Event = SessionCompactionEvent
 
@@ -477,6 +478,7 @@ const layer = Layer.effect(
             time: { created: Date.now() },
             agent: original.agent,
             model: original.model,
+            ...(original.selected ? { selected: original.selected } : {}),
             format: original.format,
             tools: original.tools,
             system: original.system,
@@ -525,6 +527,7 @@ const layer = Layer.effect(
               time: { created: Date.now() },
               agent: userMessage.agent,
               model: userMessage.model,
+              ...(userMessage.selected ? { selected: userMessage.selected } : {}),
             })
             const text =
               (input.overflow
@@ -565,10 +568,35 @@ const layer = Layer.effect(
       auto: boolean
       overflow?: boolean
     }) {
+      // A summary for a session on Codium Auto runs on the model Auto picks for standard work over the history it
+      // summarises; the session stays on Auto. When Auto cannot run, the session gets the notice a turn would.
+      const auto = SessionCodiumAuto.isAuto(input.model)
+      const model = auto
+        ? yield* provider
+            .codiumAuto({
+              tier: "standard",
+              contextTokens: SessionCodiumAuto.contextTokens(
+                MessageV2.filterCompacted(
+                  (yield* session.messages({ sessionID: input.sessionID }).pipe(Effect.orDie)).toReversed(),
+                ),
+              ),
+            })
+            .pipe(
+              Effect.tapError((err) =>
+                events.publish(Session.Event.Error, {
+                  sessionID: input.sessionID,
+                  error: SessionCodiumAuto.notice(err),
+                }),
+              ),
+              Effect.orDie,
+            )
+        : input.model
       const msg = yield* session.updateMessage({
         id: MessageID.ascending(),
         role: "user",
-        model: input.model,
+        // Not rebuilt: the loop hands over the last user message's model with its variant.
+        model,
+        ...(auto ? { selected: { providerID: input.model.providerID, modelID: input.model.modelID } } : {}),
         sessionID: input.sessionID,
         agent: input.agent,
         time: { created: Date.now() },

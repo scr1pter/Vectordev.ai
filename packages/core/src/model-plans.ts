@@ -17,26 +17,64 @@ export const API_URL = ModelPlanStatus.API_URL
 export const CATALOG_URL = `${API_URL}/models`
 export const CHAT_URL = `${API_URL}/chat`
 export const PURCHASE_URL = ModelPlanStatus.PURCHASE_URL
+export const AUTO_ID = ModelPlanStatus.AUTO_ID
+export const clientHeaders = ModelPlanStatus.clientHeaders
+export const gatewayFailure = ModelPlanStatus.gatewayFailure
+export type Failure = ModelPlanStatus.Failure
 
 // Codium's catalog, status and offers come from vectordev.ai, labelled so Vector Local decides them (blocked unless
 // allowed). Node callers hand it to ModelPlanStatus's requests, which the app also runs in the browser with its own fetch.
 export const plansCatalog = (url: string, init: RequestInit) => Egress.fetch("plans-catalog", url, init)
 
-// No prices: a Codium step spends credits, which Vector counts by tokens and never in dollars that could be added up.
-export const Model = Schema.Struct({
+// No prices: a Codium step spends the plan's usage, which Vector shows as a share and never in dollars.
+const Base = Schema.Struct({
   id: Schema.String,
   name: Schema.String,
   contextLength: Schema.Number,
   maxOutputTokens: Schema.Number,
 })
-export type Model = typeof Model.Type
-const Catalog = Schema.Struct({ enabled: Schema.Boolean, models: Schema.Array(Model) })
-/** enabled: vectordev.ai offers Codium to this signed-in account. Each chat request checks the balance itself. */
-export type Catalog = typeof Catalog.Type
+export const LABS = ["deepseek", "anthropic", "openai", "moonshot", "google"] as const
+const Locked = Schema.Struct({
+  plan: Schema.String,
+  name: Schema.String,
+  previewUntil: Schema.optional(Schema.Number.check(Schema.isInt())),
+})
+const Roles = Schema.Struct({ floor: Schema.String, default: Schema.String, ceiling: Schema.String })
+/**
+ * One `/models` entry (§4.12). The four fields older Vector releases decode are checked strictly; the rest is read
+ * leniently, so an unknown lab or role drops only that field.
+ */
+export type Model = typeof Base.Type & {
+  lab?: (typeof LABS)[number]
+  /** A public price ratio (DeepSeek = 1). */
+  weight?: number
+  role?: "floor" | "default" | "ceiling"
+  /** Chosen only by name: never an Auto role, helper, default judge, swarm or routing target. */
+  manualOnly?: true
+  /** The account's plan cannot use it yet; `plan` is the cheapest plan that can. */
+  locked?: typeof Locked.Type
+  preview?: { until: number }
+  /** Only on Codium Auto (AUTO_ID): the models it picks from. */
+  auto?: typeof Roles.Type
+}
+/**
+ * enabled: vectordev.ai offers Codium to this signed-in account. Each chat request checks the plan itself. `plan` is
+ * null without a plan (Plus's locks and limits then apply) and missing from an older gateway.
+ */
+export type Catalog = {
+  enabled: boolean
+  models: readonly Model[]
+  plan?: string | null
+  limits?: { inFlight: number }
+  /** Second-opinion judge for each worker model, from another lab. */
+  judges?: Readonly<Record<string, string>>
+  review?: { triage?: string; confirm?: string; panelJudge?: string }
+}
+const Stored = Schema.Struct({ enabled: Schema.Boolean, models: Schema.Array(Base) })
 const OFF: Catalog = { enabled: false, models: [] }
 // The last answer, kept on disk for the account it belongs to, so a fresh engine has a catalog before vectordev.ai
 // answers. The digest identifies the account without storing its token.
-const Saved = Schema.Struct({ account: Schema.String, catalog: Catalog })
+const Saved = Schema.Struct({ account: Schema.String, catalog: Schema.Unknown })
 const TTL = 60_000
 // A refresh that got no answer is tried again sooner than an answered one.
 const RETRY = 10_000
@@ -94,7 +132,7 @@ export function createClient(
   }
   const load = (token: string, current: Entry) =>
     request(CATALOG_URL, {
-      headers: { Authorization: `Bearer ${token}`, accept: "application/json" },
+      headers: { ...clientHeaders(), Authorization: `Bearer ${token}`, accept: "application/json" },
       redirect: "error",
       signal: AbortSignal.timeout(10_000),
     })
@@ -134,7 +172,7 @@ export function createClient(
 
 // undefined: no usable answer. OFF: vectordev.ai says Codium is not offered to this account.
 function parse(body: unknown): Catalog | undefined {
-  const parsed = Option.getOrUndefined(Schema.decodeUnknownOption(Catalog)(body))
+  const parsed = Option.getOrUndefined(Schema.decodeUnknownOption(Stored)(body))
   if (!parsed) return undefined
   if (!parsed.enabled || !parsed.models.length) return OFF
   if (
@@ -154,7 +192,97 @@ function parse(body: unknown): Catalog | undefined {
     new Set(parsed.models.map((model) => model.id)).size !== parsed.models.length
   )
     return undefined
-  return parsed
+  const record = body as { models: unknown[] } & Record<string, unknown>
+  const entries = parsed.models.map((model, index) => ({ ...model, ...extras(record.models[index]) }))
+  // Auto stays listed only when it names three listed models a person can use; otherwise it is left out.
+  const usable = (id: unknown) => entries.some((model) => model.id === id && usableModel(model))
+  const models = entries.flatMap((model): Model[] => {
+    if (model.id !== AUTO_ID) return [{ ...model, auto: undefined }]
+    if (!model.auto || !usable(model.auto.floor) || !usable(model.auto.default) || !usable(model.auto.ceiling))
+      return []
+    return [{ ...model, locked: undefined, manualOnly: undefined }]
+  })
+  const listed = (id: unknown): id is string => typeof id === "string" && models.some((model) => model.id === id)
+  const limits = Option.getOrUndefined(
+    Schema.decodeUnknownOption(
+      Schema.Struct({ inFlight: Schema.Number.check(Schema.isInt(), Schema.isGreaterThan(0)) }),
+    )(record.limits),
+  )
+  const judges = object(record.judges)
+  const review = object(record.review)
+  return {
+    enabled: true,
+    models: models.map(defined),
+    ...(record.plan === null || typeof record.plan === "string" ? { plan: record.plan } : {}),
+    ...(limits ? { limits } : {}),
+    ...(judges
+      ? {
+          judges: Object.fromEntries(
+            Object.entries(judges).filter(([worker, judge]) => listed(worker) && listed(judge)),
+          ) as Record<string, string>,
+        }
+      : {}),
+    ...(review
+      ? {
+          review: Object.fromEntries(
+            (["triage", "confirm", "panelJudge"] as const).flatMap((key) =>
+              listed(review[key]) ? [[key, review[key]]] : [],
+            ),
+          ),
+        }
+      : {}),
+  }
+}
+
+/**
+ * What a picker shows of a catalog entry (ModelV2.Codium): its lab, role, locks and Auto's models, never its weight. Only
+ * the fields that are set: an unset one is left out, not kept as undefined.
+ */
+export function listing(
+  model: Model,
+): Partial<Pick<Model, "lab" | "role" | "manualOnly" | "locked" | "preview" | "auto">> {
+  return defined({
+    lab: model.lab,
+    role: model.role,
+    manualOnly: model.manualOnly,
+    locked: model.locked,
+    preview: model.preview,
+    auto: model.auto,
+  })
+}
+
+/** A model a person can use on the current plan without naming it: listed, not locked and not manual-only. */
+export function usableModel(model: Model) {
+  return model.id !== AUTO_ID && !model.locked && !model.manualOnly
+}
+
+// The fields added for current clients, each read on its own: an unknown or malformed value is dropped.
+function extras(value: unknown): Omit<Model, keyof typeof Base.Type> {
+  const record = object(value)
+  if (!record) return {}
+  const field = <S extends Schema.Decoder<unknown>>(schema: S, item: unknown) =>
+    Option.getOrUndefined(Schema.decodeUnknownOption(schema)(item)) as S["Type"] | undefined
+  const until = field(Schema.Struct({ until: Schema.Number.check(Schema.isInt()) }), record.preview)
+  return {
+    lab: LABS.find((lab) => lab === record.lab),
+    weight:
+      typeof record.weight === "number" && Number.isFinite(record.weight) && record.weight > 0
+        ? record.weight
+        : undefined,
+    role: (["floor", "default", "ceiling"] as const).find((role) => role === record.role),
+    manualOnly: record.manualOnly === true ? true : undefined,
+    locked: field(Locked, record.locked),
+    preview: until,
+    auto: field(Roles, record.auto),
+  }
+}
+
+function object(value: unknown) {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined
+}
+
+function defined<T extends Record<string, unknown>>(value: T) {
+  return Object.fromEntries(Object.entries(value).filter(([, item]) => item !== undefined)) as T
 }
 
 export class Service extends Context.Service<
@@ -195,13 +323,23 @@ export async function resolveRoute(input: {
   credential: () => Promise<string | undefined>
   /** The chat path's catalog: the account's last known one, or vectordev.ai's answer awaited in full. */
   catalog: (token: string) => Promise<Catalog>
+  /**
+   * "default": a Codium Auto request goes to Auto's default model (Core V2, which has no per-message choice yet).
+   * Without it Auto is refused: an engine session resolves Auto for each user message before any request.
+   */
+  auto?: "default"
 }) {
+  // Codium Auto is a listing entry, and the gateway serves no model by that name.
+  if (input.modelID === AUTO_ID && input.auto !== "default") return { refused: localAnswer(400, "CODIUM_AUTO") }
   const token = await input.credential()
   if (!token) return { refused: localAnswer(401, "SIGN_IN_REQUIRED") }
   const catalog = await input.catalog(token)
   if (!catalog.enabled) return { refused: localAnswer(503, "CODIUM_UNAVAILABLE") }
-  const model = catalog.models.find((model) => model.id === input.modelID)
-  if (!model) return { refused: localAnswer(400, "MODEL_PLAN_MODEL") }
+  // A catalog keeps Auto only while its three models are usable (parse), so its default can be sent as it is.
+  const id =
+    input.modelID === AUTO_ID ? catalog.models.find((model) => model.id === AUTO_ID)?.auto?.default : input.modelID
+  const model = catalog.models.find((model) => model.id === id && model.id !== AUTO_ID)
+  if (!model) return { refused: localAnswer(400, input.modelID === AUTO_ID ? "CODIUM_AUTO" : "MODEL_PLAN_MODEL") }
   // A missing plan or balance is left to the gateway: a purchase made a moment ago must work at once.
   return { token, model }
 }
@@ -260,85 +398,55 @@ export function createFetch(input: {
   return Object.assign(
     async (_url: RequestInfo | URL, init?: RequestInit) => {
       const route = await resolveRoute(input)
-      // Nothing is sent; the SDK reads this answer as the gateway's, so the turn gets the same message and action.
+      // Nothing is sent; the SDK reads this answer as the gateway's, so the turn gets the same message and action. It
+      // passes the same boundary as a gateway answer, so a final one (Codium switched off) is never retried.
       if (route.refused)
-        return new Response(route.refused.body, {
-          status: route.refused.status,
-          headers: { "content-type": "application/json" },
-        })
+        return finalAnswer(
+          new Response(route.refused.body, {
+            status: route.refused.status,
+            headers: { "content-type": "application/json" },
+          }),
+        )
       const body =
         typeof init?.body === "string"
           ? Option.getOrUndefined(Schema.decodeUnknownOption(Schema.UnknownFromJsonString)(init.body))
           : undefined
-      // Destination, headers and credential are fixed here; SDK or project headers never reach the gateway.
-      return (input.request ?? fetch)(CHAT_URL, {
+      // Destination, headers and credential are fixed here; SDK or project headers never reach the gateway. Only the
+      // request's purpose passes, and only as one of the known purposes.
+      const response = await (input.request ?? fetch)(CHAT_URL, {
         method: "POST",
         redirect: "error",
         signal: init?.signal,
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${route.token}` },
+        headers: {
+          ...clientHeaders(),
+          "X-Vector-Purpose": ModelPlanStatus.purpose(new Headers(init?.headers).get("x-vector-purpose")),
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${route.token}`,
+        },
         body: serializeRequest(body, route.model),
       })
+      return finalAnswer(response)
     },
     { preconnect: fetch.preconnect },
   )
 }
 
-const GatewayError = Schema.Struct({ error: Schema.Struct({ code: Schema.String, message: Schema.String }) })
-
-export type Failure = {
-  code: string
-  /**
-   * credits: buy credits or a plan. sign-in: sign in to Vector again. unavailable: choose another model.
-   * capacity: the provider refused the request for want of credit, which is Vector's capacity or the account key's
-   * limit; the turn is retried and nothing asks for a purchase.
-   */
-  kind: ModelPlanStatus.Action | "capacity"
-  message: string
-}
-
-// The account's own pools cannot cover the request; buying credits or a plan fixes these.
-const CREDIT_CODES = [
-  "MODEL_PLAN_REQUIRED",
-  "MODEL_PLAN_PAYMENT_REQUIRED",
-  "MODEL_PLAN_EXHAUSTED",
-  "MODEL_TOPUP_EXHAUSTED",
-]
-// Codium cannot serve this account or model right now; another model can.
-const UNAVAILABLE: Record<string, string> = {
-  MODEL_PLANS_DISABLED: "Vector Codium is not available yet.",
-  MODEL_PLANS_CONFIGURATION: "Vector Codium is temporarily unavailable.",
-  MODEL_PLAN_ACCOUNT_CLOSING: "This account is being deleted, so Vector Codium is closed for it.",
-  MODEL_PLAN_MODEL: "This model is no longer included in Vector Codium.",
-  CODIUM_UNAVAILABLE: "Vector Codium is not available right now.",
-}
-
 /**
- * Account, billing and availability answers from the Codium gateway, or the same answers given locally before a
- * request. Only capacity may improve on a retry; none may move the conversation to another paid provider.
+ * The AI SDK retries 408, 409, 429 and 5xx answers on its own before the session sees them. A final Codium answer
+ * (§4.10) must fail the call at once, so it arrives as a client error; its code still says what it was.
  */
-export function gatewayFailure(status: number | undefined, body: string | undefined): Failure | undefined {
-  const parsed = body
-    ? Option.getOrUndefined(Schema.decodeUnknownOption(Schema.fromJsonString(GatewayError))(body))
-    : undefined
-  const code = parsed?.error.code ?? ""
-  if (status === 401)
-    return { code: code || "SIGN_IN_REQUIRED", kind: "sign-in", message: "Sign in to Vector to use Vector Codium." }
-  if (status === 402 && code === "MODEL_PLAN_CAPACITY")
-    return {
-      code,
-      kind: "capacity",
-      message:
-        "Vector Codium could not run this request: model capacity may be short for a moment, or your credits may have reached their limit. Vector will try again shortly; if it keeps failing, check your balance.",
-    }
-  if (status === 402 && parsed && CREDIT_CODES.includes(code))
-    return { code, kind: "credits", message: `${parsed.error.message} Buy credits at ${PURCHASE_URL}` }
-  if (Object.hasOwn(UNAVAILABLE, code))
-    return { code, kind: "unavailable", message: `${UNAVAILABLE[code]} Choose another model.` }
-  return undefined
+export async function finalAnswer(response: Response) {
+  if (![408, 409, 429].includes(response.status) && response.status < 500) return response
+  const body = await response.clone().text()
+  const answer = gatewayFailure(response.status, body)
+  if (!answer || answer.retry) return response
+  return new Response(body, { status: 400, statusText: "Bad Request", headers: response.headers })
 }
+
+const GatewayCode = Schema.Struct({ error: Schema.Struct({ code: Schema.String }) })
 
 export function contextFailure(body: string | undefined) {
   if (!body) return false
-  const parsed = Schema.decodeUnknownOption(Schema.fromJsonString(GatewayError))(body)
+  const parsed = Schema.decodeUnknownOption(Schema.fromJsonString(GatewayCode))(body)
   return Option.isSome(parsed) && parsed.value.error.code === "MODEL_PLAN_CONTEXT"
 }

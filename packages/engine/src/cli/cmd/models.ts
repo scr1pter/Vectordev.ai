@@ -102,7 +102,7 @@ export const ModelsCommand = effectCmd({
     const codium = providers[ProviderV2.ID.make(ModelPlans.PROVIDER_ID)]
     if (codium && (!args.provider || args.provider === ModelPlans.PROVIDER_ID))
       UI.println(
-        `${ModelPlans.PROVIDER_NAME}: ${Object.keys(codium.models).length} models paid with Codium credits (${ModelPlans.PROVIDER_ID}/…). Run "vector codium" for your balance.`,
+        `${ModelPlans.PROVIDER_NAME}: ${Object.keys(codium.models).length} models included in your plan (${ModelPlans.PROVIDER_ID}/…). Run "vector codium" for your plan and usage.`,
       )
 
     const print = (providerID: ProviderV2.ID, verbose?: boolean) => {

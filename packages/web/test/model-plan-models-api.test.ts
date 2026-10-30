@@ -5,7 +5,9 @@ import { mintCliToken } from "../../../api/_lib/cli-token"
 import { buildSnapshot } from "../../../api/_lib/codium-snapshot"
 import type { ModelPlanCatalogOptions } from "../../../api/_lib/model-plan-catalog-policy"
 import { configuredPlanModels, type ModelPlanModel } from "../../../api/_lib/model-plan-config"
-import { handleModelPlanModels } from "../../../api/_lib/model-plan-models"
+import { CODIUM_AUTO_ID, handleModelPlanModels } from "../../../api/_lib/model-plan-models"
+import { CodiumAuto } from "@vectordevai/core/codium-auto"
+import { ModelPlans } from "@vectordevai/core/model-plans"
 import type { CodiumPlan } from "../../../packages/schema/src/codium-plan"
 import type { PlanState } from "../../../packages/schema/src/codium-entitlements"
 
@@ -195,6 +197,16 @@ test("Plus sees its models, Pro's locked with the plan that unlocks them, and Co
   // Plus has no Second opinion judges; its review pairs are all its own models.
   expect(body.judges).toBeUndefined()
   expect(body.review).toEqual({ triage: DEEPSEEK, confirm: LUNA, panelJudge: HAIKU })
+  // The current client decodes this answer whole: Auto names usable models, so it stays and resolves to them, and its
+  // helpers start on the floor.
+  const decoded = await ModelPlans.createClient({ request: async () => Response.json(body) }).catalog("vct_t.s", {
+    force: true,
+  })
+  expect(decoded.models.map((model) => model.id)).toEqual(ids(body))
+  expect(ModelPlans.AUTO_ID).toBe(CODIUM_AUTO_ID)
+  expect(CodiumAuto.resolve({ catalog: decoded, tier: "chat", contextTokens: 1 })?.id).toBe(LUNA)
+  expect(CodiumAuto.resolve({ catalog: decoded, tier: "thorough", contextTokens: 1 })?.id).toBe(DEEPSEEK)
+  expect(CodiumAuto.helper(decoded)?.id).toBe(LUNA)
 
   // Pro unlocks them.
   service({ plan: "vector-50" }, { qualify: everything })

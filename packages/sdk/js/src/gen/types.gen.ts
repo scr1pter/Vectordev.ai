@@ -306,6 +306,10 @@ export type UserMessage = {
     modelID: string
     variant?: string
   }
+  selected?: {
+    providerID: string
+    modelID: string
+  }
   system?: string
   tools?: {
     [key: string]: boolean
@@ -2693,6 +2697,7 @@ export type Model = {
       [key: string]: unknown
     }
   }
+  codium?: ModelCodium
 }
 
 export type Provider = {
@@ -5679,6 +5684,7 @@ export type SessionErrorCodium = {
   type: "codium"
   action: "credits" | "sign-in" | "unavailable"
   message: string
+  code?: string
 }
 
 export type SessionErrorAssistant = SessionErrorUnknown | FreeModelLimit | SessionErrorCodium
@@ -6629,6 +6635,25 @@ export type ConfigV2ExperimentalPolicy = {
 }
 
 export type TeamsId = string
+
+export type ModelCodium = {
+  lab?: string
+  role?: "floor" | "default" | "ceiling"
+  manualOnly?: boolean
+  locked?: {
+    plan: string
+    name: string
+    previewUntil?: number
+  }
+  preview?: {
+    until: number
+  }
+  auto?: {
+    floor: string
+    default: string
+    ceiling: string
+  }
+}
 
 export type TaskStatus = "queued" | "running" | "waiting_on_user" | "completed" | "failed" | "stopped"
 
@@ -7759,6 +7784,7 @@ export type ModelV2Info = {
     input?: number
     output: number
   }
+  codium?: ModelCodium
 }
 
 export type ProviderAisdk = {

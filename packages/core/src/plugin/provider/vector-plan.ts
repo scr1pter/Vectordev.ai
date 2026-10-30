@@ -27,7 +27,9 @@ export const VectorPlanPlugin = define({
           provider.disabled = false
           provider.api = { type: "aisdk", package: "@ai-sdk/openai-compatible", url: ModelPlans.API_URL }
         })
-        for (const model of current.models)
+        // Codium Auto, locked and manual-only entries wait until sessions resolve Auto and the pickers, routing and
+        // swarms can tell them apart (ModelPlans.usableModel).
+        for (const model of current.models.filter(ModelPlans.usableModel))
           catalog.model.update(ModelPlans.PROVIDER_ID, model.id, (draft) => {
             draft.name = model.name
             draft.api = { id: model.id, type: "aisdk", package: "@ai-sdk/openai-compatible", url: ModelPlans.API_URL }
@@ -35,6 +37,7 @@ export const VectorPlanPlugin = define({
             // No dollar price: a Codium step spends credits, so it is recorded unpriced and left out of dollar totals.
             draft.cost = []
             draft.limit = { context: model.contextLength, output: model.maxOutputTokens }
+            draft.codium = ModelPlans.listing(model)
             draft.enabled = true
           })
       }),

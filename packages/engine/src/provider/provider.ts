@@ -8,6 +8,8 @@ import { FreeModels } from "@vectordevai/core/free-models"
 import { FreeModelGuests } from "@vectordevai/core/free-model-guests"
 import { SessionID } from "@vectordevai/schema/session-id"
 import { ModelPlans } from "@vectordevai/core/model-plans"
+import { CodiumAuto } from "@vectordevai/core/codium-auto"
+import { TaskSize } from "@vectordevai/core/task-size"
 import { freeModelRequest, serializeFreeModelRequest } from "@vectordevai/core/free-model-request"
 import {
   FREE_MODEL_FALLBACKS,
@@ -1287,6 +1289,8 @@ export const Model = Schema.Struct({
   headers: Schema.Record(Schema.String, Schema.String),
   release_date: Schema.String,
   variants: optional(Schema.Record(Schema.String, Schema.Record(Schema.String, Schema.Any))),
+  // Vector Codium's listing facts: lab, Auto role, locks and Codium Auto's models.
+  codium: optional(ModelV2.Codium),
 }).annotate({ identifier: "Model" })
 export type Model = Types.DeepMutable<Schema.Schema.Type<typeof Model>>
 
@@ -1371,15 +1375,26 @@ export function toClientInfo(provider: Info): Info {
 
 export function defaultModelIDs<
   T extends {
-    models: Record<string, { id: string; freeModel?: { source: "shared" | "openrouter"; dataPolicy?: FreeDataPolicy } }>
+    models: Record<
+      string,
+      {
+        id: string
+        freeModel?: { source: "shared" | "openrouter"; dataPolicy?: FreeDataPolicy }
+        codium?: { role?: string; manualOnly?: boolean; locked?: unknown; auto?: unknown }
+      }
+    >
   },
 >(providers: Record<string, T>) {
   return Object.fromEntries(
     Object.entries(providers).flatMap(([id, item]) => {
-      // Vector Codium lists its models in the catalog's order, led by the model it recommends.
+      // Vector Codium's default is the model its catalog gives the default role, else the first it lists that the
+      // plan can use; never Codium Auto, a locked or a manual-only entry.
+      const codium = Object.values(item.models).filter(
+        (model) => !model.codium?.auto && !model.codium?.locked && !model.codium?.manualOnly,
+      )
       const model =
         id === ModelPlans.PROVIDER_ID
-          ? Object.values(item.models)[0]
+          ? (codium.find((model) => model.codium?.role === "default") ?? codium[0])
           : automaticModels(
               Object.values(item.models).filter(
                 (model) => id !== "openrouter" || model.freeModel?.source === "openrouter",
@@ -1475,6 +1490,15 @@ export interface Interface {
     query: string[],
   ) => Effect.Effect<{ providerID: ProviderV2.ID; modelID: string } | undefined>
   readonly getSmallModel: (providerID: ProviderV2.ID, primaryID?: ModelV2.ID) => Effect.Effect<Model | undefined>
+  /**
+   * The Vector Codium model Codium Auto runs one user message on, from the message's size and the context it adds to
+   * (CodiumAuto.resolve). Fails like getModel when Codium cannot run, and with a Codium notice when the account's plan
+   * offers no usable Auto.
+   */
+  readonly codiumAuto: (input: {
+    tier: TaskSize.Tier
+    contextTokens: number
+  }) => Effect.Effect<{ providerID: ProviderV2.ID; modelID: ModelV2.ID }, ModelNotFoundError>
   readonly defaultModel: () => Effect.Effect<{ providerID: ProviderV2.ID; modelID: ModelV2.ID }, DefaultModelError>
   /** The model a saved choice names today: renamed providers map to their new ID, retired ones give undefined. */
   readonly savedModel: (model: {
@@ -1747,7 +1771,11 @@ export function fromFreeModels(models: readonly FreeModelInfo[], providerID: "ve
   }
 }
 
-/** Vector Codium. Credentials are read at the fixed request boundary and never appear in provider info. */
+/**
+ * Vector Codium. Credentials are read at the fixed request boundary and never appear in provider info. Only models the
+ * plan can use by any route are listed: Codium Auto, locked and manual-only entries wait until sessions resolve Auto
+ * and the pickers, routing and swarms can tell them apart.
+ */
 export function fromModelPlans(models: readonly ModelPlans.Model[]): Info {
   return {
     id: ProviderV2.ID.make(ModelPlans.PROVIDER_ID),
@@ -1756,7 +1784,7 @@ export function fromModelPlans(models: readonly ModelPlans.Model[]): Info {
     env: [],
     options: {},
     models: Object.fromEntries(
-      models.map((model) => [
+      models.filter(ModelPlans.usableModel).map((model) => [
         model.id,
         {
           id: ModelV2.ID.make(model.id),
@@ -1771,6 +1799,7 @@ export function fromModelPlans(models: readonly ModelPlans.Model[]): Info {
           // No dollar price: a Codium step spends credits, so it is recorded unpriced and left out of dollar totals.
           cost: { ...UNPRICED },
           limit: { context: model.contextLength, output: model.maxOutputTokens },
+          codium: ModelPlans.listing(model),
           capabilities: {
             temperature: true,
             reasoning: false,
@@ -2870,11 +2899,12 @@ const layer = Layer.effect(
       // A helper call never moves a conversation onto a free model whose provider may train on prompts.
       if (providerID === "vector")
         return Object.values(provider.models).find((model) => isFreeModel(model) && !freeModelMayTrain(model))
-      // An explicitly selected Codium conversation keeps helper calls on its credit route at the lowest ceiling.
-      if (providerID === ModelPlans.PROVIDER_ID)
-        return Object.values(provider.models).toSorted(
-          (a, b) => a.cost.input + a.cost.output - b.cost.input - b.cost.output,
-        )[0]
+      // An explicitly selected Codium conversation keeps helper calls on Codium: Auto's floor, then its default, never
+      // a locked, manual-only or Auto entry. Without either, there is no helper model and the helper is skipped.
+      if (providerID === ModelPlans.PROVIDER_ID) {
+        const chosen = CodiumAuto.helper(yield* modelPlans.catalog(yield* freeCredentials.get("vector")))
+        return chosen ? provider.models[chosen.id] : undefined
+      }
       const cfg = yield* config.get()
 
       if (cfg.small_model) {
@@ -2951,6 +2981,33 @@ const layer = Layer.effect(
       }
 
       return undefined
+    })
+
+    const codiumAuto = Effect.fn("Provider.codiumAuto")(function* (input: {
+      tier: TaskSize.Tier
+      contextTokens: number
+    }) {
+      const auto = ModelV2.ID.make(ModelPlans.AUTO_ID)
+      // Signed out, Codium off for the account or Vector Local on: the same notice a chosen Codium model gets.
+      const listed = (yield* refreshCodium({ wait: true }))[planID]
+      if (!listed) return yield* getModel(planID, auto).pipe(Effect.as({ providerID: planID, modelID: auto }))
+      const chosen = CodiumAuto.resolve({
+        catalog: yield* modelPlans.catalog(yield* freeCredentials.get("vector"), { wait: true }),
+        tier: input.tier,
+        contextTokens: input.contextTokens,
+      })
+      if (chosen && listed.models[chosen.id]) return { providerID: planID, modelID: ModelV2.ID.make(chosen.id) }
+      // An older gateway, or a plan whose Auto models are not all usable, offers no Auto: say so rather than pick one.
+      return yield* new ModelNotFoundError({
+        providerID: planID,
+        modelID: auto,
+        codium: "unavailable",
+        unavailable: {
+          id: planID,
+          reason: "no-models",
+          message: "Codium Auto is not available on your plan right now. Choose a Vector Codium model to continue.",
+        },
+      })
     })
 
     const savedModel = Effect.fn("Provider.savedModel")(function* (model: { providerID: string; modelID: string }) {
@@ -3034,6 +3091,7 @@ const layer = Layer.effect(
       preconnect,
       closest,
       getSmallModel,
+      codiumAuto,
       defaultModel,
       savedModel,
       freeSignIn,

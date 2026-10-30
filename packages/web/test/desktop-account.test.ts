@@ -11,11 +11,14 @@ import {
   verifyDesktopToken,
 } from "../../../api/_lib/cli-token"
 import {
+  cliSignInCallback,
+  cliSignInCancel,
   deletionConfirmation,
   deletionNeedsSignIn,
   deletionReauthPath,
   desktopSignInCallback,
   desktopSignInRequest,
+  desktopSignInStep,
 } from "../src/lib/desktop-sign-in"
 import { createVectorAccount } from "../../desktop/src/main/vector-account"
 
@@ -237,6 +240,60 @@ test("login return paths retain only validated desktop binding fields", () => {
   expect(desktopSignInRequest(new URL(parsed.returnPath, "https://vectordev.ai").search)).toEqual(parsed)
   expect(() => desktopSignInRequest("desktop=1&state=bad")).toThrow("Start sign-in")
   expect(() => desktopSignInCallback({ code: "vct_private", state: input.state }, input.state)).toThrow()
+})
+
+test("a CLI sign-in keeps its purpose and loopback port through sign-in, and its code returns only to 127.0.0.1", () => {
+  const input = binding()
+  const query = new URLSearchParams({
+    desktop: "1",
+    state: input.state,
+    code_challenge: input.challenge,
+    code_challenge_method: "S256",
+    purpose: "cli",
+    port: "49152",
+    returnTo: "https://foreign.example/next",
+    redirect: "https://foreign.example/callback",
+  })
+  const parsed = desktopSignInRequest(query.toString())
+  if (parsed?.purpose !== "cli") throw new Error("Expected a CLI sign-in request")
+  expect(parsed).toMatchObject({ port: 49152, confirmed: false })
+  expect(parsed.returnPath).toContain("purpose=cli")
+  expect(parsed.returnPath).toContain("port=49152")
+  expect(parsed.returnPath).not.toContain("foreign")
+  // Through /login and back, unchanged.
+  expect(desktopSignInRequest(new URL(parsed.returnPath, "https://vectordev.ai").search)).toEqual(parsed)
+  // The port must be a user port, and it comes only with the CLI purpose.
+  for (const port of ["0", "80", "1023", "65536", "8080.5", "08080", "localhost", ""]) {
+    const bad = new URLSearchParams({ ...Object.fromEntries(query), port })
+    expect(() => desktopSignInRequest(bad.toString())).toThrow("Run vector login again")
+  }
+  const missing = new URLSearchParams(query)
+  missing.delete("port")
+  expect(() => desktopSignInRequest(missing.toString())).toThrow("Run vector login again")
+  const desktop = new URLSearchParams(query)
+  desktop.delete("purpose")
+  expect(() => desktopSignInRequest(desktop.toString())).toThrow("Start sign-in")
+  const deleting = new URLSearchParams({ ...Object.fromEntries(query), purpose: "delete" })
+  expect(() => desktopSignInRequest(deleting.toString())).toThrow("Start sign-in")
+
+  // Nothing is minted until the person approves this terminal; a desktop sign-in goes straight on.
+  expect(desktopSignInStep(false, parsed)).toBe("ask")
+  expect(desktopSignInStep(true, parsed)).toBe("send")
+  expect(desktopSignInStep(false, desktopSignInRequest(desktop.toString().replace(/&port=\d+/, ""))!)).toBe("send")
+  // A CLI sign-in carries no deletion Continue.
+  const marked = new URLSearchParams({ ...Object.fromEntries(query), confirmed: "1" })
+  expect(desktopSignInStep(false, desktopSignInRequest(marked.toString())!)).toBe("ask")
+
+  const code = randomBytes(32).toString("base64url")
+  const callback = new URL(cliSignInCallback({ code, state: input.state }, parsed))
+  expect(callback.origin + callback.pathname).toBe("http://127.0.0.1:49152/callback")
+  expect(Object.fromEntries(callback.searchParams)).toEqual({ code, state: input.state })
+  expect(() => cliSignInCallback({ code, state: binding().state }, parsed)).toThrow()
+  expect(() => cliSignInCallback({ code: "vct_private", state: input.state }, parsed)).toThrow()
+  expect(() => cliSignInCallback({ code, state: input.state }, { ...parsed, port: 22 })).toThrow()
+  const cancel = new URL(cliSignInCancel(parsed))
+  expect(cancel.origin).toBe("http://127.0.0.1:49152")
+  expect(Object.fromEntries(cancel.searchParams)).toEqual({ error: "access_denied", state: input.state })
 })
 
 test("desktop start, signed-in website and one-time API exchange complete the same bound flow", async () => {

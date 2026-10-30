@@ -1355,7 +1355,7 @@ describe("model plan HTTP inference", () => {
       expect(refused.status).toBe(402)
       const text = await refused.json()
       expect(text).toEqual(answer)
-      // Vector's client offers Buy credits with it, as for any shortfall.
+      // Vector's client offers See plans with it, as for any shortfall.
       expect(ModelPlans.gatewayFailure(402, JSON.stringify(text))).toMatchObject({ kind: "credits" })
     }
     expect(chats()).toHaveLength(0)
@@ -1491,36 +1491,43 @@ describe("Codium credits used from Vector", () => {
     if (!url.startsWith(`${ModelPlanStatus.SITE}/api/model-plans/`)) throw new Error(`Unexpected destination ${url}`)
     return fetch(`${state.origin}${url.slice(ModelPlanStatus.SITE.length)}`, init)
   }
-  // A19 will add these headers to the production SDK. This explicit fixture adapter keeps these older SDK plumbing
-  // tests exercising billing while A16 separately tests that the unadapted client is refused.
-  const modernClientFixture = (url: string, init: RequestInit) => {
-    const headers = new Headers(init.headers)
-    headers.set("x-vector-client", "1.99.113")
-    headers.set("x-vector-catalog", "2")
-    return forward(url, { ...init, headers })
-  }
+  // The client sends its own version and catalog headers (A19); in development the gateway accepts "local".
   const turn = (token: string) => {
-    const catalog = ModelPlans.createClient({ request: modernClientFixture })
+    const catalog = ModelPlans.createClient({ request: forward })
     return ModelPlans.createFetch({
       modelID: model.id,
       credential: async () => token,
       catalog: (value) => catalog.catalog(value, { wait: true }),
-      request: modernClientFixture,
+      request: forward,
     })("https://vectordev.ai/api/model-plans/chat/completions", {
       method: "POST",
       body: JSON.stringify({ model: model.id, messages: [{ role: "user", content: "Fix the failing test" }] }),
     })
   }
 
-  test("a signed-in turn is debited from the monthly credits, and running out stops at Buy credits", async () => {
+  test("a signed-in turn is debited from the monthly usage, and running out stops at See plans", async () => {
     await paid()
     const token = mintCliToken(user, Date.now(), "desktop").token
-    const catalog = await ModelPlans.createClient({ request: modernClientFixture }).catalog(token, { force: true })
-    expect(catalog).toEqual({
-      enabled: true,
-      models: [
-        { id: model.id, name: model.name, contextLength: model.contextLength, maxOutputTokens: model.maxOutputTokens },
-      ],
+    const catalog = await ModelPlans.createClient({ request: forward }).catalog(token, { force: true })
+    // The v2 answer: the plan, its limits and each model's public fields, never a price or an amount.
+    expect(catalog).toMatchObject({ enabled: true, limits: { inFlight: expect.any(Number) } })
+    expect(catalog).toHaveProperty("plan")
+    expect(catalog.models.find((item) => item.id === model.id)).toMatchObject({
+      id: model.id,
+      name: model.name,
+      contextLength: model.contextLength,
+      maxOutputTokens: model.maxOutputTokens,
+    })
+    // A client that does not say which release it is gets nothing listed (§4.12), whatever the account has.
+    const unannounced = (url: string, init: RequestInit) => {
+      const headers = new Headers(init.headers)
+      headers.delete("x-vector-client")
+      headers.delete("x-vector-catalog")
+      return forward(url, { ...init, headers })
+    }
+    expect(await ModelPlans.createClient({ request: unannounced }).catalog(token, { force: true })).toEqual({
+      enabled: false,
+      models: [],
     })
 
     state.charge = 0.5
@@ -1541,15 +1548,15 @@ describe("Codium credits used from Vector", () => {
     expect(JSON.stringify(chats()[0]!.body)).not.toContain(token)
     const status = await ModelPlanStatus.fetchStatus(token, forward)
     expect(status).toMatchObject({ signedIn: true, enabled: true, plan: { name: "Plus", left: 0.9 } })
-    expect(ModelPlanStatus.describe(status)[0]).toContain("90% of this month's credits left")
+    expect(ModelPlanStatus.describe(status)[0]).toContain("90% left this month")
 
-    // The monthly credits run out: the next turn is refused before any model request, with Buy credits.
+    // The monthly usage runs out: the next turn is refused before any model request, with See plans.
     keys.get("hash_fixture1")!.data.usage = 5
     const refused = await turn(token)
     expect(refused.status).toBe(402)
     expect(ModelPlans.gatewayFailure(refused.status, await refused.text())).toMatchObject({
       kind: "credits",
-      message: expect.stringContaining(`Buy credits at ${ModelPlanStatus.PURCHASE_URL}`),
+      message: expect.stringContaining(`See plans at ${ModelPlanStatus.PURCHASE_URL}`),
     })
     expect(chats()).toHaveLength(1)
     // Status keeps an answer 30 s (§4.11); this read stands for one after that.
@@ -1628,7 +1635,7 @@ describe("Codium credits used from Vector", () => {
     await paid()
     process.env.MODEL_PLANS_ENABLED = "false"
     const token = mintCliToken(user, Date.now(), "desktop").token
-    expect(await ModelPlans.createClient({ request: modernClientFixture }).catalog(token, { force: true })).toEqual({
+    expect(await ModelPlans.createClient({ request: forward }).catalog(token, { force: true })).toEqual({
       enabled: false,
       models: [],
     })
@@ -1636,7 +1643,10 @@ describe("Codium credits used from Vector", () => {
     expect(ModelPlans.gatewayFailure(refused.status, await refused.text())).toMatchObject({ kind: "unavailable" })
     expect(chats()).toHaveLength(0)
     const status = await ModelPlanStatus.fetchStatus(token, forward)
-    expect(ModelPlanStatus.notice(status)).toEqual({ kind: "unavailable", text: "Vector Codium is not available yet." })
+    expect(ModelPlanStatus.notice(status)).toEqual({
+      kind: "unavailable",
+      text: "Vector Codium is not available right now.",
+    })
   })
 })
 

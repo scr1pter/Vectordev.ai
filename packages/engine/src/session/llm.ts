@@ -1,3 +1,4 @@
+import { ModelPlanStatus } from "@vectordevai/core/model-plan-status"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
 import { llmClient } from "@vectordevai/core/effect/app-node-platform"
 import { PermissionV1 } from "@vectordevai/core/v1/permission"
@@ -60,6 +61,9 @@ export type StreamInput = {
   // Reasoning effort from the request's task size (LLMRequestPrep.prepare).
   effort?: TaskSize.Effort
   tools: Record<string, Tool>
+  // What a Vector Codium request is for (X-Vector-Purpose): "title", "brain", a Vectorscope review's "review"; without
+  // one, a judge agent's request is "judge" and anything else "chat".
+  purpose?: ModelPlanStatus.Purpose
   retries?: number
   toolChoice?: "auto" | "required" | "none"
   // false for a request whose prefix is never sent again, such as a compaction summary: cache breakpoints would only

@@ -98,3 +98,113 @@ Intent-preserving corrections to the contract text, recorded with the A18 source
 - **Estimate model form only.** `{kind: "hosted" | "race" | "playbook"}` answers 400 `CODIUM_ESTIMATE_KIND` until A51, B06 and Track B add their rates. Unknown, staged or unserved and locked models answer chat's codes (400, 503, 403 with plan and plan name) with no amounts.
 - **P2 rounds the pool too.** Rounding the units and the cost to steps 1.5× apart (§4.13) is not enough: the band edges fall at different fractions of a step, so asking at every step would narrow the pool to about 1.2%. The pool is also rounded down to the grid, so an answer depends only on the difference of the two steps and reveals the pool to one 1.5× step, no finer. Every rounding errs the same way, so an answer never understates a share. It can overstate one by up to 1.5× for each of the request count, the tokens, the cost step and the pool step: about 1.5⁴ ≈ 5× together. That is typically no band or one band, and at most three. For example, one full-window DeepSeek request on Plus is 9.8% of today's limit and is answered "10–20%".
 - **New store key.** `estimate:<account>:<meterEpoch>:<phase>:<dailyShare>:<step>` (beyond §4.6) keeps each step's answer, as `{answer, poolStep}` with the pool's grid step it was worked out on, until a day after the period ends. `<phase>` is `ramp` while the period key's credits are still the pool ramp's share (`creditsMicro < fullCreditsMicro`, A10) and `full` after that. A kept answer is served only while the pool's current step is at or above its `poolStep`, so a carry that rises in the same phase tells a repeated question nothing (the kept answer only overstates). Carry can also fall in the same phase: a refunded, disputed or otherwise unavailable source charge drops its origin (`refreshCarry`, M6) on the next same-period reconcile or carry true-up. A kept answer from a higher pool step would then understate, so it is worked out again on the smaller pool and replaces the kept one; that reveals only the new pool step, as any fresh answer does. The ramp's end raises the pool about 3.3× and starts fresh answers, so answers from the ramp are not served for the rest of the month. The phase is read from the same key record as the total, so an answer computed with a ramped total is never stored under `full`. A57 erases the key or relies on its TTL.
+
+## A19 decisions (core and engine clients, part 1)
+
+Intent-preserving corrections to the contract text, recorded with the first part of the A19 source. Details, tests and
+the remaining A19 work are in [codium-a19-clients-notes.md](codium-a19-clients-notes.md).
+
+- **The code table is browser-safe.** §4.10 names `packages/core/src/model-plans.ts` as the client mapping. That module
+  needs Node (file cache, crypto, the egress layer) and imports the status module, which the app bundles for the
+  browser. The table (`gatewayFailure`, `failureKind`), `clientHeaders`, `AUTO_ID` and the purposes live in
+  `model-plan-status.ts`; `model-plans.ts` re-exports them. `codium-auto.ts` imports `model-plans.ts` for types only.
+- **Only listed codes are final.** "New error codes must be final" covers the §4.10 codes and the A17/A18 additions
+  (`MODEL_PLAN_POOL_UNAVAILABLE`, `MODEL_PLAN_RUN_EXPIRED`, `MODEL_PLAN_ADDONS`, `MODEL_PLANS_CONFIGURATION`,
+  `CODIUM_ESTIMATE_KIND`), not every `MODEL_PLAN_*` or `CODIUM_*` name: the gateway's transient chat failures
+  (`MODEL_PLAN_UPSTREAM`, `MODEL_PLAN_STREAM`, `MODEL_PLAN_UNAVAILABLE`, `MODEL_PLAN_KEY_INVALID`,
+  `MODEL_PLAN_RISK_UNAVAILABLE`) stay ordinary provider errors and keep the 5xx retry. Retried: `RATE_LIMITED`,
+  `MODEL_PLAN_BUSY`, `MODEL_PLAN_RENEWING`, `MODEL_PLAN_CONCURRENCY`, `MODEL_PLAN_CAPACITY`. `MODEL_TOPUP_EXHAUSTED`
+  and the internal `MODEL_PLAN_CANCELLED` are not classified. A local `CODIUM_AUTO` refuses a request for Auto itself.
+- **The stored action stays three-valued.** §4.10's kinds are finer than the `credits | sign-in | unavailable` action
+  stored on failed turns and read by released apps. The kind is stored beside it (`metadata.kind`, V2
+  `providerMetadata.codium.kind`) and from the code (`failureKind`); the action is credits for credits, upgrade and plan
+  answers, sign-in for sign-in, unavailable for run, daily, contact, wait, update and unavailable. A daily, run or Brain
+  limit therefore never offers a purchase. The credit suffix is " See plans at <url>", or " Update your card at <url>" /
+  " Confirm your payment at <url>" by the answer's `action`; upgrade answers end " Change plan at <url>".
+- **Final codes are stopped below both retry loops; `packages/llm/src/route/executor.ts` is unchanged.** The AI SDK
+  retries 408, 409, 429 and 5xx answers itself on calls with `maxRetries` (titles, model learning, fast turns), and the
+  V2 executor retries 429 and 5xx. Both Codium transports (`ModelPlans.createFetch`, the V2 route's fetch) pass a final
+  answer on as a 400 (`ModelPlans.finalAnswer`), and it is still classified by its code, so the shared executor needs no
+  Codium codes. `createFetch`'s own refusals before a request (signed out, Codium switched off, a retired model) pass
+  the same boundary, so its local 503 `CODIUM_UNAVAILABLE` also arrives as a 400. The V2 test shows one request for each final code and three (the executor's retries) for a temporary one.
+- **Waiting for the account's other requests.** In V1, `MODEL_PLAN_CONCURRENCY` is retried after its retry-after
+  without counting toward the attempt bound, within the 15-minute bound. Nor does it lengthen a later failure's
+  backoff: that backs off from the counted failures only, so a transient gateway answer after the waits (which carries
+  no retry-after) is retried after 2 s, not after minutes. V2 retries are the executor's (two retries), so a busy V2
+  Codium turn can fail sooner.
+- **Purpose header plumbing.** `X-Vector-Purpose` is added by the engine request preparation
+  (`packages/engine/src/session/llm.ts`, `llm/request.ts`, beyond A19's list), last, for `vector-plan` models only,
+  so a plugin or model header cannot set it and no other provider sees it: `title`, `brain` (model learning), `judge`
+  (the judge agent), else `chat`; `createFetch` passes only a known purpose. Core V2 sends `chat`.
+- **Helpers without a helper model are skipped.** Codium helper calls use Auto's floor, then its default; with neither
+  usable, or a catalog without Auto (an older gateway), titles, model learning and the project copy's generated name
+  (`packages/engine/src/server/routes/instance/httpapi/handlers/project-copy.ts`, beyond A19's list; it falls back to
+  its random name) are skipped instead of running on the conversation's own model. The copy's name is sent as purpose
+  `title`.
+- **Interim listing.** Until the pickers, routing and swarms can tell entries apart (A20), the engine and Core V2 list
+  only usable models (not Auto, not locked, not manual-only), the same set older clients get. Sessions already resolve
+  Auto per message (part 2 below), so the listing waits only on A20. The decoded catalog keeps every entry for those
+  consumers, and the listed entries carry their `codium` metadata.
+- **`vector login` is a loopback PKCE flow with an Approve step.** The CLI listens on `http://127.0.0.1:<port>/callback`
+  (port 0, or `--port` for SSH forwarding) using the shared hardened listener extracted from
+  `packages/core/src/oauth/loopback.ts` (beyond A19's list); `/auth/cli` takes `purpose=cli` with that `port`, mints
+  nothing until Approve, sends the code only to that loopback, and Cancel returns `error=access_denied` so the CLI stops
+  waiting. The CLI stores only a grant whose claims are `client: "cli"` with a `jti`; the server is unchanged. Whether a
+  token is marked is read from its claims, not from a stored flag. `vector login` over a copied token's sign-in goes to
+  the browser; if another account approves there, the copied token's sign-in is signed out (its team choice and checked
+  tokens with it) before the new grant is stored. The page asks again on a retry unless the person chose Approve.
+  `vector login` over a marked grant asks vectordev.ai (`/api/account/cli-verify`) whether it still stands before saying
+  "Already signed in": one revoked or expired since the day's check is signed out and the browser sign-in starts, so
+  Codium's `CODIUM_SIGN_IN_REQUIRED` answer ("run vector login") never ends there; an unreachable site keeps it.
+- **Copy.** Status notices say "Vector Codium is not available right now." (Codium switched off can come with a plan),
+  and the CLI's plan lines show "N% left this month" and "Today: N% of today's limit used" with "See plans" or "Change
+  plan" links, never credits or top-ups. Notice kinds are unchanged.
+- **H7 fixtures.** The 1.99.111 and 1.99.112 decoders are kept as two verbatim copies of the released
+  `model-plan-status.ts` (`5f1d785f`, `ab5fa8ce`; they differ only in a comment) under `packages/core/test/fixture/`, and
+  run over hand-built §4.11 answers and over the real status and config handlers' answers (config with sales open and
+  closed).
+
+## A19 decisions (part 2: Codium Auto per message, schema, generators)
+
+- **Where Auto is resolved in the engine.** `createUserMessage` resolves Auto once, after the parts are resolved and
+  before the `chat.message` hook, through a new `Provider.codiumAuto({tier, contextTokens})` (engine
+  `provider/provider.ts`, beyond A19's list only by the method). The message stores the concrete `model` and
+  `selected` = Auto; `setAgentModel` keeps the session on Auto, and `currentModel` prefers a message's `selected` in
+  its fallback, so the next message picks again. The tier is the size of the request the message opens or joins
+  (`SessionTaskSize.size` over the history plus the new message, as the run will size it), so a message that joins a
+  running request never steps down within it; a session that is not sized (a subagent, a helper, a custom agent) uses
+  the sender's explicit size, else `standard`.
+- **The context Auto guards.** "Context from the history sent after the last compaction boundary" is read as: the
+  newest finished request after the boundary as the provider measured it (input, cache read and write, output) plus an
+  estimate of what came after it (its own tool results and later messages), never a summary's measured size (its input
+  was the replaced history), with an estimate of the whole visible history as a floor for a provider that reports no
+  usage; plus the new message's parts. The estimate is the shared 4-characters-per-token one.
+- **Other places a user message gets a model** (beyond A19's list: `session/compaction.ts`, `tool/plan.ts`). `/compact`
+  (`SessionCompaction.create`, which the summarize handler calls), a shell command and a subtask part on Auto resolve
+  with the `standard` tier (a subtask's subagent starts its own history, so its context is empty); a command on Auto
+  skips the early model check, since its message or subtask resolves it. A subtask part in a free conversation stays on
+  the free model and never resolves Auto. A shell command is local: when Auto cannot pick a model, the command still
+  runs and its message keeps Auto (no `selected`), for the next model turn to resolve or refuse with the notice below.
+  Follow-up messages inside a request (a judge
+  or research repair, a subtask command's summary, a compaction replay or continue, plan approval) keep the concrete
+  model, so a request stays on one model and its cache, and copy `selected`.
+- **When Auto cannot run.** Signed out, Codium off or Vector Local on give the notice a chosen Codium model gives. A
+  catalog without a usable Auto (an older gateway, or a plan whose Auto roles are not all usable) fails the message with
+  a Codium `unavailable` notice ("Codium Auto is not available on your plan right now. Choose a Vector Codium model to
+  continue."); nothing is saved for the message, nothing is sent, and the session stays on Auto. Vector never falls back
+  to a model the person did not choose.
+- **Core V2.** `resolveRoute` takes `auto: "default"`; the V2 route passes it, so a V2 turn on Auto goes to Auto's
+  default model at prepare. Without it (the engine's transport) Auto is still refused locally (`CODIUM_AUTO`).
+- **Schema.** `Model.Codium` (`packages/schema/src/model.ts`) carries `lab` (a string, so a lab added later does not
+  fail old decoders), `role`, `manualOnly`, `locked`, `preview` and `auto`; never `weight`, which stays hidden
+  metadata in the client's catalog. It is optional on `ModelV2.Info` and on the engine's `Provider.Model`
+  (`ModelPlans.listing`). V1 `UserMessage.selected` is `{providerID, modelID}`; `Session.Error.Codium` gains an
+  optional `code`, filled from the route's metadata. The legacy SDK (`packages/sdk/js`) and `packages/client` were
+  regenerated; nothing generated was edited by hand.
+- **Codium's default model** (`Provider.defaultModelIDs`) is the entry with role `default`, else the first usable entry,
+  never Auto, a locked or a manual-only one.
+- **The `review` purpose** is sent for a session whose `internal` starts with `vectorscope.` (a Vectorscope review, its
+  verify pass and the other review helpers), set in the run loop beside `title`, `brain` and `judge`.
+- **Not done in A19, with the listing (A20).** Listing Auto, locked and manual-only entries in the engine provider and
+  the V2 catalog, and the `vector models` line naming Codium Auto and locked models, wait for A20's routing and swarm
+  guards. The CLI command cannot read the catalog service from its runtime, so the line will come from the listing.

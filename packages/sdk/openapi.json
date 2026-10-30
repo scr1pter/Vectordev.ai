@@ -26265,6 +26265,19 @@
             "required": ["providerID", "modelID"],
             "additionalProperties": false
           },
+          "selected": {
+            "type": "object",
+            "properties": {
+              "providerID": {
+                "type": "string"
+              },
+              "modelID": {
+                "type": "string"
+              }
+            },
+            "required": ["providerID", "modelID"],
+            "additionalProperties": false
+          },
           "system": {
             "type": "string"
           },
@@ -33746,6 +33759,9 @@
             "additionalProperties": {
               "type": "object"
             }
+          },
+          "codium": {
+            "$ref": "#/components/schemas/ModelCodium"
           }
         },
         "required": [
@@ -42794,6 +42810,9 @@
           },
           "message": {
             "type": "string"
+          },
+          "code": {
+            "type": "string"
           }
         },
         "required": ["type", "action", "message"],
@@ -45829,6 +45848,64 @@
       "TeamsID": {
         "type": "string",
         "pattern": "^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$"
+      },
+      "ModelCodium": {
+        "type": "object",
+        "properties": {
+          "lab": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string",
+            "enum": ["floor", "default", "ceiling"]
+          },
+          "manualOnly": {
+            "type": "boolean"
+          },
+          "locked": {
+            "type": "object",
+            "properties": {
+              "plan": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "previewUntil": {
+                "type": "number"
+              }
+            },
+            "required": ["plan", "name"],
+            "additionalProperties": false
+          },
+          "preview": {
+            "type": "object",
+            "properties": {
+              "until": {
+                "type": "number"
+              }
+            },
+            "required": ["until"],
+            "additionalProperties": false
+          },
+          "auto": {
+            "type": "object",
+            "properties": {
+              "floor": {
+                "type": "string"
+              },
+              "default": {
+                "type": "string"
+              },
+              "ceiling": {
+                "type": "string"
+              }
+            },
+            "required": ["floor", "default", "ceiling"],
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
       },
       "TaskStatus": {
         "type": "string",
@@ -49206,6 +49283,9 @@
             },
             "required": ["context", "output"],
             "additionalProperties": false
+          },
+          "codium": {
+            "$ref": "#/components/schemas/ModelCodium"
           }
         },
         "required": [

@@ -370,6 +370,14 @@ export const User = Schema.Struct({
     modelID: Model.ID,
     variant: Schema.optional(Schema.String),
   }),
+  // What the sender chose when it differs from `model`: Codium Auto, which ran this message on `model`. The session
+  // stays on the choice, and a picker shows it.
+  selected: Schema.optional(
+    Schema.Struct({
+      providerID: Provider.ID,
+      modelID: Model.ID,
+    }),
+  ),
   system: Schema.optional(Schema.String),
   tools: Schema.optional(Schema.Record(Schema.String, Schema.Boolean)),
   executionMode: Schema.optional(Schema.Union([Schema.Literal("normal"), Schema.Literal("fast")])),

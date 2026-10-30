@@ -28,6 +28,8 @@ export const CodiumError = Schema.Struct({
   type: Schema.Literal("codium"),
   action: Schema.Literals(["credits", "sign-in", "unavailable"]),
   message: Schema.String,
+  // The gateway's code (§4.10), for a finer answer than the action, such as a daily limit that offers no purchase.
+  code: Schema.String.pipe(optional),
 }).annotate({ identifier: "Session.Error.Codium" })
 
 export const AssistantError = Schema.Union([UnknownError, FreeModelLimit, CodiumError]).annotate({

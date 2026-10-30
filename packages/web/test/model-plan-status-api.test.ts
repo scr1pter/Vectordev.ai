@@ -20,11 +20,14 @@ import {
   STATUS_CACHE_MS,
   type ModelPlanStatusOptions,
 } from "../../../api/_lib/model-plan-status"
-import type { ModelPlanModel } from "../../../api/_lib/model-plan-config"
+import { codiumBillingConfigProblems, type ModelPlanModel } from "../../../api/_lib/model-plan-config"
 import { publicEntitlements } from "../../../packages/schema/src/codium-entitlements"
 import type { CodiumPlan } from "../../../packages/schema/src/codium-plan"
+import configHandler from "../../../api/model-plans/config"
 import { readModelPlanStatus } from "../src/lib/model-plans"
 import { ModelPlanStatus } from "@vectordevai/core/model-plan-status"
+import { ModelPlanStatus1_99_111 } from "../../core/test/fixture/model-plan-status-1.99.111"
+import { ModelPlanStatus1_99_112 } from "../../core/test/fixture/model-plan-status-1.99.112"
 import { codiumFakes, codiumTestEnvironment, loadStripeFixture, type StripeFixture } from "./fixture/codium-fakes"
 
 // The status Vector's screens read (§4.11): shares of the month, public caps and timestamps only (P1), from the
@@ -68,6 +71,14 @@ afterEach(() => {
   setSystemTime()
 })
 afterAll(() => server.close())
+
+// H7: the status decoders Vector 1.99.111 and 1.99.112 shipped, run over this handler's real answers.
+const released = async (token: string) => {
+  const send = (_url: string, init: RequestInit) => fetch(`${origin.url}/api/model-plans/status`, init)
+  return Promise.all(
+    [ModelPlanStatus1_99_111, ModelPlanStatus1_99_112].map((decoder) => decoder.fetchStatus(token, send)),
+  )
+}
 
 const read = async (token: string) => {
   const response = await fetch(`${origin.url}/api/model-plans/status`, {
@@ -300,6 +311,10 @@ describe("a plan's status, from the snapshot", () => {
       (await ModelPlanStatus.fetchStatus(token, (_url, init) => fetch(`${origin.url}/api/model-plans/status`, init)))
         .error,
     ).toBeUndefined()
+    for (const status of await released(token)) {
+      expect(status.error).toBeUndefined()
+      expect(status).toMatchObject({ signedIn: true, access: false, plan: { id: "vector-50" } })
+    }
   })
 
   test("a frozen plan has the paused shape with its reason and no action; an ended one has no plan", async () => {
@@ -313,6 +328,7 @@ describe("a plan's status, from the snapshot", () => {
     })
     expect((await read(frozen.token)).body.plan.action).toBeUndefined()
     expect((await read(frozen.token)).body.plan.left).toBeUndefined()
+    for (const status of await released(frozen.token)) expect(status.error).toBeUndefined()
 
     const ended = await seed("ended-canceled")
     expect((await read(ended.token)).body).toEqual({
@@ -325,6 +341,10 @@ describe("a plan's status, from the snapshot", () => {
       empty: true,
       low: false,
     })
+    for (const status of await released(ended.token)) {
+      expect(status.error).toBeUndefined()
+      expect(status.plan).toBeUndefined()
+    }
   })
 
   test("a renewing plan serves its previous month until the grace ends, then shows the payment it waits for", async () => {
@@ -427,8 +447,12 @@ describe("a plan's status, from the snapshot", () => {
     )
     expect(ModelPlanStatus.notice(decoded)).toEqual({
       kind: "unavailable",
-      text: "Vector Codium is not available yet.",
+      text: "Vector Codium is not available right now.",
     })
+    for (const status of await released(token)) {
+      expect(status.error).toBeUndefined()
+      expect(status.enabled).toBe(false)
+    }
     // The switch is read beside the 30-second answer, not kept in it: back on, the same kept answer has access again.
     fakes.store.set(codiumKey("switch", "codium"), "on")
     setSystemTime(new Date(now + 2 * SWITCH_CACHE_MS))
@@ -603,5 +627,50 @@ describe("the forecast's hiding rules", () => {
     expect(forecastDate({ used: 0.5, periodStart: start, periodEnd: month, now: start + 15 * DAY })).toBeUndefined()
     expect(forecastDate({ used: 0.5, periodStart: start, periodEnd: month, now: start + 14 * DAY })).toBe("2026-10-29")
     expect(forecastDate({ used: 1, periodStart: start, periodEnd: month, now: start + 5 * DAY })).toBeUndefined()
+  })
+})
+
+// H7: the configuration decoders Vector 1.99.111 and 1.99.112 shipped (`salesOpen`, `fetchOffers`), run over the real
+// /api/model-plans/config answer, so a later change to that answer cannot drop installed apps' plan offers unnoticed.
+describe("the public configuration, as released Vector reads it", () => {
+  test("Vector 1.99.111 and 1.99.112 read the real configuration with sales open and closed", async () => {
+    const config = createServer((request, response) => void configHandler(request as never, response as never))
+    await new Promise<void>((resolve) => config.listen(0, "127.0.0.1", resolve))
+    const url = `http://127.0.0.1:${(config.address() as AddressInfo).port}/api/model-plans/config`
+    const send = (_url: string, init: RequestInit) => fetch(url, init)
+    // A configuration ready to sell: the fixture's, with the webhook secret and portal configuration it leaves out.
+    const restoreReady = codiumTestEnvironment({
+      STRIPE_MODEL_PLAN_WEBHOOK_SECRET: "whsec_fixture",
+      STRIPE_MODEL_PLAN_PORTAL_CONFIG_ID: "bpc_fixture",
+    })
+    try {
+      expect(codiumBillingConfigProblems()).toEqual([])
+      for (const open of [true, false]) {
+        process.env.MODEL_PLANS_ENABLED = String(open)
+        const body = (await (await fetch(url)).json()) as {
+          enabled: boolean
+          plans: { id: string; name: string; price: number; available: boolean }[]
+        }
+        expect(body.enabled).toBe(open)
+        expect(body.plans.length).toBeGreaterThan(0)
+        expect(body.plans.some((plan) => plan.available)).toBe(open)
+        for (const decoder of [ModelPlanStatus1_99_111, ModelPlanStatus1_99_112]) {
+          expect(await decoder.salesOpen(send)).toBe(open)
+          expect(await decoder.fetchOffers(send)).toEqual({
+            enabled: open,
+            plans: body.plans.map((plan) => ({
+              id: plan.id,
+              name: plan.name,
+              price: plan.price,
+              available: plan.available,
+            })),
+            topups: [],
+          })
+        }
+      }
+    } finally {
+      restoreReady()
+      config.close()
+    }
   })
 })
