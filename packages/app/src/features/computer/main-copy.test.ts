@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 import type { Computer } from "@vectordevai/schema/computer"
 import { Hands } from "@vectordevai/schema/hands"
 import { dict } from "@vectordevai/ui/i18n/en"
+import { dict as appDict } from "../../i18n/en"
 import { ComputerMainCopy } from "./main-copy"
 
 const samples = [
@@ -164,6 +165,29 @@ describe("desktop main copy", () => {
     expect(ComputerMainCopy.handoff({ reason: "other" })).toBe(
       "Your turn: finish this step yourself. Press Continue when you're done.",
     )
+  })
+
+  test("the timeline's and the app's handoff sentences match the desktop's", () => {
+    const appKeys = {
+      credential: "credential",
+      sign_in: "signIn",
+      captcha: "captcha",
+      payment_details: "payment",
+      admin_prompt: "adminPrompt",
+      security_prompt: "security",
+      capture_confirm: "recording",
+      elevated: "elevated",
+      site_permission: "sitePermission",
+      download: "download",
+      extension: "extension",
+      protocol_handler: "protocolHandler",
+      macros: "macros",
+      other: "other",
+    } as const satisfies Record<Computer.HandoffReason, string>
+    for (const reason of Object.keys(handoffs) as Computer.HandoffReason[]) {
+      expect(dict[`ui.tool.computer.handoff.${reason}`]).toBe(handoffs[reason])
+      expect(appDict[`computer.handoff.reason.${appKeys[reason]}`]).toBe(handoffs[reason])
+    }
   })
 
   test("every live action uses a Vector-built label", () => {

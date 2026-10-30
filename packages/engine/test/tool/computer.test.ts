@@ -1595,6 +1595,27 @@ toolTests.instance("a secure field hands off to the user before any typed input 
       expect(desktop.questions[0].questions[0].options.map((option) => option.label)).toEqual(["Continue", "Stop"])
       expect(bridge.commands()).not.toContain("act")
       expect(desktop.requests.filter((request) => request.permission === "computer_sensitive")).toHaveLength(0)
+      // Text aimed at a secure field never becomes a timeline preview; only its length stays.
+      expect(result.metadata.text).toEqual({ length: 9 })
+      expect(JSON.stringify(result.metadata)).not.toContain("test text")
+    }),
+  ),
+)
+
+toolTests.instance("text for a secure field keeps no preview when another refusal comes before the handoff", () =>
+  toolCase(({ desktop, execute, bridge }) =>
+    Effect.gen(function* () {
+      // A layout from another platform is refused before the secure-field check, so no handoff runs.
+      desktop.inspect = {
+        ...desktop.inspect,
+        layout: { platform: "windows" },
+        element: { role: "text", label: "Password", secure: true, enabled: true, editable: true },
+      }
+      const result = yield* execute({ action: "type", text: "test text", ref: "ui_1" })
+      expect(result.metadata.code).toBe("changed")
+      expect(result.metadata.handoff).toBeUndefined()
+      expect(result.metadata.text).toEqual({ length: 9 })
+      expect(bridge.commands()).not.toContain("act")
     }),
   ),
 )
@@ -1964,6 +1985,29 @@ toolTests.instance("credential text is refused before any step of its batch reac
       expect(bridge.commands()).not.toContain("act")
       expect(result.metadata.code !== undefined || result.metadata.handoff !== undefined).toBe(true)
       expect(desktop.requests.filter((request) => request.permission === "computer_sensitive")).toHaveLength(0)
+      // The refusal comes before the part's typed-text metadata, so no preview of the credential is ever written.
+      expect(result.metadata.text).toBeUndefined()
+      expect(JSON.stringify(result.metadata)).not.toContain("sk-test")
+    }),
+  ),
+)
+
+toolTests.instance("typed text leaves the timeline a cleaned preview of at most 60 characters", () =>
+  toolCase(({ desktop, execute }) =>
+    Effect.gen(function* () {
+      desktop.inspect = {
+        ...desktop.inspect,
+        element: { role: "text", label: "Document", secure: false, enabled: true, editable: true },
+      }
+      const short = yield* execute({ action: "type", text: "October\u202e receipts\n", ref: "ui_1" })
+      expect(short.metadata.code).toBeUndefined()
+      expect(short.metadata.text).toEqual({ length: 18, preview: "October receipts" })
+      // 58 letters then two astral characters: a cut by code point would leave 61 UTF-16 units.
+      const text = `${"a".repeat(58)}\u{1f600}\u{1f600} and more`
+      const long = yield* execute({ action: "type", text, ref: "ui_1" })
+      expect(long.metadata.code).toBeUndefined()
+      expect(long.metadata.text).toEqual({ length: text.length, preview: `${"a".repeat(58)}\u2026` })
+      expect(Schema.decodeUnknownOption(Computer.ComputerPartMetadata)(long.metadata)._tag).toBe("Some")
     }),
   ),
 )
@@ -2111,6 +2155,49 @@ toolTests.instance("declining a pointer wait returns the mouse message without r
   ),
 )
 
+// The point is in the pixels of the frame the click was aimed at. After a take-over or handoff the part's frame is
+// the one captured after the user, so the point would mark a spot on a frame it does not belong to.
+for (const outcome of ["acted", "paused", "pointer", "protected"] as const) {
+  toolTests.instance(
+    outcome === "acted"
+      ? "a coordinate click keeps its point on an unchanged frame"
+      : `a coordinate click ${outcome === "protected" ? "handed off" : `with a ${outcome} wait`} keeps no point for the frame after the user`,
+    () =>
+      toolCase(({ desktop, execute }) =>
+        Effect.gen(function* () {
+          yield* execute({ action: "screenshot", app: "Notes" })
+          desktop.handle = ({ body }) => {
+            if (body.command === "act" && outcome === "paused")
+              return { done: 0, state: { ...desktop.state, phase: "paused", pause: "input" } }
+            if (body.command === "act" && outcome === "pointer")
+              return {
+                done: 0,
+                state: { ...desktop.state, phase: "waiting" },
+                waiting: { waitId: "pointer-1", reason: "pointer" },
+              }
+            if (body.command === "act" && outcome === "protected")
+              return { ok: false, code: "protected", error: "This step needs the user." }
+            if (body.command === "awaitControl") {
+              desktop.frame = { ...desktop.frame, id: "frame-after-user" }
+              return { result: "resumed" }
+            }
+            if (body.command === "handoff" && body.phase === "end")
+              desktop.frame = { ...desktop.frame, id: "frame-after-user" }
+          }
+          if (outcome === "protected") desktop.questionAnswers.push("Continue")
+          const result = yield* execute({ action: "click", x: 100, y: 50 })
+          expect(result.metadata.code).toBeUndefined()
+          if (outcome === "acted") {
+            expect(result.metadata.point).toEqual({ x: 100, y: 50 })
+            return
+          }
+          expect(result.metadata.frame).toMatchObject({ id: "frame-after-user" })
+          expect(result.metadata.point).toBeUndefined()
+        }),
+      ),
+  )
+}
+
 toolTests.instance("aborting the tool while awaitControl is in flight cancels the wait and stops input", () =>
   toolCase(({ desktop, execute, bridge }) =>
     Effect.gen(function* () {
@@ -2169,6 +2256,58 @@ for (const code of ["secure_field", "protected", "elevated"] as const) {
         ])
         expect(result.metadata.frame).toMatchObject({ id: "frame-after-handoff" })
         expect(bridge.commands().filter((command) => command === "act")).toHaveLength(1)
+      }),
+    ),
+  )
+
+  // The desktop re-checks the focused element at the point of input, so a field the inspection saw as ordinary can
+  // still turn out secure. Hands typed none of the text, and it may be a password, so no preview of it stays.
+  toolTests.instance(`typed text refused at input with ${code} keeps only its length`, () =>
+    toolCase(({ desktop, execute, bridge }) =>
+      Effect.gen(function* () {
+        desktop.inspect = {
+          ...desktop.inspect,
+          element: { role: "text", label: "Document", secure: false, enabled: true, editable: true },
+        }
+        desktop.handle = ({ body }) => {
+          if (body.command === "act") return { ok: false, code, error: "This step needs the user." }
+        }
+        desktop.questionAnswers.push("Continue")
+        const result = yield* execute({ action: "type", text: "Tr0ub4dor&3", ref: "ui_1" })
+        expect(bridge.commands().filter((command) => command === "act")).toHaveLength(1)
+        expect(result.metadata.handoff).toBeDefined()
+        expect(result.metadata.text).toEqual({ length: 11 })
+        expect(JSON.stringify(result.metadata)).not.toContain("Tr0ub4dor")
+      }),
+    ),
+  )
+
+  // Recording the refusal comes before the handoff. When that record fails, no handoff runs, so the preview must
+  // already be gone: the part keeps the text the desktop found going into a secure field otherwise.
+  toolTests.instance(`typed text refused at input with ${code} keeps no preview if its record fails`, () =>
+    toolCase(({ desktop, execute, bridge, sessionID }) =>
+      Effect.gen(function* () {
+        const global = yield* Global.Service
+        const file = path.join(global.data, "computer", "log", `${sessionID}.jsonl`)
+        yield* Effect.addFinalizer(() => Effect.promise(() => rm(file, { recursive: true, force: true })))
+        desktop.inspect = {
+          ...desktop.inspect,
+          element: { role: "text", label: "Document", secure: false, enabled: true, editable: true },
+        }
+        desktop.handle = async ({ body }) => {
+          if (body.command !== "act") return
+          // The log becomes unwritable after the attempt was recorded, so the refusal's record fails.
+          await rm(file)
+          await mkdir(file)
+          return { ok: false, code, error: "This step needs the user." }
+        }
+        const result = yield* execute({ action: "type", text: "Tr0ub4dor&3", ref: "ui_1" })
+        expect(bridge.commands().filter((command) => command === "act")).toHaveLength(1)
+        expect(result.metadata.code).toBe("failed")
+        expect(result.metadata.handoff).toBeUndefined()
+        expect(desktop.questions).toHaveLength(0)
+        expect(result.metadata.text).toEqual({ length: 11 })
+        expect(JSON.stringify(result.metadata)).not.toContain("Tr0ub4dor")
       }),
     ),
   )

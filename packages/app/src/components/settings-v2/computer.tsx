@@ -85,6 +85,7 @@ export function SettingsComputerV2(props: { computer: Computer.ComputerPlatform 
     return current && ComputerSettings.blockedRows(current)
   })
   const retention = createMemo(() => ComputerSettings.retentionOptions(settings()?.policy.maxRetentionDays))
+  let retentionControl: HTMLDivElement | undefined
   const date = (at: number) => new Intl.DateTimeFormat(language.intl(), { dateStyle: "medium" }).format(at)
 
   const use = async (next: boolean) => {
@@ -691,11 +692,12 @@ export function SettingsComputerV2(props: { computer: Computer.ComputerPlatform 
                     <div class="settings-v2-row-title">{t("computer.settings.screenshots.keep")}</div>
                     {managed("retention")}
                   </div>
-                  <div class="settings-v2-row-control">
-                    {/* Modal: inside the modal Settings dialog, Kobalte marks a later-added non-modal popup
-                        aria-hidden, so assistive tech would not see its options. */}
+                  <div class="settings-v2-row-control" ref={retentionControl}>
+                    {/* Inside the modal Settings dialog, a list portalled to the body sits under the dialog's layer
+                        and is marked aria-hidden, so it opens inside the dialog's content instead, as the server row
+                        menu does. */}
                     <SelectV2
-                      modal
+                      mount={retentionControl?.closest<HTMLElement>('[data-slot="dialog-content"]') ?? undefined}
                       appearance="inline"
                       options={retention()}
                       current={effective()?.retention}

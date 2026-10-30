@@ -25,12 +25,15 @@ import { createVirtualizer, defaultRangeExtractor, elementScroll, type VirtualIt
 import { Accordion } from "@vectordevai/ui/accordion"
 import { Button } from "@vectordevai/ui/button"
 import { Card } from "@vectordevai/ui/card"
+import { ComputerRunCard } from "@vectordevai/session-ui/computer-tool"
 import {
   ContextToolGroup,
+  copyPartID,
   Message,
   MessageDivider,
   Part as MessagePart,
   partDefaultOpen,
+  ReplyActions,
   type UserActions,
 } from "@vectordevai/session-ui/message-part"
 import { FileIcon } from "@vectordevai/ui/file-icon"
@@ -440,6 +443,7 @@ export function MessageTimeline(props: {
   const activeMessageID = projection.activeMessageID
   const assistantMessagesByParent = projection.assistantMessagesByParent
   const lastAssistantGroupKey = projection.lastAssistantGroupKey
+  const runParts = projection.runParts
   const messageByID = projection.messageByID
   const messageLastRowIndex = projection.messageLastRowIndex
   const messageRowIndex = projection.messageRowIndex
@@ -1049,21 +1053,15 @@ export function MessageTimeline(props: {
     return end - message.time.created
   }
 
+  // The last text with a row of its own, or, when every text is a note inside Hands run cards, the last note, whose
+  // card then carries the turn's footer (see copyPartID).
   const assistantCopyPartID = (userMessageID: string) => {
     if (workingTurn(userMessageID)) return null
     const messages = assistantMessagesByParent().get(userMessageID) ?? emptyAssistantMessages
-
-    for (let i = messages.length - 1; i >= 0; i--) {
-      const message = messages[i]
-      if (!message) continue
-
-      const parts = getMsgParts(message.id)
-      for (let j = parts.length - 1; j >= 0; j--) {
-        const part = parts[j]
-        if (!part || part.type !== "text" || !part.text?.trim()) continue
-        return part.id
-      }
-    }
+    return copyPartID(
+      messages.map((message) => getMsgParts(message.id)),
+      runParts(),
+    )
   }
 
   const renderAssistantPartGroup = (row: Accessor<TimelineRowMap["AssistantPart"]>, onSizeChange?: () => void) => {
@@ -1089,6 +1087,54 @@ export function MessageTimeline(props: {
             workingTurn(row().userMessageID) && lastAssistantGroupKey().get(row().userMessageID) === row().group.key
           }
           onSizeChange={onSizeChange}
+        />
+      )
+    }
+
+    if (row().group.type === "computer") {
+      // Tool calls and the agent's notes between them, in order; the open state lives with the other tool rows so
+      // it survives virtualization and the session cache.
+      const parts = createMemo(() => {
+        const group = row().group
+        if (group.type !== "computer") return emptyParts
+        // A long run holds hundreds of refs, so each message's parts are indexed once instead of searched per ref.
+        const byMessage = new Map<string, Map<string, PartType>>()
+        return group.refs.flatMap((ref) => {
+          const index =
+            byMessage.get(ref.messageID) ?? new Map(getMsgParts(ref.messageID).map((part) => [part.id, part] as const))
+          byMessage.set(ref.messageID, index)
+          return index.get(ref.partID) ?? []
+        })
+      })
+      const openKey = () => `computer:${row().group.key}`
+      // When every text of the turn is a note in a run card, the card holding the last one carries the turn's footer.
+      const footer = createMemo(() => {
+        const id = assistantCopyPartID(row().userMessageID)
+        const item = parts().find((part) => part.id === id)
+        const message = item && messageByID().get(item.messageID)
+        return item?.type === "text" && message ? { item, message } : undefined
+      })
+      return (
+        <ComputerRunCard
+          parts={parts()}
+          open={toolOpen[openKey()] === true}
+          onOpenChange={(value) => setToolOpen(openKey(), value)}
+          busy={
+            workingTurn(row().userMessageID) && lastAssistantGroupKey().get(row().userMessageID) === row().group.key
+          }
+          onSizeChange={onSizeChange}
+          footer={
+            <Show when={footer()}>
+              {(value) => (
+                <ReplyActions
+                  message={value().message}
+                  part={value().item}
+                  turnDurationMs={turnDurationMs(row().userMessageID)}
+                  useV2Actions={settings.general.newLayoutDesigns()}
+                />
+              )}
+            </Show>
+          }
         />
       )
     }

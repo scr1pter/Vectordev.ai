@@ -125,7 +125,15 @@ test("company-locked controls are disabled with the label, company rules are rea
     await expect(page.getByRole("option", { name: option, exact: true })).toBeVisible()
   await expect(page.getByRole("option", { name: "30 days", exact: true })).toHaveCount(0)
   await expect(page.getByRole("option", { name: "Until I delete the conversation", exact: true })).toHaveCount(0)
-  await page.getByRole("option", { name: "1 day", exact: true }).click()
+  const day = page.getByRole("option", { name: "1 day", exact: true })
+  // The list must sit above the full-screen Settings dialog, not merely be in the accessibility tree.
+  expect(
+    await day.evaluate((element) => {
+      const bounds = element.getBoundingClientRect()
+      return element.contains(document.elementFromPoint(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2))
+    }),
+  ).toBe(true)
+  await day.click()
   await expect.poll(() => calls(page)).toEqual([{ method: "setPrefs", prefs: { retention: "1d" } }])
 })
 
