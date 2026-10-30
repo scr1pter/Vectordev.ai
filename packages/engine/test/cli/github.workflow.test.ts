@@ -76,7 +76,7 @@ jobs:
       github.event_name == 'workflow_dispatch' ||
       ((github.event_name == 'issue_comment' || github.event_name == 'pull_request_review_comment') &&
         github.event.comment.user.type != 'Bot' &&
-        (contains(github.event.comment.body, '/vectorscope') || contains(github.event.comment.body, '/vs') || contains(github.event.comment.body, '/vector') || contains(github.event.comment.body, '/vx')))
+        (contains(github.event.comment.body, '/vector') || contains(github.event.comment.body, '/vs') || contains(github.event.comment.body, '/vectorscope') || contains(github.event.comment.body, '/vx')))
     runs-on: ubuntu-latest
     timeout-minutes: 3
     permissions:
@@ -217,7 +217,7 @@ jobs:
       github.event_name == 'workflow_dispatch' ||
       ((github.event_name == 'issue_comment' || github.event_name == 'pull_request_review_comment') &&
         github.event.comment.user.type != 'Bot' &&
-        (contains(github.event.comment.body, '/vectorscope') || contains(github.event.comment.body, '/vs') || contains(github.event.comment.body, '/vector') || contains(github.event.comment.body, '/vx')))
+        (contains(github.event.comment.body, '/vector') || contains(github.event.comment.body, '/vs') || contains(github.event.comment.body, '/vectorscope') || contains(github.event.comment.body, '/vx')))
     runs-on: ubuntu-latest
     timeout-minutes: 3
     permissions:

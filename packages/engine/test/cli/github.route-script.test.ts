@@ -2,8 +2,10 @@
 // the way actions/github-script runs it.
 
 import { describe, expect, test } from "bun:test"
-import { parseReviewCommand } from "@vectordevai/core/review/command"
+import { GithubAgents } from "@vectordevai/core/github-agents"
+import { parseReviewCommand, type ReviewCommandKind } from "@vectordevai/core/review/command"
 import { buildWorkflowYaml } from "@vectordevai/core/review/workflow"
+import { MENTION_CASES } from "../../../core/test/review/mention-cases"
 
 type Script = (github: unknown, context: unknown, core: unknown) => Promise<void>
 const AsyncFunction = Object.getPrototypeOf(async () => {}).constructor as new (...args: string[]) => Script
@@ -13,7 +15,8 @@ const HEAD = "a".repeat(40)
 const BASE = "b".repeat(40)
 const MERGE_BASE = "c".repeat(40)
 
-function script(app = false): string {
+// Built for each call, since the script differs with the App opt-in and with the mentions.
+function routeJob(app = false, mentions?: readonly string[]) {
   const yaml = buildWorkflowYaml({
     provider: "openai",
     model: "gpt-4.1",
@@ -21,13 +24,17 @@ function script(app = false): string {
     autoReview: true,
     version: "1.17.14",
     ...(app ? { auth: "auto" as const } : {}),
+    ...(mentions ? { mentions } : {}),
   })
-  const workflow = Bun.YAML.parse(yaml) as { jobs: { route: { steps: { with: { script: string } }[] } } }
-  return workflow.jobs.route.steps[0]!.with.script
+  const workflow = Bun.YAML.parse(yaml) as {
+    jobs: { route: { if: string; steps: { with: { script: string } }[] } }
+  }
+  return workflow.jobs.route
 }
 
 interface Options {
   app?: boolean
+  mentions?: readonly string[]
   permission?: string
   role?: string
   permissionStatus?: number
@@ -96,7 +103,7 @@ async function route(context: object, options: Options = {}) {
       outputs["failed"] = message
     },
   }
-  await new AsyncFunction("github", "context", "core", script(options.app))(
+  await new AsyncFunction("github", "context", "core", routeJob(options.app, options.mentions).steps[0]!.with.script)(
     github,
     { repo: { owner: "o", repo: "r" }, ...context },
     core,
@@ -141,6 +148,59 @@ const CORPUS = [
   "/vector fix the flaky test",
   "no command here",
 ]
+
+// What the route job does for each kind the parser reads. A refused mention, like a dismissal, costs no API call.
+const NONE = { kind: "none", pr: "", ref: "" }
+const ROUTED: Record<ReviewCommandKind, { outputs: Record<string, string>; methods: string[] }> = {
+  review: { outputs: { kind: "review", pr: "7", ref: HEAD }, methods: ["permission", "pulls.get"] },
+  "review-full": { outputs: { kind: "review-full", pr: "7", ref: HEAD }, methods: ["permission", "pulls.get"] },
+  task: { outputs: { kind: "task", pr: "7", ref: "" }, methods: ["permission"] },
+  pause: { outputs: NONE, methods: ["permission", "labels.add", "react.issue"] },
+  resume: { outputs: NONE, methods: ["permission", "labels.remove", "react.issue"] },
+  dismiss: { outputs: NONE, methods: [] },
+  none: { outputs: NONE, methods: [] },
+}
+
+// The workflow built for a table row: the default mentions, or GithubAgents.mentions(slug) baked in.
+function mentionsFor(slug: string | undefined) {
+  return slug === undefined ? undefined : GithubAgents.mentions(slug)
+}
+
+describe("the shared mention table", () => {
+  test("the generated route script reads every body as core's parser does", async () => {
+    for (const [body, kind, slug] of MENTION_CASES) {
+      expect({ body, slug, kind: parseReviewCommand(body, GithubAgents.mentions(slug)).kind }).toEqual({
+        body,
+        slug,
+        kind,
+      })
+      const { outputs, calls } = await route(issueComment(body), { mentions: mentionsFor(slug) })
+      expect({ body, slug, outputs, methods: calls.map((call) => call.method) }).toEqual({
+        body,
+        slug,
+        ...ROUTED[kind],
+      })
+    }
+  })
+
+  // Actions starts the route job only when the comment contains one of the mentions, ignoring case, so the filter
+  // must never drop a comment the script would act on.
+  test("the route job's contains() filter lets through every body the script reads a mention in", () => {
+    const filtered = (slug: string | undefined) =>
+      Array.from(
+        routeJob(false, mentionsFor(slug)).if.matchAll(/contains\(github\.event\.comment\.body, '([^']*)'\)/g),
+        (match) => match[1]!.toLowerCase(),
+      )
+    expect(filtered(undefined)).toEqual(GithubAgents.mentions())
+    expect(filtered("vector-fixture")).toEqual(GithubAgents.mentions("vector-fixture"))
+    for (const [body, , slug] of MENTION_CASES.filter((row) => row[1] !== "none"))
+      expect({ body, slug, passes: filtered(slug).some((mention) => body.toLowerCase().includes(mention)) }).toEqual({
+        body,
+        slug,
+        passes: true,
+      })
+  })
+})
 
 describe("the route script", () => {
   test("its outputs agree with core's parseReviewCommand for every command in the corpus", async () => {
