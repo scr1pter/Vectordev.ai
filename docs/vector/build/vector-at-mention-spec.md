@@ -522,7 +522,7 @@ The file must have **no imports**, so `api/` can import it as `../../packages/co
 | `WORKFLOW_FILE` | `".github/workflows/vector.yml"` (`workflow.ts` re-exports it) |
 | `WORKFLOW_VERSION` | `"3"`, written by the v3 builder. `workflow.ts`'s `GITHUB_WORKFLOW_VERSION` (what the CLI compares against) stays `"2"` until V24 sets it to this value (2.11.4) |
 | `MIN_CODIUM_WORKFLOW_VERSION` | `3` |
-| `MIN_AGENTS_CLI` | the first CLI version that carries V15–V22; set in V14 to the next CLI release's version and recorded in the progress file (section 4 step 7) |
+| `MIN_AGENTS_CLI` | (added by V14) the first CLI version that carries V15–V22; set in V14 to the next CLI release's version and recorded in the progress file (section 4 step 7) |
 | `JOB` | `{ agent: "Vector agent", publish: "Vector publish", review: "Vector review", bind: "Vector bind", legacyTask: "Vector task" }` |
 | `AUDIENCE` | `{ mint: "https://vectordev.ai/api/cloud-agents/mint", bind: "https://vectordev.ai/api/cloud-agents/bind" }` |
 | `ENDPOINT` | `{ bindCode, bind, bindings, unbind, mint, heartbeat, settle, runs, artifactKey }` as `/api/cloud-agents/<kebab-name>` |
@@ -555,9 +555,9 @@ The file must have **no imports**, so `api/` can import it as `../../packages/co
 | `PATCH_LIMITS` | `{ bytes: 8_000_000, files: 2_000, fileBytes: 10_000_000, summaryBytes: 262_144, sessionBytes: 20_000_000 }` |
 | `RUN_LOGIN_DAYS` / `RUNS_KEPT` | `90` / `200` per account |
 | `SESSION_DAYS` / `BUNDLE_DAYS` | `7` / `1` |
-| `MINT_STATUS` | `"ok" \| "not-bound" \| "suspended" \| "update-required" \| "binding-unavailable" \| "not-in-plan" \| "service-off" \| "source-unavailable" \| "runner" \| "hours" \| "at-once" \| "scheduled" \| "denied" \| "needs-app" \| "unavailable"` |
-| `OUTCOME` | `"changes" \| "no-changes" \| "draft" \| "failed" \| "refused" \| "cancelled"` |
-| `STOP_CODES` | the 2.9.2 codes that end in a draft |
+| `MINT_STATUS` / `MintStatus` | a readonly tuple of `"ok" \| "not-bound" \| "suspended" \| "update-required" \| "binding-unavailable" \| "not-in-plan" \| "service-off" \| "source-unavailable" \| "runner" \| "hours" \| "at-once" \| "scheduled" \| "denied" \| "needs-app" \| "unavailable"`; `type MintStatus = (typeof MINT_STATUS)[number]` |
+| `OUTCOME` / `Outcome` | a readonly tuple of `"changes" \| "no-changes" \| "draft" \| "failed" \| "refused" \| "cancelled"`; `type Outcome = (typeof OUTCOME)[number]`, the `Outcome` of 2.8 (settle), 2.12 and 2.16 |
+| `STOP_CODES` / `StopCode` | a readonly tuple of the codes 2.9.2 names that end in a draft, the wait rows included (they end in a draft as busy); `type StopCode = (typeof STOP_CODES)[number]`. `"deadline"` (the heartbeat and local-deadline row) and the default row's codes are not stop codes, so `RunSummary.stop` (2.12) is a `StopCode`, `"deadline"`, or another code from the default row |
 
 ## 2.2 Mentions (amendment 4)
 
