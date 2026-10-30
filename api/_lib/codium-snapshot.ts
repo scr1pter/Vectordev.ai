@@ -10,7 +10,8 @@ import {
 } from "../../packages/schema/src/codium-entitlements.js"
 import { PLANS, rank, type PlanId } from "../../packages/schema/src/codium-plan.js"
 import { codiumKey } from "./codium-keys.js"
-import { TRUST_RAMP, trustRampDays } from "./codium-limits.js"
+import { renewalGraceMinutes, TRUST_RAMP, trustRampDays } from "./codium-limits.js"
+import { ApiError } from "./http.js"
 import { requireCodiumLivemode, stripeMode } from "./model-plan-stripe.js"
 import { persistentStore } from "./persistent-store.js"
 
@@ -115,6 +116,62 @@ export function isStale(snapshot: EntitlementSnapshot, now = Date.now()) {
   // Paused, ended and frozen snapshots written by reconcile are trusted until the next notification or the age limit;
   // an active one is rechecked once its period is over.
   return snapshot.state === "active" && now >= snapshot.periodEnd
+}
+
+const PAYMENT_MESSAGES = {
+  payment_failed: "Your last Vector Codium payment did not go through. Update your card to keep using Vector Codium.",
+  action_required: "Your bank needs you to confirm your Vector Codium payment.",
+  payment_pending: "Your Vector Codium renewal has not been paid yet. Update your card to keep using Vector Codium.",
+} as const
+const ACTIONS = {
+  payment_failed: "update-card",
+  action_required: "confirm-payment",
+  payment_pending: "update-card",
+} as const
+
+/**
+ * The snapshot when its plan state lets it use Codium now, or `requireEntitlement`'s refusal for that state. Here so a
+ * snapshot already in hand (one a reconcile just returned, or the one a pool hold reads) gets the same final answers
+ * without codium-entitlements.ts and model-plan-account.ts importing each other:
+ * - 402 `MODEL_PLAN_REQUIRED` without a plan, or once it ended (409 `MODEL_PLAN_ACCOUNT_CLOSING` while the account is
+ *   being deleted);
+ * - 402 `MODEL_PLAN_PAYMENT_REQUIRED {reason, action}` while a payment is owed;
+ * - 403 `MODEL_PLAN_BLOCKED {reason}` while a dispute, a fraud warning or the owner holds it;
+ * - 503 `MODEL_PLAN_RENEWING` (retry after 30 s) once a renewal's grace ran out before reconcile caught up.
+ */
+export function requireUsableSnapshot(snapshot: EntitlementSnapshot | undefined, now = Date.now()) {
+  if (!snapshot || snapshot.state === "none")
+    throw new ApiError(402, "MODEL_PLAN_REQUIRED", "Choose a Vector Codium plan to use this.")
+  if (snapshot.state === "ended") {
+    if (snapshot.reason === "closing")
+      throw new ApiError(409, "MODEL_PLAN_ACCOUNT_CLOSING", "This account is being deleted. Vector Codium is closed.")
+    throw new ApiError(402, "MODEL_PLAN_REQUIRED", "Your Vector Codium plan has ended. Choose a plan to use this.", {
+      detail: snapshot.reason ? { reason: snapshot.reason } : undefined,
+    })
+  }
+  if (snapshot.state === "paused") {
+    const reason =
+      snapshot.reason === "action_required" || snapshot.reason === "payment_pending"
+        ? snapshot.reason
+        : "payment_failed"
+    throw new ApiError(402, "MODEL_PLAN_PAYMENT_REQUIRED", PAYMENT_MESSAGES[reason], {
+      detail: { reason, action: ACTIONS[reason] },
+    })
+  }
+  if (snapshot.state === "frozen")
+    throw new ApiError(
+      403,
+      "MODEL_PLAN_BLOCKED",
+      snapshot.reason === "disputed"
+        ? "Vector Codium is on hold for this account while a payment dispute is open."
+        : "Vector Codium is on hold for this account. Contact Vector support.",
+      { detail: { reason: snapshot.reason ?? "owner" } },
+    )
+  if (snapshot.state === "renewing" && now >= snapshot.periodEnd + renewalGraceMinutes() * 60_000)
+    throw new ApiError(503, "MODEL_PLAN_RENEWING", "Your Vector Codium plan is renewing. Try again in a moment.", {
+      retryAfterSeconds: 30,
+    })
+  return snapshot
 }
 
 /** A per-period counter's key, `meter:<account>:<meterEpoch>:<name>` under the mode prefix: new with every period. */

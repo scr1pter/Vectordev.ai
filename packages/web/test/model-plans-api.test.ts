@@ -2,7 +2,8 @@ import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:tes
 import { RedisClient } from "bun"
 import { createHash } from "node:crypto"
 import { mkdtemp, rm, stat } from "node:fs/promises"
-import { createServer } from "node:http"
+import { createServer, IncomingMessage, ServerResponse } from "node:http"
+import { Socket } from "node:net"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { mintCliToken } from "../../../api/_lib/cli-token"
@@ -15,6 +16,7 @@ import {
   modelPlanStatus,
   paidModelPlan,
   readModelPlanAccount,
+  reconcileModelPlanAccount,
 } from "../../../api/_lib/model-plan-account"
 import {
   handleModelPlanChange,
@@ -23,6 +25,20 @@ import {
   handleModelTopupRemoved,
 } from "../../../api/_lib/model-plan-billing"
 import { handleModelPlanChat } from "../../../api/_lib/model-plan-chat"
+import { ADMISSION_SCRIPTS } from "../../../api/_lib/model-plan-admit"
+import { drainOutbox, enqueueAction } from "../../../api/_lib/codium-provision"
+import { createRunVerifierRegistry, type ModelPlanCaller } from "../../../api/_lib/model-plan-caller"
+import type { AfterSettleContext, GatewayHook } from "../../../api/_lib/model-plan-gateway-hooks"
+import { ApiError } from "../../../api/_lib/http"
+import { readModelSpendLedger } from "../../../api/_lib/codium-spend-ledger"
+import { verifiedGatewayModel } from "../../../api/_lib/model-plan-catalog-policy"
+import { CODIUM_MODELS } from "../../../api/_lib/codium-catalog"
+import {
+  modelPlanAttempts,
+  modelPlanReservation,
+  nominalModelPlanRequestCredits,
+  type ModelPlanModel,
+} from "../../../api/_lib/model-plan-config"
 import { handleModelPlanModels } from "../../../api/_lib/model-plan-models"
 import { handleModelPlanStatus, modelPlanBalance } from "../../../api/_lib/model-plan-status"
 import { ModelPlans } from "@vectordevai/core/model-plans"
@@ -85,6 +101,8 @@ const environment = [
   "CODIUM_3DS_MIN_USD",
   "VECTOR_ADMIN_EMAILS",
   "MODEL_PLANS_MIN_CLIENT",
+  "MODEL_PLAN_GLOBAL_INFLIGHT",
+  "MODEL_PLAN_PRIORITY_RESERVE",
   "MODEL_PLANS_ENABLED",
   "MODEL_PLAN_MODELS_JSON",
   "MODEL_PLAN_KEY_ENCRYPTION_SECRET",
@@ -106,7 +124,7 @@ const environment = [
 ]
 const previousEnvironment = new Map(environment.map((key) => [key, process.env[key]]))
 
-function subscription(start = Math.floor(Date.now() / 1000) - 3600, end = start + 7200) {
+function subscription(start = Math.floor(Date.now() / 1000) - 3600, end = start + 7200, price = 10) {
   return {
     id: "sub_fixture",
     status: "active",
@@ -119,10 +137,10 @@ function subscription(start = Math.floor(Date.now() / 1000) - 3600, end = start 
           current_period_start: start,
           current_period_end: end,
           price: {
-            id: "price_fixture10",
+            id: `price_fixture${price}`,
             active: true,
             currency: "usd",
-            unit_amount: 1000,
+            unit_amount: price * 100,
             recurring: { interval: "month", interval_count: 1 },
           },
         },
@@ -132,9 +150,15 @@ function subscription(start = Math.floor(Date.now() / 1000) - 3600, end = start 
       id: "in_fixture",
       paid: true,
       status: "paid",
-      amount_paid: 1000,
-      charge: { paid: true, refunded: false, disputed: false, amount_refunded: 0 },
-      lines: { data: [{ price: { id: "price_fixture10" }, period: { start, end }, proration: false }] },
+      amount_paid: price * 100,
+      charge: {
+        paid: true,
+        refunded: false,
+        disputed: false,
+        amount_refunded: 0,
+        payment_method_details: { card: { three_d_secure: { result: "authenticated" } } },
+      },
+      lines: { data: [{ price: { id: `price_fixture${price}` }, period: { start, end }, proration: false }] },
     },
   }
 }
@@ -153,6 +177,18 @@ const state = {
   charge: 0,
   keyReadDelay: 0,
   chatDelay: 0,
+  gatewayModels: undefined as readonly ModelPlanModel[] | undefined,
+  gatewayFetcher: undefined as typeof fetch | undefined,
+  runVerifiers: undefined as ReturnType<typeof createRunVerifierRegistry> | undefined,
+  hostedLive: undefined as ((session: string) => Promise<boolean>) | undefined,
+  hooks: undefined as readonly GatewayHook[] | undefined,
+  upstreamStatuses: [] as number[],
+  admitGate: undefined as Promise<void> | undefined,
+  admitReached: () => {},
+  failSettles: 0,
+  failSettlesFrom: 0,
+  throwTransport: false,
+  dispatches: 0,
   subscriptions: [] as (ReturnType<typeof subscription> & { schedule?: string })[],
 }
 const calls: { path: string; method: string; headers: Headers; body: Record<string, unknown> }[] = []
@@ -175,6 +211,21 @@ const upstream = Bun.serve({
       if (!Array.isArray(command) || command.some((part) => typeof part !== "string" && typeof part !== "number"))
         throw new Error("Invalid Redis command")
       commands.push(command)
+      // A test can hold an admission EVAL after its credential read, to land it after another write.
+      if (state.admitGate && command[0] === "EVAL" && command[1] === ADMISSION_SCRIPTS.ADMIT) {
+        state.admitReached()
+        await state.admitGate
+      }
+      // A settlement whose answer is lost (the store's reply never arrives), for requests admitted from a given time.
+      if (
+        state.failSettles > 0 &&
+        command[0] === "EVAL" &&
+        command[1] === ADMISSION_SCRIPTS.SETTLE &&
+        JSON.parse(String(command[3 + Number(command[2])])).admittedAt >= state.failSettlesFrom
+      ) {
+        state.failSettles--
+        return new Response(null, { status: 503 })
+      }
       if (
         state.failClosingWrite &&
         command[0] === "SET" &&
@@ -284,8 +335,8 @@ const upstream = Bun.serve({
     }
     if (url.pathname === "/api/v1/chat/completions") {
       expect(request.headers.get("authorization")).toBe(`Bearer ${keys.values().next().value?.secret}`)
-      if (state.upstreamStatus !== 200)
-        return Response.json({ error: { message: "PRIVATE fixture-paid-secret-1" } }, { status: state.upstreamStatus })
+      const status = state.upstreamStatuses.shift() ?? state.upstreamStatus
+      if (status !== 200) return Response.json({ error: { message: "PRIVATE fixture-paid-secret-1" } }, { status })
       // The provider bills a request, and the key's usage grows, only once it finishes.
       if (state.chatDelay) await Bun.sleep(state.chatDelay)
       const charged = keys.values().next().value
@@ -326,6 +377,10 @@ const upstream = Bun.serve({
 const fetcher: typeof fetch = Object.assign(
   (input: string | URL | Request, init?: RequestInit) => {
     const url = new URL(input instanceof Request ? input.url : input)
+    if (url.pathname === "/api/v1/chat/completions") {
+      state.dispatches++
+      if (state.throwTransport) throw new Error("Fixture transport lost after dispatch")
+    }
     if (url.origin === "https://api.stripe.com" || url.origin === "https://openrouter.ai")
       return fetch(new URL(url.pathname + url.search, upstream.url), init)
     if (url.origin === upstream.url.origin) return fetch(input, init)
@@ -333,6 +388,12 @@ const fetcher: typeof fetch = Object.assign(
   },
   { preconnect: fetch.preconnect },
 )
+// The invented fixture models have no captured native window, so tests inject an explicit synthetic reservation.
+const fixtureReservation = (selected: ModelPlanModel, plan: Parameters<typeof modelPlanReservation>[1]) => {
+  const attemptMicro = Math.ceil(nominalModelPlanRequestCredits(selected, plan) * 1_000_000 - 1e-6)
+  const attempts = modelPlanAttempts(plan)
+  return { attemptMicro, attempts, requiredMicro: attemptMicro * attempts }
+}
 const server = createServer((request, response) => {
   // /chat is the gateway as the other tests call it; the /api/model-plans paths are what Vector itself requests.
   if (request.url === "/api/model-plans/models") return void handleModelPlanModels(request, response, fetcher)
@@ -341,7 +402,23 @@ const server = createServer((request, response) => {
   if (request.url === "/api/model-plans/checkout") return void handleModelPlanCheckout(request, response, fetcher)
   if (request.url === "/api/model-plans/topup") return void handleModelTopupRemoved(request, response)
   if (request.url === "/api/model-plans/portal") return void handleModelPlanPortal(request, response, fetcher)
-  void handleModelPlanChat(request, response, fetcher)
+  // Only this local upstream implements the invented fixture model. Planned catalogs must be explicitly supplied by
+  // a test; ordinary active-model requests retain the production qualification guard.
+  void handleModelPlanChat(request, response, state.gatewayFetcher ?? fetcher, {
+    models: state.gatewayModels,
+    runVerifiers: state.runVerifiers,
+    assertHostedSessionLive: state.hostedLive,
+    // Scoped service hooks for one test; production registrations are never replaced.
+    hooks: state.hooks,
+    qualify: (selected) =>
+      state.gatewayModels
+        ? state.gatewayModels.some((model) => model.id === selected.id)
+        : selected.id === model.id || verifiedGatewayModel(selected),
+    reservation: (selected, plan) =>
+      !state.gatewayModels && selected.id !== model.id
+        ? modelPlanReservation(selected, plan)
+        : fixtureReservation(selected, plan),
+  })
 })
 
 beforeAll(async () => {
@@ -394,6 +471,8 @@ beforeEach(async () => {
   delete process.env.CODIUM_3DS_MIN_USD
   delete process.env.VERCEL_ENV
   delete process.env.MODEL_PLANS_MIN_CLIENT
+  delete process.env.MODEL_PLAN_GLOBAL_INFLIGHT
+  delete process.env.MODEL_PLAN_PRIORITY_RESERVE
   delete process.env.STRIPE_MODEL_PLAN_CHANGE_PORTAL_CONFIG_ID
   delete process.env.UPSTASH_REDIS_REST_URL
   delete process.env.UPSTASH_REDIS_REST_TOKEN
@@ -420,6 +499,18 @@ beforeEach(async () => {
     charge: 0,
     keyReadDelay: 0,
     chatDelay: 0,
+    gatewayModels: undefined,
+    gatewayFetcher: undefined,
+    runVerifiers: undefined,
+    hostedLive: undefined,
+    hooks: undefined,
+    upstreamStatuses: [],
+    admitGate: undefined,
+    admitReached: () => {},
+    failSettles: 0,
+    failSettlesFrom: 0,
+    throwTransport: false,
+    dispatches: 0,
     subscriptions: [],
   })
   calls.length = 0
@@ -1107,7 +1198,7 @@ describe("paid credential lifecycle", () => {
     await paid()
     await modelPlanCredential(user.id, fetcher)
     keys.get("hash_fixture1")!.data.usage = 5
-    await expect(modelPlanCredential(user.id, fetcher)).rejects.toMatchObject({
+    await expect(modelPlanCredential(user.id, fetcher, Date.now(), 0.01)).rejects.toMatchObject({
       code: "MODEL_PLAN_EXHAUSTED",
       statusCode: 402,
     })
@@ -1183,13 +1274,16 @@ describe("model plan HTTP inference", () => {
     })
     expect(JSON.stringify(chats()[0]!.body)).not.toContain("strip me")
     expect(JSON.stringify(chats()[0]!.body)).not.toContain("vct_")
-    expect(await modelPlanStatus(user.id, fetcher)).toMatchObject({ active: true, used: 0, remaining: 5 })
+    // The provider reported no cost for this answer, so the gateway committed its whole one-attempt reservation
+    // (8,192 tokens at $1 and 2,048 at $2 per million): an unknown charge is never counted as free.
+    expect(await modelPlanStatus(user.id, fetcher)).toMatchObject({ active: true, used: 0.012288, remaining: 4.987712 })
   })
 
-  test("enforces the real atomic per-user minute cap under concurrent requests", async () => {
+  test("the thirty-first Plus request reaches the per-minute refusal independently of concurrency", async () => {
     await paid()
     await modelPlanCredential(user.id, fetcher)
-    const responses = await Promise.all(Array.from({ length: 34 }, () => chat()))
+    const responses: Response[] = []
+    for (let index = 0; index < 34; index++) responses.push(await chat())
     expect(responses.filter((response) => response.status === 200)).toHaveLength(30)
     expect(responses.filter((response) => response.status === 429)).toHaveLength(4)
     expect(chats()).toHaveLength(30)
@@ -1216,7 +1310,8 @@ describe("model plan HTTP inference", () => {
     expect(response.status).toBe(400)
     expect(await response.json()).toMatchObject({ error: { code: "MODEL_PLAN_CONTEXT" } })
     expect(chats()).toHaveLength(0)
-    expect(keys.size).toBe(0)
+    // Refused before admission: nothing reserved (the snapshot read before it may have provisioned the period's key).
+    expect(await redis(["ZRANGE", heldKey, 0, -1])).toEqual([])
   })
 
   test("exhausted paid credits return payment-required without an inference request", async () => {
@@ -1275,7 +1370,8 @@ describe("model plan HTTP inference", () => {
 
   test("parallel requests hold their largest cost, so together they cannot spend past the balance", async () => {
     await paid()
-    await modelPlanCredential(user.id, fetcher)
+    // The account's snapshot and key exist before the burst, so every request is admitted at the same moment.
+    await reconcileModelPlanAccount(user.id, fetcher)
     // Each hold is "<ticket>:<purpose>:<runId or ->:<micro-dollars>". A request settles its hold just after its answer ends.
     const held = async (count: number, charge?: string) => {
       const members = async () => (await redis(["ZRANGE", heldKey, 0, -1])) as string[]
@@ -1309,11 +1405,14 @@ describe("model plan HTTP inference", () => {
     state.chatDelay = 0
     expect((await chat()).status).toBe(200)
     expect(await held(3, "1000")).toHaveLength(3)
-    // A request the provider refuses releases its hold at once.
+    // A request the provider refuses after dispatch keeps its attempt held: a refusal is not proof that nothing was
+    // billed (the owner's A17 reservation policy), so it settles as broken at its one-attempt amount.
     keys.get("hash_fixture1")!.data.usage = 4
     state.upstreamStatus = 500
     expect((await chat()).status).toBe(503)
-    expect(await held(3, "1000")).toHaveLength(3)
+    const after = await held(4)
+    expect(after.filter((member) => member.endsWith(":1000"))).toHaveLength(3)
+    expect(after.filter((member) => member.endsWith(":12288"))).toHaveLength(1)
     expect(chats()).toHaveLength(4)
   })
 
@@ -1335,7 +1434,8 @@ describe("model plan HTTP inference", () => {
     const kept = current.find((member) => !member.endsWith(":1000"))
     if (!kept) throw new Error("Expected the broken answer's hold")
     // Still the model's largest request, held until it lapses 11 minutes after the request started, not 30 seconds.
-    expect(kept.split(":").slice(1)).toEqual(["chat", "-", "12288"])
+    // A request without X-Vector-Purpose counts as `task` (§4.9).
+    expect(kept.split(":").slice(1)).toEqual(["task", "-", "12288"])
     expect(Number(await redis(["ZSCORE", pool, kept]))).toBeGreaterThan(Date.now() + 600_000)
   })
 
@@ -1497,5 +1597,615 @@ describe("Codium credits used from Vector", () => {
     expect(chats()).toHaveLength(0)
     const status = await ModelPlanStatus.fetchStatus(token, forward)
     expect(ModelPlanStatus.notice(status)).toEqual({ kind: "unavailable", text: "Vector Codium is not available yet." })
+  })
+})
+
+describe("A17 admission and chat", () => {
+  const admissions = () => commands.filter((command) => command[0] === "EVAL" && command[1] === ADMISSION_SCRIPTS.ADMIT)
+  const stripeCalls = () => calls.filter((call) => call.path.startsWith("/v1/"))
+  const keyReads = () => calls.filter((call) => call.path.startsWith("/api/v1/keys") && call.method === "GET")
+  const inflight = `vector:codium:test:inflight:${user.id}`
+  // A model whose one attempt reserves `inputPrice` × 8,192 + $2 × 2,048 per million, for budget boundaries.
+  const priced = (id: string, inputPrice: number, extra: Partial<ModelPlanModel> = {}): ModelPlanModel => ({
+    ...model,
+    id,
+    name: id,
+    inputPrice,
+    ...extra,
+  })
+  // The account is paid and reconciled (its snapshot and key exist), and nothing it took to get there is counted.
+  async function subscribed(price: 10 | 50 | 100 | 200 = 10) {
+    state.subscriptions = [subscription(undefined, undefined, price)]
+    await redis(["SET", accountKey, JSON.stringify({ customer: "cus_fixture" })])
+    await reconcileModelPlanAccount(user.id, fetcher)
+    calls.length = 0
+    commands.length = 0
+  }
+  // P1: a refusal names no amount, price or credit figure.
+  const privateFree = (body: unknown) => expect(JSON.stringify(body)).not.toMatch(/\$|usd|credit|cent|\d/i)
+  function runs(caller: (token: string) => ModelPlanCaller) {
+    const registry = createRunVerifierRegistry()
+    registry.register("vrt_", async (token) => caller(token))
+    registry.register("vht_", async (token) => caller(token))
+    state.runVerifiers = registry
+  }
+  const runCaller = (
+    run: string,
+    service: "cloud-agents" | "hosted" = "cloud-agents",
+    extra: Partial<NonNullable<ModelPlanCaller["run"]>> = {},
+  ): ModelPlanCaller => ({
+    account: { id: user.id },
+    kind: "run",
+    purpose: "review",
+    run: { id: run, source: "github-comment", deadline: Date.now() + 3_600_000, service, ...extra },
+  })
+
+  test("an unqualified real route is unavailable before the snapshot, a credential, a hold or a fetch", async () => {
+    const real = CODIUM_MODELS[0]!
+    process.env.MODEL_PLAN_MODELS_JSON = JSON.stringify([model, real])
+    await paid()
+    const response = await chat({ model: real.id, messages: [{ role: "user", content: "fixture" }] })
+    expect(response.status).toBe(503)
+    expect(await response.json()).toMatchObject({ error: { code: "MODEL_PLAN_MODEL_UNAVAILABLE" } })
+    expect(stripeCalls()).toEqual([])
+    expect(calls.filter((call) => call.path.startsWith("/api/v1/"))).toEqual([])
+    expect(admissions()).toEqual([])
+    expect(await redis(["GET", `vector:codium:test:ent:${user.id}`])).toBeNull()
+  })
+
+  test("a disabled model answers 503 before any account read", async () => {
+    await paid()
+    await redis(["SADD", "vector:codium:test:models-off", model.id])
+    // The switch cache is per fetcher; a fresh one reads the set this test wrote.
+    state.gatewayFetcher = Object.assign((input: string | URL | Request, init?: RequestInit) => fetcher(input, init), {
+      preconnect: fetch.preconnect,
+    })
+    const response = await chat()
+    expect(response.status).toBe(503)
+    expect(await response.json()).toMatchObject({ error: { code: "MODEL_PLAN_MODEL_UNAVAILABLE" } })
+    expect(stripeCalls()).toEqual([])
+    expect(admissions()).toEqual([])
+    expect(chats()).toEqual([])
+  })
+
+  test("a misconfigured gateway limit refuses at the enabled gate, before Stripe, OpenRouter or the store", async () => {
+    await subscribed()
+    process.env.MODEL_PLAN_PRIORITY_RESERVE = "1.5"
+    const response = await chat()
+    expect(response.status).toBe(503)
+    expect(await response.json()).toMatchObject({ error: { code: "MODEL_PLANS_CONFIGURATION" } })
+    expect(calls).toEqual([])
+    expect(commands).toEqual([])
+  })
+
+  test("with a fresh snapshot a request makes one admission EVAL, one key read and no Stripe call (M4)", async () => {
+    await subscribed()
+    for (let index = 0; index < 5; index++) {
+      const response = await chat()
+      expect(response.status).toBe(200)
+      await response.text()
+    }
+    expect(admissions()).toHaveLength(5)
+    expect(keyReads()).toHaveLength(5)
+    expect(stripeCalls()).toEqual([])
+    expect(chats()).toHaveLength(5)
+    // The provider key is revealed only for the upstream call, never written to the store with the admission.
+    expect(JSON.stringify(commands)).not.toContain("fixture-paid-secret")
+  })
+
+  test("a locked model answers 403 with no hold, admission or provider call", async () => {
+    await subscribed()
+    state.gatewayModels = [model, priced("fixture/max-only", 1, { minPlan: "vector-100" })]
+    const response = await chat({ model: "fixture/max-only", messages: [{ role: "user", content: "fixture" }] })
+    expect(response.status).toBe(403)
+    expect(await response.json()).toMatchObject({
+      error: { code: "MODEL_PLAN_UPGRADE_REQUIRED", plan: "vector-100" },
+    })
+    expect(admissions()).toEqual([])
+    expect(keyReads()).toEqual([])
+    expect(chats()).toEqual([])
+    expect(await redis(["ZRANGE", heldKey, 0, -1])).toEqual([])
+  })
+
+  // A Max checkout opened ten minutes ago: a locked model reconciles once before answering, and that answer follows
+  // the reconciled snapshot's state exactly as the first snapshot's would.
+  async function upgrading(status: string) {
+    await subscribed()
+    state.gatewayModels = [model, priced("fixture/max-only", 1, { minPlan: "vector-100" })]
+    const checkout = { id: "cs_upgrade", plan: "vector-100", url: "https://checkout.stripe.com/c/pay/cs_upgrade" }
+    sessions.set(checkout.id, {
+      ...checkout,
+      customer: "cus_fixture",
+      expires_at: Math.floor(Date.now() / 1000) + 1200,
+      status: "open",
+      metadata: {},
+    })
+    const account = JSON.parse(String(await redis(["GET", accountKey])))
+    await redis([
+      "SET",
+      accountKey,
+      JSON.stringify({ ...account, checkout: { ...checkout, expires: Date.now() + 1_200_000 } }),
+    ])
+    state.subscriptions = [{ ...subscription(undefined, undefined, 100), status }]
+    calls.length = 0
+    commands.length = 0
+    return chat({ model: "fixture/max-only", messages: [{ role: "user", content: "fixture" }] })
+  }
+  const reconcileSlot = `vector:codium:test:reconcile:${user.id}`
+  const reconciles = () => commands.filter((command) => command[0] === "SET" && command[1] === reconcileSlot)
+
+  test("a locked model after a recent upgrade checkout reconciles once and serves the upgraded plan", async () => {
+    const served = await upgrading("active")
+    expect(served.status).toBe(200)
+    await served.text()
+    expect(reconciles()).toHaveLength(1)
+    expect(calls.filter((call) => call.path === "/v1/subscriptions")).toHaveLength(1)
+    expect(admissions()).toHaveLength(1)
+    expect(chats()).toHaveLength(1)
+  })
+
+  test("a recent-checkout reconcile that finds the payment failed answers 402, not a retry", async () => {
+    const refused = await upgrading("past_due")
+    expect(refused.status).toBe(402)
+    expect(refused.headers.get("retry-after")).toBeNull()
+    const payload = await refused.json()
+    expect(payload).toMatchObject({
+      error: { code: "MODEL_PLAN_PAYMENT_REQUIRED", reason: "payment_failed", action: "update-card" },
+    })
+    privateFree(payload)
+    expect(reconciles()).toHaveLength(1)
+    expect(admissions()).toEqual([])
+    expect(keyReads()).toEqual([])
+    expect(chats()).toEqual([])
+  })
+
+  test("the thirty-first Plus request in a parallel burst is rate limited, whatever concurrency refuses", async () => {
+    await subscribed()
+    state.chatDelay = 50
+    const responses = await Promise.all(Array.from({ length: 34 }, () => chat()))
+    const codes = await Promise.all(
+      responses.map(async (response) =>
+        response.status === 200 ? (await response.text(), "ok") : (await response.json()).error.code,
+      ),
+    )
+    expect(codes.filter((code) => code === "RATE_LIMITED")).toHaveLength(4)
+    expect(codes.every((code) => ["ok", "RATE_LIMITED", "MODEL_PLAN_CONCURRENCY"].includes(code))).toBe(true)
+    expect(codes.filter((code) => code === "ok").length).toBeGreaterThan(0)
+    // Requests refused before admission never reached it; every admitted one dispatched once.
+    expect(admissions()).toHaveLength(30)
+    expect(chats()).toHaveLength(codes.filter((code) => code === "ok").length)
+  })
+
+  test("a settlement lost twice is queued with its known outcome, and the outbox records it once", async () => {
+    await subscribed()
+    state.charge = 0.001
+    state.failSettles = 2
+    state.failSettlesFrom = Date.now()
+    const served = await chat()
+    expect(served.status).toBe(200)
+    await served.text()
+    const [admit] = admissions()
+    const ticket = JSON.parse(String(admit![3 + Number(admit![2])])).ticket
+    const key = `vector:codium:test:outbox:item:model-settle:${ticket}`
+    const queued = async () => Number(await redis(["EXISTS", key]))
+    for (let tries = 0; tries < 200 && (await queued()) === 0; tries++) await Bun.sleep(10)
+    expect(await queued()).toBe(1)
+    // Until the retry lands the reservation still counts at its full amount and the slot stays taken: never free.
+    expect(await readModelSpendLedger(user.id, "hash_fixture1", Date.now(), fetcher)).toMatchObject({
+      reservedMicro: 12_288,
+      committedMicro: 0,
+    })
+    expect(Number(await redis(["ZCARD", inflight]))).toBe(1)
+    const record = JSON.parse(String(await redis(["GET", key])))
+    expect(record).toMatchObject({
+      kind: "model-settle",
+      payload: { outcome: { kind: "complete", chargeMicro: 1_000 } },
+    })
+    await drainOutbox({ now: Date.now(), fetcher })
+    expect(await queued()).toBe(0)
+    expect(await readModelSpendLedger(user.id, "hash_fixture1", Date.now(), fetcher)).toMatchObject({
+      reservedMicro: 0,
+      committedMicro: 1_000,
+    })
+    expect(Number(await redis(["ZCARD", inflight]))).toBe(0)
+    // A second delivery of the same retry is recognised as done: nothing is charged twice.
+    await enqueueAction("model-settle", record.key, record.payload, undefined, fetcher)
+    await drainOutbox({ now: Date.now(), fetcher })
+    expect(await queued()).toBe(0)
+    expect((await readModelSpendLedger(user.id, "hash_fixture1", Date.now(), fetcher)).committedMicro).toBe(1_000)
+  })
+
+  test("service hooks see each admitted request once, after its settlement is recorded or queued", async () => {
+    await subscribed()
+    const settles = () =>
+      commands.filter((command) => command[0] === "EVAL" && command[1] === ADMISSION_SCRIPTS.SETTLE).length
+    const seen: { hook: string; admissions: number; settles: number; queued?: number; context?: AfterSettleContext }[] =
+      []
+    state.hooks = [
+      {
+        id: "fixture-meter",
+        beforeAdmit: async () => {
+          seen.push({ hook: "before", admissions: admissions().length, settles: settles() })
+        },
+        afterSettle: async (_caller, context) => {
+          const admit = admissions().at(-1)!
+          const ticket = JSON.parse(String(admit[3 + Number(admit[2])])).ticket
+          const queued = Number(await redis(["EXISTS", `vector:codium:test:outbox:item:model-settle:${ticket}`]))
+          seen.push({ hook: "after", admissions: admissions().length, settles: settles(), queued, context })
+        },
+      },
+    ]
+    const after = async (count: number) => {
+      for (let tries = 0; tries < 200 && seen.filter((entry) => entry.hook === "after").length < count; tries++)
+        await Bun.sleep(10)
+      return seen.filter((entry) => entry.hook === "after")
+    }
+    state.charge = 0.001
+    const served = await chat()
+    expect(served.status).toBe(200)
+    await served.text()
+    expect(await after(1)).toHaveLength(1)
+    // Hooks run before admission, then once after the settlement landed, with the outcome the gateway knows.
+    expect(seen).toMatchObject([
+      { hook: "before", admissions: 0, settles: 0 },
+      {
+        hook: "after",
+        admissions: 1,
+        settles: 1,
+        queued: 0,
+        context: { charge: 0.001, streamed: true, model: { id: model.id }, snapshot: { plan: "vector-10" } },
+      },
+    ])
+    expect(seen[1]!.context!.startedAt).toBeLessThanOrEqual(seen[1]!.context!.endedAt)
+
+    // Both settle answers lost: the outcome is queued for the outbox, and the hooks still see the request, once.
+    seen.length = 0
+    state.failSettles = 2
+    state.failSettlesFrom = Date.now()
+    const queued = await chat()
+    expect(queued.status).toBe(200)
+    await queued.text()
+    expect(await after(1)).toHaveLength(1)
+    await Bun.sleep(50)
+    expect(seen).toMatchObject([
+      { hook: "before", admissions: 1, settles: 1 },
+      { hook: "after", admissions: 2, settles: 3, queued: 1, context: { charge: 0.001, streamed: true } },
+    ])
+
+    // A request refused before admission never reaches afterSettle: nothing was admitted or settled.
+    seen.length = 0
+    state.hooks = [
+      ...state.hooks,
+      {
+        id: "fixture-refusal",
+        beforeAdmit: async () => {
+          throw new ApiError(403, "MODEL_PLAN_BLOCKED", "Refused by a fixture service.")
+        },
+      },
+    ]
+    expect((await chat()).status).toBe(403)
+    await Bun.sleep(50)
+    expect(seen.map((entry) => entry.hook)).toEqual(["before"])
+    expect(admissions()).toHaveLength(2)
+  })
+
+  test("concurrency is freed after an upstream error, a transport throw and a client abort", async () => {
+    await subscribed()
+    // Settlement runs in the gateway's finally, just after the answer is written.
+    const freed = async () => {
+      for (let tries = 0; tries < 200 && Number(await redis(["ZCARD", inflight])) > 0; tries++) await Bun.sleep(10)
+      return Number(await redis(["ZCARD", inflight]))
+    }
+    state.upstreamStatus = 500
+    expect((await chat()).status).toBe(503)
+    expect(await freed()).toBe(0)
+    state.upstreamStatus = 200
+    state.throwTransport = true
+    expect((await chat()).status).toBe(503)
+    expect(await freed()).toBe(0)
+    state.throwTransport = false
+    state.chatDelay = 300
+    const abort = new AbortController()
+    const pending = fetch(`${state.origin}/chat`, {
+      method: "POST",
+      signal: abort.signal,
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${mintCliToken(user, Date.now(), "desktop").token}`,
+        "x-vector-client": "1.99.113",
+        "x-vector-catalog": "2",
+      },
+      body: JSON.stringify({ model: model.id, messages: [{ role: "user", content: "fixture" }] }),
+    }).catch(() => undefined)
+    for (let tries = 0; tries < 100 && state.dispatches < 3; tries++) await Bun.sleep(10)
+    abort.abort()
+    await pending
+    expect(await freed()).toBe(0)
+    // Plus runs three at once; a fourth waits with a jittered retry-after-ms and is not a credit refusal.
+    state.chatDelay = 150
+    const responses = await Promise.all(Array.from({ length: 4 }, () => chat()))
+    expect(responses.map((response) => response.status).sort()).toEqual([200, 200, 200, 429])
+    const busy = responses.find((response) => response.status === 429)!
+    const wait = Number(busy.headers.get("retry-after-ms"))
+    expect(wait).toBeGreaterThanOrEqual(1500)
+    expect(wait).toBeLessThanOrEqual(4000)
+    const body = await busy.json()
+    expect(body).toMatchObject({ error: { code: "MODEL_PLAN_CONCURRENCY" } })
+    privateFree(body)
+  })
+
+  test("a client that stops reading is settled at the request's deadline, never left to the platform's kill", async () => {
+    await subscribed()
+    // A run whose deadline is two seconds away bounds the request; the provider streams without end.
+    runs(() => runCaller("run-stalled", "cloud-agents", { deadline: Date.now() + 2_000 }))
+    const frame = new TextEncoder().encode(
+      `data: ${JSON.stringify({ choices: [{ delta: { content: "fixture" } }] })}\n\n`,
+    )
+    const gateway = Object.assign(
+      (input: string | URL | Request, init?: RequestInit) =>
+        String(input).endsWith("/chat/completions")
+          ? Promise.resolve(
+              new Response(new ReadableStream({ pull: (controller) => controller.enqueue(frame) }), {
+                headers: { "content-type": "text/event-stream" },
+              }),
+            )
+          : fetcher(input, init),
+      { preconnect: fetch.preconnect },
+    )
+    const request = Object.assign(new IncomingMessage(new Socket()), {
+      method: "POST",
+      url: "/chat",
+      headers: {
+        "content-type": "application/json",
+        authorization: "Bearer vrt_fixture.run-stalled",
+        "x-vector-client": "1.99.113",
+        "x-vector-catalog": "2",
+      },
+      body: { model: model.id, messages: [{ role: "user", content: "fixture" }] },
+    })
+    // An unattached response never drains, as a connection whose client stopped reading but stayed open.
+    const handled = handleModelPlanChat(request, new ServerResponse(request), gateway, {
+      models: [model],
+      qualify: (selected) => selected.id === model.id,
+      reservation: fixtureReservation,
+      runVerifiers: state.runVerifiers,
+    }).then(() => "settled")
+    expect(await Promise.race([handled, Bun.sleep(10_000).then(() => "stalled")])).toBe("settled")
+    // Settled as broken in the gateway's finally: its one dispatched attempt is committed at the fixed reservation,
+    // instead of an open reservation abandoned at its full amount when the platform kills the function.
+    expect(await readModelSpendLedger(user.id, "hash_fixture1", Date.now(), fetcher)).toMatchObject({
+      reservedMicro: 0,
+      committedMicro: 12_288,
+    })
+    expect(Number(await redis(["ZCARD", inflight]))).toBe(0)
+  })
+
+  test("Max runs four Astra requests at once and refuses the fifth", async () => {
+    await subscribed(100)
+    state.gatewayModels = [model, priced("fixture/astra", 1, { inFlightGroup: "astra", minPlan: "vector-100" })]
+    state.chatDelay = 200
+    const responses = await Promise.all(
+      Array.from({ length: 5 }, () =>
+        chat({ model: "fixture/astra", messages: [{ role: "user", content: "fixture" }] }),
+      ),
+    )
+    expect(responses.map((response) => response.status).sort()).toEqual([200, 200, 200, 200, 429])
+    expect(await responses.find((response) => response.status === 429)!.json()).toMatchObject({
+      error: { code: "MODEL_PLAN_CONCURRENCY" },
+    })
+    expect(chats()).toHaveLength(4)
+  })
+
+  test("the global priority reserve keeps the last slots for Max and Ultra", async () => {
+    process.env.MODEL_PLAN_GLOBAL_INFLIGHT = "2"
+    process.env.MODEL_PLAN_PRIORITY_RESERVE = "0.5"
+    await subscribed(10)
+    state.chatDelay = 150
+    const plus = await Promise.all(Array.from({ length: 2 }, () => chat()))
+    expect(plus.map((response) => response.status).sort()).toEqual([200, 429])
+    expect(await plus.find((response) => response.status === 429)!.json()).toMatchObject({
+      error: { code: "MODEL_PLAN_BUSY" },
+    })
+    await redis(["FLUSHDB"])
+    keys.clear()
+    await subscribed(100)
+    const max = await Promise.all(Array.from({ length: 3 }, () => chat()))
+    expect(max.map((response) => response.status).sort()).toEqual([200, 200, 429])
+  })
+
+  test("the daily share refuses with retry-after to UTC midnight and names no amount", async () => {
+    await subscribed()
+    // Plus: a quarter of 5 a day. Each attempt reserves 0.602112 and is charged 0.6.
+    state.gatewayModels = [priced("fixture/heavy", 73)]
+    state.charge = 0.6
+    const body = { model: "fixture/heavy", messages: [{ role: "user", content: "fixture" }] }
+    for (let index = 0; index < 2; index++) expect((await chat(body)).status).toBe(200)
+    const refused = await chat(body)
+    expect(refused.status).toBe(429)
+    const payload = await refused.json()
+    expect(payload).toMatchObject({ error: { code: "MODEL_PLAN_DAILY_LIMIT" } })
+    privateFree(payload)
+    const midnight = Math.ceil((86_400_000 - (Date.now() % 86_400_000)) / 1000)
+    expect(Math.abs(Number(refused.headers.get("retry-after")) - midnight)).toBeLessThanOrEqual(2)
+    expect(chats()).toHaveLength(2)
+  })
+
+  test("Brain requests share a tenth of the period, and the refusal is not a credit code", async () => {
+    await subscribed()
+    state.gatewayModels = [priced("fixture/brain", 36)]
+    state.charge = 0.29
+    const body = { model: "fixture/brain", messages: [{ role: "user", content: "fixture" }] }
+    const token = mintCliToken(user, Date.now(), "desktop").token
+    expect((await chat(body, token, { "x-vector-purpose": "brain" })).status).toBe(200)
+    const refused = await chat(body, token, { "x-vector-purpose": "brain" })
+    expect(refused.status).toBe(429)
+    const payload = await refused.json()
+    expect(payload).toMatchObject({ error: { code: "MODEL_PLAN_BRAIN_SHARE" } })
+    expect(ModelPlans.gatewayFailure(429, JSON.stringify(payload))?.kind).not.toBe("credits")
+    // Other purposes still have the month.
+    expect((await chat(body, token, { "x-vector-purpose": "chat" })).status).toBe(200)
+  })
+
+  test("a run's ceiling is atomic under parallel requests", async () => {
+    await subscribed()
+    // Plus: a run may spend a tenth of 5. Each attempt reserves 0.200704: two fit, a third does not.
+    state.gatewayModels = [priced("fixture/run", 24)]
+    runs(() => runCaller("run-ceiling"))
+    state.chatDelay = 150
+    const body = { model: "fixture/run", messages: [{ role: "user", content: "fixture" }] }
+    const responses = await Promise.all(Array.from({ length: 3 }, () => chat(body, "vrt_fixture.run-ceiling")))
+    expect(responses.map((response) => response.status).sort()).toEqual([200, 200, 429])
+    const payload = await responses.find((response) => response.status === 429)!.json()
+    expect(payload).toMatchObject({ error: { code: "MODEL_PLAN_RUN_LIMIT", limit: "ceiling" } })
+    privateFree(payload)
+    expect(chats()).toHaveLength(2)
+  })
+
+  test("run-service guards refuse before any credential, admission or dispatch", async () => {
+    await subscribed()
+    const computer = {
+      model: model.id,
+      messages: [{ role: "user", content: "fixture" }],
+      tools: [{ type: "function", function: { name: "computer_use", parameters: {} } }],
+    }
+    // A signed review purpose does not evade the cloud-agents service guard.
+    runs(() => runCaller("run-tools"))
+    const blocked = await chat(computer, "vrt_fixture.run-tools")
+    expect(blocked.status).toBe(403)
+    expect(await blocked.json()).toMatchObject({ error: { code: "MODEL_PLAN_BLOCKED" } })
+    // A hosted run whose session the user has taken over waits; without a live verifier it is unavailable.
+    runs(() => runCaller("run-hosted", "hosted", { sessionId: "session-1" }))
+    expect(await (await chat(undefined, "vht_fixture.run-hosted")).json()).toMatchObject({
+      error: { code: "HOSTED_UNAVAILABLE" },
+    })
+    state.hostedLive = async () => false
+    const paused = await chat(undefined, "vht_fixture.run-hosted")
+    expect(paused.status).toBe(409)
+    expect(await paused.json()).toMatchObject({ error: { code: "HOSTED_SESSION_PAUSED" } })
+    expect(admissions()).toEqual([])
+    expect(keyReads()).toEqual([])
+    expect(chats()).toEqual([])
+    state.hostedLive = async () => true
+    const live = await chat(undefined, "vht_fixture.run-hosted")
+    expect(live.status).toBe(200)
+    await live.text()
+  })
+
+  test("a run bound to a replaced pool must start again, and a new run is admitted", async () => {
+    await subscribed()
+    // An earlier admission of run-old against the period's previous key bound it there (an upgrade or renewal since).
+    await redis(["SET", "vector:codium:test:run-pool:run-old", "hash_replaced"])
+    runs((token) => runCaller(token.slice(token.indexOf(".") + 1)))
+    const expired = await chat(undefined, "vrt_fixture.run-old")
+    expect(expired.status).toBe(401)
+    const payload = await expired.json()
+    expect(payload).toMatchObject({ error: { code: "MODEL_PLAN_RUN_EXPIRED" } })
+    privateFree(payload)
+    expect(chats()).toEqual([])
+    expect(await redis(["ZRANGE", heldKey, 0, -1])).toEqual([])
+    const fresh = await chat(undefined, "vrt_fixture.run-new")
+    expect(fresh.status).toBe(200)
+    await fresh.text()
+    expect(await redis(["GET", "vector:codium:test:run-pool:run-new"])).toBe("hash_fixture1")
+  })
+
+  test("an admission delayed past a renewal's key replacement never lands on the old pool", async () => {
+    await subscribed()
+    const reached = new Promise<void>((resolve) => (state.admitReached = resolve))
+    let release = () => {}
+    state.admitGate = new Promise<void>((resolve) => (release = resolve))
+    const pending = chat()
+    await reached
+    // The renewal is paid meanwhile: reconcile saves the barrier, switches the old key off and publishes a new one.
+    const renewed = Math.floor(Date.now() / 1000) - 60
+    state.subscriptions = [subscription(renewed, renewed + 30 * 86_400)]
+    await reconcileModelPlanAccount(user.id, fetcher)
+    expect((await readModelPlanAccount(user.id, fetcher))?.key).toMatchObject({ hash: "hash_fixture2", start: renewed })
+    expect(keys.get("hash_fixture1")!.data.disabled).toBe(true)
+    state.admitGate = undefined
+    release()
+    const refused = await pending
+    expect(refused.status).toBe(503)
+    expect(refused.headers.get("retry-after")).toBe("1")
+    expect(await refused.json()).toMatchObject({ error: { code: "MODEL_PLAN_RENEWING" } })
+    expect(chats()).toEqual([])
+    // Nothing was reserved on either pool by the refused admission.
+    for (const pool of ["hash_fixture1", "hash_fixture2"])
+      expect(await readModelSpendLedger(user.id, pool, Date.now(), fetcher)).toMatchObject({
+        reservedMicro: 0,
+        committedMicro: 0,
+      })
+  })
+
+  test("a key that is not ready gets one on-demand reconcile, then a retryable answer", async () => {
+    await subscribed()
+    keys.get("hash_fixture1")!.data.disabled = true
+    // Another request already holds this minute's reconcile.
+    await redis(["SET", `vector:codium:test:reconcile:${user.id}`, "taken", "PX", 60_000])
+    const waiting = await chat()
+    expect(waiting.status).toBe(503)
+    expect(waiting.headers.get("retry-after")).toBe("1")
+    const payload = await waiting.json()
+    expect(payload).toMatchObject({ error: { code: "MODEL_PLAN_RENEWING" } })
+    privateFree(payload)
+    expect(admissions()).toEqual([])
+    expect(stripeCalls()).toEqual([])
+    await redis(["DEL", `vector:codium:test:reconcile:${user.id}`])
+    const repaired = await chat()
+    expect(repaired.status).toBe(200)
+    await repaired.text()
+    expect(keys.get("hash_fixture1")!.data.disabled).toBe(false)
+  })
+
+  test("retries: none below Max; one before any byte on Max, charging the uncertain first attempt", async () => {
+    await subscribed()
+    state.upstreamStatuses = [429]
+    expect((await chat()).status).toBe(429)
+    expect(state.dispatches).toBe(1)
+    await redis(["FLUSHDB"])
+    keys.clear()
+    await subscribed(100)
+    state.dispatches = 0
+    state.charge = 0.001
+    state.upstreamStatuses = [503]
+    const retried = await chat()
+    expect(retried.status).toBe(200)
+    await retried.text()
+    expect(state.dispatches).toBe(2)
+    // The first attempt's outcome is unknown, so its whole attempt is committed beside the reported charge.
+    expect((await readModelSpendLedger(user.id, "hash_fixture1", Date.now(), fetcher)).committedMicro).toBe(
+      12_288 + 1_000,
+    )
+    state.dispatches = 0
+    state.upstreamStatuses = [429, 429]
+    expect((await chat()).status).toBe(429)
+    expect(state.dispatches).toBe(2)
+    // Both attempts stay held at the two-attempt reservation: the provider may have billed either.
+    const held = (await redis(["ZRANGE", heldKey, 0, -1])) as string[]
+    expect(held.filter((member) => member.endsWith(":24576"))).toHaveLength(1)
+  })
+
+  test("a variant sends its upstream id, catalog effort and pinned route, whatever the client asks", async () => {
+    await subscribed()
+    state.gatewayModels = [
+      priced("fixture/variant", 1, {
+        upstream: "fixture/upstream-id",
+        reasoningEffort: "high",
+        providerOnly: ["fixture/fast"],
+      }),
+    ]
+    const response = await chat({
+      model: "fixture/variant",
+      messages: [{ role: "user", content: "fixture" }],
+      reasoning: { effort: "max" },
+      provider: { allow_fallbacks: true },
+    })
+    expect(response.status).toBe(200)
+    await response.text()
+    expect(chats()[0]!.body).toMatchObject({
+      model: "fixture/upstream-id",
+      reasoning: { effort: "high" },
+      provider: { only: ["fixture/fast"], allow_fallbacks: false, zdr: true, data_collection: "deny" },
+    })
   })
 })

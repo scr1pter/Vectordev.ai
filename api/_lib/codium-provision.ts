@@ -50,6 +50,7 @@ export const ACTION_KINDS = [
   "pool-ramp",
   "pause-collection",
   "debit-apply",
+  "model-settle",
 ] as const
 export type ActionKind = (typeof ACTION_KINDS)[number]
 /** The outbox's own action: an owner alert that is retried until it is sent (dead letters use it). */

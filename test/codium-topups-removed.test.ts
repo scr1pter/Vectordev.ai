@@ -5,6 +5,7 @@ import { mintCliToken } from "../api/_lib/cli-token"
 import { checkCodiumFunding } from "../api/_lib/codium-funding"
 import { codiumLedger, codiumLedgerSummary, recordCodiumCharge } from "../api/_lib/codium-ledger"
 import { POOL_SCRIPTS } from "../api/_lib/codium-pool"
+import { MODEL_SPEND_SCRIPTS } from "../api/_lib/codium-spend-ledger"
 import { RAMP_SCRIPTS } from "../api/_lib/codium-ramp"
 import { SNAPSHOT_SCRIPTS } from "../api/_lib/codium-snapshot"
 import {
@@ -152,10 +153,15 @@ function store(input: unknown[]) {
   if (name === "ZREM") return 1
   if (name === "EVAL") {
     const [script, , key, token] = args as [string, string, string, string]
-    // HOLD: the request fits when the pool's base covers it (no other holds or debits here).
-    if (script === POOL_SCRIPTS.HOLD) return Number(args[5]) >= Number(args[6]) ? 1 : 0
-    if (script === POOL_SCRIPTS.SETTLE || script === POOL_SCRIPTS.DEBIT) return 1
-    if (script === POOL_SCRIPTS.READ) return [0, 0, 0]
+    // A fresh key's ledger genesis (codium-spend-ledger.ts; its Lua runs for real in model-plan-admit.test.ts and
+    // codium-pool.test.ts): the account's marker turns ready. These pools hold nothing and have no debits.
+    if (script === MODEL_SPEND_SCRIPTS.GENESIS) {
+      world.store.set(key, world.store.get(key)!.replace('"state":"pending"', '"state":"ready"'))
+      hash(args[3]!).set("genesis", args[5]!)
+      return 1
+    }
+    if (script === MODEL_SPEND_SCRIPTS.READ) return [0, 0, 0, 0, 0, 0]
+    if (script === POOL_SCRIPTS.DEBIT) return 1
     if (script === POOL_SCRIPTS.DEBITS) return [...hash(key)].flat()
     if (script === POOL_SCRIPTS.APPLY) return 0
     if (script === RAMP_SCRIPTS.WRITE) {
@@ -455,7 +461,6 @@ describe("an account record written while top-ups were sold", () => {
     world.subscriptions = [subscription]
     const credential = await modelPlanCredential(user.id, fetcher, Date.now(), 0.01)
     expect(credential.key).toBe("fixture-openrouter-secret-hash_topups2")
-    await credential.release(0.001)
     expect(world.keys.get("hash_topups2")).toMatchObject({
       name: `Vector test ${user.id} sub_topups ${subscription.items.data[0]!.current_period_start}`,
       limit: 4,

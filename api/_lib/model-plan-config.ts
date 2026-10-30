@@ -3,6 +3,7 @@ import { ENTITLEMENTS } from "../../packages/schema/src/codium-entitlements.js"
 import { CodiumPlan } from "../../packages/schema/src/codium-plan.js"
 import { ApiError } from "./http.js"
 import { CODIUM_RUNTIME_CATALOG_UPDATED, CODIUM_MODELS, CODIUM_TIER_MODELS } from "./codium-catalog.js"
+import { capturedReservationMicro } from "./codium-reservations.js"
 import { codiumLimitProblems, testCreditCapUsd } from "./codium-limits.js"
 import { stripeMode, stripeModeProblems, requireStripeMode, type StripeMode } from "./model-plan-stripe.js"
 
@@ -50,12 +51,37 @@ export const ModelPlanModel = Schema.Struct({
 export type ModelPlanModel = typeof ModelPlanModel.Type
 
 /**
- * The credits a request to this model must find available, and holds until it settles: its whole context at the input
- * price plus its longest reply at the output price, the most one request can cost. It comes from the public catalog
- * and never from the request, so a refusal says only that the credits available are below this one public amount. Sized
- * from the request instead, a client could vary max_tokens and read back exactly how much is left.
+ * The fixed reservation a request must find available, in whole micro-dollars. Captured models use the entire native
+ * provider window and all captured price tiers, plus their maximum reply, after the owner's A17 reservation decision. It
+ * comes from the catalog and never from the request, so a refusal says only that what is available is below this one
+ * amount. Sized from the request instead, a client could vary max_tokens and read back exactly how much is left.
+ *
+ * A 429/503 answer is not proof that the first attempt cost nothing, and Max and Ultra may dispatch a second attempt, so
+ * they reserve two. `requiredMicro` is exactly `attempts × attemptMicro`, so charging every dispatched attempt at
+ * `attemptMicro` can never exceed what was reserved.
  */
+export function modelPlanReservation(model: ModelPlanModel, plan?: CodiumPlan.PlanId) {
+  if (plan !== undefined && !CodiumPlan.isPlanId(plan)) throw configurationError()
+  const attemptMicro = capturedReservationMicro(model)
+  if (attemptMicro === undefined)
+    throw new ApiError(503, "MODEL_PLAN_MODEL_UNAVAILABLE", "A reservation for this model could not be verified.")
+  const attempts = modelPlanAttempts(plan)
+  return { attemptMicro, attempts, requiredMicro: attemptMicro * attempts }
+}
+
+/** How many provider attempts one request may dispatch on `plan`: a second, before any byte, on Max and Ultra. */
+export function modelPlanAttempts(plan?: CodiumPlan.PlanId) {
+  return plan === undefined || CodiumPlan.rank(plan) >= 3 ? 2 : 1
+}
+
+/** The reservation in dollars, for status's read-only "empty" figure. */
 export function modelPlanRequestCredits(model: ModelPlanModel, plan?: CodiumPlan.PlanId) {
+  return modelPlanReservation(model, plan).requiredMicro / 1_000_000
+}
+
+/** Unqualified planning/status estimate only. This function never authorizes a real hold or provider route. */
+export function nominalModelPlanRequestCredits(model: ModelPlanModel, plan?: CodiumPlan.PlanId) {
+  if (plan !== undefined && !CodiumPlan.isPlanId(plan)) throw configurationError()
   const context =
     plan === undefined
       ? Math.max(model.contextLength, ...Object.values(model.tierContext ?? {}))

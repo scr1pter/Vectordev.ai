@@ -13,9 +13,11 @@ import {
   effectiveModel,
   modelAccess,
   modelPlanRequestCredits,
+  nominalModelPlanRequestCredits,
   publicModelPlans,
   type ModelPlanModel,
 } from "../../../api/_lib/model-plan-config"
+import { capturedReservationMicro } from "../../../api/_lib/codium-reservations"
 import { ENTITLEMENTS } from "../../schema/src/codium-entitlements"
 import { CodiumPlan } from "../../schema/src/codium-plan"
 
@@ -171,18 +173,18 @@ describe("tier access and windows", () => {
   })
 })
 
-describe("public per-request holds", () => {
+describe("captured reservations and unqualified nominal estimates", () => {
   test.each([
-    { id: ids.luna, plan: "vector-10", hold: "0.040" },
+    { id: ids.luna, plan: "vector-10", hold: "0.269" },
     { id: ids.terra, plan: "vector-10", hold: "0.241" },
     { id: ids.sol, plan: "vector-50", hold: "0.442" },
     ...[ids.kimi, ids.argon].flatMap((id) => [
-      { id: `${id}:long`, plan: "vector-50", hold: "0.594" },
-      { id: `${id}:long`, plan: "vector-100", hold: "1.106" },
-      { id: `${id}:long`, plan: "vector-200", hold: "1.618" },
+      { id: `${id}:long`, plan: "vector-50", hold: "2.179" },
+      { id: `${id}:long`, plan: "vector-100", hold: "4.358" },
+      { id: `${id}:long`, plan: "vector-200", hold: "4.358" },
     ]),
-    { id: `${ids.deepseek}:long`, plan: "vector-100", hold: "0.173" },
-    { id: `${ids.deepseek}:long`, plan: "vector-200", hold: "0.250" },
+    { id: `${ids.deepseek}:long`, plan: "vector-100", hold: "0.668" },
+    { id: `${ids.deepseek}:long`, plan: "vector-200", hold: "0.668" },
     { id: ids.sonnet, plan: "vector-100", hold: "0.730" },
     { id: `${ids.sol}:deep`, plan: "vector-100", hold: "0.532" },
     { id: ids.astra, plan: "vector-100", hold: "2.661" },
@@ -191,9 +193,17 @@ describe("public per-request holds", () => {
     { id: ids.opus, plan: "vector-200", hold: "1.821" },
     { id: `${ids.sol}:deepest`, plan: "vector-200", hold: "1.064" },
     { id: `${ids.astra}:long`, plan: "vector-200", hold: "5.322" },
-  ])("$id on $plan reserves $hold at the contract ceilings", ({ id, plan, hold }) => {
-    expect(modelPlanRequestCredits(candidate(id), plan as CodiumPlan.PlanId).toFixed(3)).toBe(hold)
-  })
+  ])(
+    "$id on $plan reports $hold; unqualified entries remain nominal and cannot authorize a request",
+    ({ id, plan, hold }) => {
+      const model = candidate(id)
+      const credits =
+        capturedReservationMicro(model) === undefined
+          ? nominalModelPlanRequestCredits(model, plan as CodiumPlan.PlanId)
+          : modelPlanRequestCredits(model, plan as CodiumPlan.PlanId)
+      expect(credits.toFixed(3)).toBe(hold)
+    },
+  )
 
   test("weights compare public prices rather than context or private monthly pools", () => {
     const models = configuredPlanModels({ tiered: true })

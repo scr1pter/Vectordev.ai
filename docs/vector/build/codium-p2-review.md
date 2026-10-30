@@ -55,8 +55,10 @@ repository's no-missing-cron rule while later work packages are built.
 
 ## Remaining gates
 
-The full pre-push check, canonical source push and fresh phase CI follow this
-record; do not infer a successful phase CI run from the local results above.
+After this record the full pre-push check passed, the canonical source was
+pushed, and the phase CI ran on the exact repaired source `4539d83b`: scoped
+run 40810014805 and full general run 40810044741 both succeeded, the latter with
+all 15 jobs including the Linux and Windows browser suites.
 
 Protected provider acceptance still requires the owner's test environment and
 authorization. Stripe acceptance of the 3-D Secure request fields and actual

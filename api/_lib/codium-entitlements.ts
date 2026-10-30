@@ -4,21 +4,17 @@ import {
   type Entitlements,
 } from "../../packages/schema/src/codium-entitlements.js"
 import { PLANS, type PlanId } from "../../packages/schema/src/codium-plan.js"
-import { codiumKey } from "./codium-keys.js"
-import { renewalGraceMinutes } from "./codium-limits.js"
 import {
   isStale,
   METER_KEEP_MS,
   meterKey,
   onEntitlementChange,
-  readSnapshot,
+  requireUsableSnapshot,
   runMeterAdd,
-  SNAPSHOT_RECHECK_MS,
 } from "./codium-snapshot.js"
 import { readSwitch } from "./codium-switches.js"
 import { ApiError } from "./http.js"
-import { reconcileModelPlanAccount } from "./model-plan-account.js"
-import { persistentStore } from "./persistent-store.js"
+import { readEntitlement, reconcileOnDemand } from "./model-plan-account.js"
 
 /*
  * The plan cache, as every Codium service reads it (contract §4.3). A service asks `requireEntitlement` (or
@@ -28,69 +24,9 @@ import { persistentStore } from "./persistent-store.js"
  */
 
 export type { EntitlementChange, EntitlementListener, OutboxItem, TransitionCause } from "./codium-snapshot.js"
-export { isStale, meterKey, onEntitlementChange }
-
-// While another request reconciles an account that has no snapshot yet, wait this long, in steps, for its answer.
-const MISSING_WAIT_MS = 2_000
-const MISSING_STEP_MS = 200
-
-/**
- * The account's snapshot, by the read rules: a fresh one as stored; a stale one (over 6 hours old, past its period,
- * or a `none` or `renewing` one over a minute old) served after one reconcile, or as it is when another request is
- * already reconciling or Stripe cannot be read; a missing one reconciled on demand. Undefined only when there is none
- * and the reconcile that would write it is running elsewhere and did not finish in time. A snapshot from the other
- * Stripe mode is refused (503).
- */
-export async function readEntitlement(
-  account: string,
-  fetcher: typeof fetch = fetch,
-  now = Date.now(),
-): Promise<EntitlementSnapshot | undefined> {
-  const stored = await readSnapshot(account, fetcher)
-  if (stored && !isStale(stored, now)) return stored
-  const fresh = await reconcileOnDemand(account, fetcher, now).catch((error: unknown) => {
-    // A stale snapshot is still the best answer while Stripe or the lease is unavailable; a missing one is not.
-    if (stored) return undefined
-    throw error
-  })
-  if (fresh) return fresh
-  if (stored) return stored
-  for (let waited = 0; waited < MISSING_WAIT_MS; waited += MISSING_STEP_MS) {
-    await new Promise((resolve) => setTimeout(resolve, MISSING_STEP_MS))
-    const written = await readSnapshot(account, fetcher)
-    if (written) return written
-  }
-  return undefined
-}
-
-/**
- * Reconciles the account from Stripe now, unless that already happened in the last minute: `reconcile:<id>` is taken
- * with SET NX for 60 s, so a hundred requests at a period's end make one Stripe call, and an account without a plan
- * at most one a minute. Undefined when another request holds the minute.
- */
-export async function reconcileOnDemand(
-  account: string,
-  fetcher: typeof fetch = fetch,
-  now = Date.now(),
-): Promise<EntitlementSnapshot | undefined> {
-  const taken = await persistentStore(
-    ["SET", codiumKey("reconcile", account), String(now), "NX", "PX", SNAPSHOT_RECHECK_MS],
-    fetcher,
-  )
-  if (taken !== "OK") return undefined
-  return reconcileModelPlanAccount(account, fetcher, now, { source: "request" })
-}
-
-const PAYMENT_MESSAGES = {
-  payment_failed: "Your last Vector Codium payment did not go through. Update your card to keep using Vector Codium.",
-  action_required: "Your bank needs you to confirm your Vector Codium payment.",
-  payment_pending: "Your Vector Codium renewal has not been paid yet. Update your card to keep using Vector Codium.",
-} as const
-const ACTIONS = {
-  payment_failed: "update-card",
-  action_required: "confirm-payment",
-  payment_pending: "update-card",
-} as const
+// `readEntitlement` (the read rules) lives beside `reconcileOnDemand` in model-plan-account.ts, so the pool's own holds
+// read the snapshot by the same rules without an import cycle.
+export { isStale, meterKey, onEntitlementChange, readEntitlement, reconcileOnDemand, requireUsableSnapshot }
 
 /**
  * The account's snapshot when it may use `perk` now ("codium" for model access alone), or the refusal:
@@ -110,38 +46,7 @@ export async function requireEntitlement(
 ): Promise<EntitlementSnapshot> {
   if (perk === "codium" && (await readSwitch("codium", fetcher, { now })) !== "on")
     throw new ApiError(503, "MODEL_PLANS_DISABLED", "Vector Codium is temporarily unavailable.")
-  const snapshot = await readEntitlement(account, fetcher, now)
-  if (!snapshot || snapshot.state === "none")
-    throw new ApiError(402, "MODEL_PLAN_REQUIRED", "Choose a Vector Codium plan to use this.")
-  if (snapshot.state === "ended") {
-    if (snapshot.reason === "closing")
-      throw new ApiError(409, "MODEL_PLAN_ACCOUNT_CLOSING", "This account is being deleted. Vector Codium is closed.")
-    throw new ApiError(402, "MODEL_PLAN_REQUIRED", "Your Vector Codium plan has ended. Choose a plan to use this.", {
-      detail: snapshot.reason ? { reason: snapshot.reason } : undefined,
-    })
-  }
-  if (snapshot.state === "paused") {
-    const reason =
-      snapshot.reason === "action_required" || snapshot.reason === "payment_pending"
-        ? snapshot.reason
-        : "payment_failed"
-    throw new ApiError(402, "MODEL_PLAN_PAYMENT_REQUIRED", PAYMENT_MESSAGES[reason], {
-      detail: { reason, action: ACTIONS[reason] },
-    })
-  }
-  if (snapshot.state === "frozen")
-    throw new ApiError(
-      403,
-      "MODEL_PLAN_BLOCKED",
-      snapshot.reason === "disputed"
-        ? "Vector Codium is on hold for this account while a payment dispute is open."
-        : "Vector Codium is on hold for this account. Contact Vector support.",
-      { detail: { reason: snapshot.reason ?? "owner" } },
-    )
-  if (snapshot.state === "renewing" && now >= snapshot.periodEnd + renewalGraceMinutes() * 60_000)
-    throw new ApiError(503, "MODEL_PLAN_RENEWING", "Your Vector Codium plan is renewing. Try again in a moment.", {
-      retryAfterSeconds: 30,
-    })
+  const snapshot = requireUsableSnapshot(await readEntitlement(account, fetcher, now), now)
   if (perk !== "codium" && !includes(snapshot.caps, perk)) {
     const plan = cheapestPlanWith(perk)
     throw new ApiError(403, "CODIUM_PERK_REQUIRED", "Your Vector Codium plan does not include this.", {

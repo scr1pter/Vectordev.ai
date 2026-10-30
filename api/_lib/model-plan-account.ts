@@ -11,6 +11,12 @@ import type { AccountUser } from "./account.js"
 import { withBillingMutation } from "./billing-lock.js"
 import { requireCodiumSales, reserveCodiumSale } from "./codium-funding.js"
 import { writeRampOwed } from "./codium-ramp.js"
+import {
+  initializeFreshModelPool,
+  modelSpendStale,
+  modelSpendUnavailable,
+  monthlyShortfall,
+} from "./codium-spend-ledger.js"
 import { readSwitch } from "./codium-switches.js"
 import { syncCodiumCollection } from "./codium-collection.js"
 import {
@@ -40,8 +46,11 @@ import {
 import "./codium-provisioners.js"
 import {
   buildSnapshot,
+  isStale,
   readSnapshot,
   readSnapshotForWrite,
+  requireUsableSnapshot,
+  SNAPSHOT_RECHECK_MS,
   writeSnapshot,
   type SnapshotFacts,
   type SnapshotSource,
@@ -49,17 +58,18 @@ import {
 import {
   DEBIT_RETRY_MS,
   DEBITS_KEEP_MS,
+  debitHoldTicket,
   dueDebitApplies,
   EMPTY_LEDGER,
   expectedLimitMicro,
   finishDebitApply,
+  holdMember,
   isPoolPurpose,
   limitMatches,
   limitUsd,
   markDebitsApplied,
   MAX_POOL_HOLD_MS,
   microToUsd,
-  MODEL_HOLD_MS,
   placeHold,
   poolFigures,
   poolShareUsed,
@@ -68,12 +78,12 @@ import {
   readPoolLedger,
   recordDebit,
   releaseHold,
-  settleHold,
   usdToMicro,
   usdToMicroCeil,
   validDebitRef,
   validRunId,
   type PoolBase,
+  type PoolFunding,
   type PoolPurpose,
   type PoolTicket,
 } from "./codium-pool.js"
@@ -100,6 +110,14 @@ const Checkout = Schema.Struct({
 })
 const Micro = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))
 const CarryOrigin = Schema.Struct({ charge: Schema.String, micro: Micro })
+const KeyCreation = Schema.Struct({
+  nonce: Schema.String,
+  subscription: Schema.String,
+  start: Schema.Number,
+  end: Schema.Number,
+  limitMicro: Micro,
+  expiresAt: Schema.String,
+})
 /**
  * What holds an account's Codium regardless of what Stripe says is paid (contract §4.3, §4.4): disputes still open on
  * any of its charges, by charge, with Stripe's status and when Vector first saw it; charges with an early-fraud
@@ -182,6 +200,17 @@ const Account = Schema.Struct({
       confirmationSent: Schema.optional(Schema.Boolean),
     }),
   ),
+  // The barrier every key replacement saves before it reads any source balance (renewal, upgrade, a downgrade taking
+  // effect). It changes the private record that HOLD and ADMIT fence on, so a hold or admission observed earlier can
+  // never land after the source ledger was read; the save that publishes the new key clears it. A replacement whose
+  // period stops governing first is abandoned by the same-period path (provisionMonthlyKey).
+  transition: Schema.optional(Schema.Struct({ subscription: Schema.String, start: Schema.Number, at: Schema.Number })),
+  // Persisted before creating an A17 pool; the nonce cannot refer to a pre-A17/exposed key.
+  keyCreation: Schema.optional(KeyCreation),
+  // Creations whose replacement was abandoned before its key was published (`abandonReplacement`). Their key may exist
+  // with its answer lost, so a later creation for the same period reuses the nonce and OpenRouter's idempotent create
+  // answers that key instead of making a second funded one. Neither the fence nor the credential reads this field.
+  abandonedCreations: Schema.optional(Schema.Array(KeyCreation)),
   // Persisted before disabling the old key or creating its replacement: a retry keeps exactly the same carry.
   upgrade: Schema.optional(
     Schema.Struct({
@@ -207,6 +236,9 @@ const Account = Schema.Struct({
     Schema.Struct({
       hash: Schema.String,
       provisioning: Schema.optional(Schema.Boolean),
+      spendGenesis: Schema.optional(
+        Schema.Struct({ nonce: Schema.String, state: Schema.Literals(["pending", "ready"]) }),
+      ),
       encrypted: Schema.String,
       subscription: Schema.String,
       start: Schema.Number,
@@ -233,6 +265,8 @@ const Account = Schema.Struct({
           visibleOrigins: Schema.optional(Schema.Array(CarryOrigin)),
           fromVisibleLimitMicro: Schema.optional(Micro),
           fullMicro: Schema.optional(Micro),
+          // Set by the first completed true-up: `fullMicro` is then settled, not an upper bound (settledCarryOrigins).
+          trued: Schema.optional(Schema.Boolean),
           rampUntil: Schema.optional(Schema.Number),
           revokedOrigins: Schema.optional(Schema.Array(Schema.String)),
         }),
@@ -414,6 +448,58 @@ export type ReconcileHint =
 const DAY_MS = 86_400_000
 
 /**
+ * Reconciles the account from Stripe now, unless that already happened in the last minute: `reconcile:<id>` is taken
+ * with SET NX for 60 s, so a hundred requests at a period's end make one Stripe call, and an account without a plan
+ * at most one a minute. Undefined when another request holds the minute.
+ */
+export async function reconcileOnDemand(
+  account: string,
+  fetcher: typeof fetch = fetch,
+  now = Date.now(),
+): Promise<EntitlementSnapshot | undefined> {
+  const taken = await persistentStore(
+    ["SET", codiumKey("reconcile", account), String(now), "NX", "PX", SNAPSHOT_RECHECK_MS],
+    fetcher,
+  )
+  if (taken !== "OK") return undefined
+  return reconcileModelPlanAccount(account, fetcher, now, { source: "request" })
+}
+
+// While another request reconciles an account that has no snapshot yet, wait this long, in steps, for its answer.
+const MISSING_WAIT_MS = 2_000
+const MISSING_STEP_MS = 200
+
+/**
+ * The account's snapshot, by the read rules (contract §4.3; codium-entitlements.ts re-exports it): a fresh one as
+ * stored; a stale one (over 6 hours old, past its period, or a `none` or `renewing` one over a minute old) served after
+ * one reconcile, or as it is when another request is already reconciling or Stripe cannot be read; a missing one
+ * reconciled on demand. Undefined only when there is none and the reconcile that would write it is running elsewhere
+ * and did not finish in time. A snapshot from the other Stripe mode is refused (503). It lives beside
+ * `reconcileOnDemand` so `holdPool` reads by the same rules as chat without an import cycle.
+ */
+export async function readEntitlement(
+  account: string,
+  fetcher: typeof fetch = fetch,
+  now = Date.now(),
+): Promise<EntitlementSnapshot | undefined> {
+  const stored = await readSnapshot(account, fetcher)
+  if (stored && !isStale(stored, now)) return stored
+  const fresh = await reconcileOnDemand(account, fetcher, now).catch((error: unknown) => {
+    // A stale snapshot is still the best answer while Stripe or the lease is unavailable; a missing one is not.
+    if (stored) return undefined
+    throw error
+  })
+  if (fresh) return fresh
+  if (stored) return stored
+  for (let waited = 0; waited < MISSING_WAIT_MS; waited += MISSING_STEP_MS) {
+    await new Promise((resolve) => setTimeout(resolve, MISSING_STEP_MS))
+    const written = await readSnapshot(account, fetcher)
+    if (written) return written
+  }
+  return undefined
+}
+
+/**
  * Brings the account in line with Stripe's current state (contract §4.3, §4.4) and writes its entitlement snapshot,
  * which every service reads instead of calling Stripe. It reads the account's subscriptions and the disputes and
  * fraud warnings that hold it, picks the governing subscription, maps it to a state, records the payment history, and
@@ -482,7 +568,7 @@ export async function reconcileModelPlanAccount(
       if (standing.state === "active" && standing.governing?.paid)
         await provisionMonthlyKey(id, updated, standing.governing.paid, fetcher, verify, now)
       else if (previous)
-        await convergeKey(id, updated, previous, verify, fetcher, {
+        await convergeKey(id, await abandonReplacement(id, updated, verify, fetcher, now), previous, verify, fetcher, {
           expiresAt: keyExpiresAt(standing.governing!.end),
         })
       if (standing.duplicates.length)
@@ -1528,94 +1614,85 @@ export async function modelPlanStatus(id: string, fetcher: typeof fetch = fetch,
 }
 
 /**
- * The key that pays for one request, with the request's largest possible cost held against its pool until release.
- * A key's usage only grows when a request finishes, so without the hold parallel requests would each pass the same
- * stale balance and spend past it, at Vector's cost.
+ * The key of the account's paid period, provisioned or repaired under the lease when it needs it, for checks and the
+ * account's own maintenance. It holds nothing: model requests are admitted and held by ADMIT (model-plan-admit.ts) and
+ * every other pool charge by `holdPool`, both against the durable committed floor. With `requiredCredits`, the pool
+ * must have that much available now, by the same figure HOLD and ADMIT use (M3); otherwise the one shortfall answer.
  */
 export async function modelPlanCredential(
   id: string,
   fetcher: typeof fetch = fetch,
   now = Date.now(),
   requiredCredits = 0,
-  options: { purpose?: PoolPurpose; runId?: string } = {},
 ) {
   if ((await readSwitch("codium", fetcher, { now })) !== "on")
     throw new ApiError(503, "MODEL_PLANS_DISABLED", "Vector Codium is temporarily unavailable.")
   // A request's largest cost, in whole micro-dollars and never rounded down.
   const required = requiredCredits > 0 ? usdToMicroCeil(requiredCredits) : 0
-  return holdCredits(
-    id,
-    await monthlyCredential(id, fetcher, now, required),
-    required,
-    now,
-    fetcher,
-    monthlyShortfall(),
-    { purpose: options.purpose ?? "chat", run: options.runId },
-  )
-}
-
-// A pool that is used up, too small for the model's largest request, or held by requests still running gets one
-// answer. A different answer for each would tell a client which side of a threshold its balance is on, and with the
-// share of a plan it has used, the allowance and so the markup. Codium sells monthly plans only, so the answer offers
-// nothing to buy, and like every answer it names no amount and no credits (P1).
-function monthlyShortfall() {
-  return new ApiError(
-    402,
-    "MODEL_PLAN_EXHAUSTED",
-    "This month's Vector Codium usage cannot cover this model's largest request right now. Wait for running requests to finish, or choose a lighter model. Your Codium usage renews each billing period.",
-  )
+  const funding = await monthlyCredential(id, fetcher, now, required)
+  if (required > 0) {
+    const ledger = await readPoolLedger(id, funding.pool, now, fetcher)
+    const figures = poolFigures(
+      { creditsMicro: funding.totalMicro, carryMicro: 0 },
+      funding.totalMicro - funding.baseMicro,
+      ledger,
+    )
+    if (figures.availableMicro <= 0 || figures.availableMicro < required) throw monthlyShortfall()
+  }
+  return { key: funding.key }
 }
 
 /**
- * Holds a request's largest cost against its pool (codium-pool.ts HOLD): one member of the pool's held set,
- * `<ticket>:<purpose>:<runId or ->:<micro>`, scored by when it lapses, so a hold whose request never settles (an answer
- * that broke off or was cancelled, or a function killed at its time limit) frees itself once the request could no
- * longer run. The script takes the applied debits and every live hold off the pool's base in the same step.
+ * The credential for one model admission or pool hold, from the entitlement snapshot alone (M4: no Stripe call on a
+ * hot path). The snapshot names the paid period; the account's ready key for exactly that period is read once from
+ * OpenRouter. Undefined when that key is missing, still being provisioned or replaced, or needs a repair: only
+ * reconcile (or the account's lease) provisions and repairs. The private record is read before the provider, and is
+ * what HOLD and ADMIT fence on, so any billing write after this observation makes the hold or admission stale.
  */
-async function holdCredits(
+export async function snapshotPoolCredential(
   id: string,
-  funding: { key: string; pool: string; baseMicro: number },
-  requiredMicro: number,
-  now: number,
-  fetcher: typeof fetch,
-  refusal: ApiError,
-  hold: { purpose: PoolPurpose; run?: string },
-) {
-  // Provisioning and checks without a request to pay for hold nothing.
-  if (requiredMicro <= 0) return { key: funding.key, release: async (_charge?: number) => {} }
-  const ticket = await placeHold(
-    {
-      account: id,
-      pool: funding.pool,
-      baseMicro: funding.baseMicro,
-      requiredMicro,
-      purpose: hold.purpose,
-      run: hold.run,
-      ttlMs: MODEL_HOLD_MS,
-      now,
-    },
-    fetcher,
+  snapshot: EntitlementSnapshot,
+  fetcher: typeof fetch = fetch,
+  now = Date.now(),
+): Promise<(PoolFunding & { key: string }) | undefined> {
+  const raw = await persistentStore(["GET", accountKey(id)], fetcher)
+  if (raw === null) return undefined
+  const account = decodeModelPlanAccount(raw)
+  if (account.closing)
+    throw new ApiError(409, "MODEL_PLAN_ACCOUNT_CLOSING", "This account is being deleted. Model access is closed.")
+  const held = riskState(account)
+  if (held) throw riskRefusal(held)
+  const key = account.key
+  const end = snapshot.periodEnd / 1000
+  // The same predicate the shared Lua fence applies (codium-spend-ledger.ts), so a refusal here and there agree.
+  if (
+    snapshot.account !== id ||
+    (snapshot.state !== "active" && snapshot.state !== "renewing") ||
+    (snapshot.state === "active" && now >= snapshot.periodEnd) ||
+    (snapshot.state === "renewing" && now >= snapshot.periodEnd + renewalGraceMinutes() * 60_000) ||
+    !key ||
+    account.transition !== undefined ||
+    account.upgrade !== undefined ||
+    account.keyCreation !== undefined ||
+    (account.ownerEnd !== undefined && !account.ownerEnd.done) ||
+    key.provisioning ||
+    key.revoked !== undefined ||
+    key.subscription !== snapshot.subscription ||
+    key.start * 1000 !== snapshot.periodStart ||
+    key.end !== end
   )
-  if (!ticket) throw refusal
-  return {
-    key: funding.key,
-    /** Pass what the request was charged once it reached the provider, in dollars, or nothing when it never did. */
-    release: async (charge?: number) => {
-      if (charge === undefined) return releaseHold(ticket, fetcher)
-      await settleHold(
-        ticket,
-        Number.isFinite(charge) ? usdToMicroCeil(Math.max(0, charge)) : ticket.micro,
-        Date.now(),
-        fetcher,
-      )
-    },
-  }
+    return undefined
+  // A key from before the A17 ledger has no trusted genesis, and a zero is never assumed for it: final, not a retry.
+  if (key.spendGenesis?.state !== "ready" || key.creditsMicro === undefined) throw modelSpendUnavailable()
+  const ready = await readyKey(id, key, end, fetcher)
+  return ready && { ...ready, accountRecord: String(raw) }
 }
 
 /**
  * The paid month as the account's screens show it, in dollars that never leave the server: `credits` is the pool's
- * total (credits + carry), `used` what was spent (usage + debits), `remaining` what is left of the month, `available`
- * what a new request could still hold (M3), and `shareUsed` the whole-percent share spent.
+ * total (credits + carry), `used` what was spent (model spend, never below the committed floor, plus debits),
+ * `remaining` what is left of the month, `available` what a new request could still hold (M3, as HOLD and ADMIT
+ * compute it), and `shareUsed` the whole-percent share spent.
  */
 async function monthlyStatus(id: string, fetcher: typeof fetch = fetch, now = Date.now()) {
   const account = await readModelPlanAccount(id, fetcher)
@@ -1669,9 +1746,10 @@ async function monthlyStatus(id: string, fetcher: typeof fetch = fetch, now = Da
 }
 
 /**
- * The key that pays for a month's request and what its pool holds: `baseMicro` is credits + carry − usage, from which
- * the hold takes the applied debits and the live holds. Normal parallel requests only read the account and the key;
- * provisioning, repairs and debits are serialized on the account's lease.
+ * The key of the account's paid period and what its pool holds: `baseMicro` is credits + carry − usage. Normal parallel
+ * calls only read the account and the key; provisioning, repairs and debits are serialized on the account's lease.
+ * Whether the pool can pay is decided only by HOLD/ADMIT's one figure (M3); `requiredMicro` only stops a key being
+ * created for a request no month of this plan could ever pay for.
  */
 async function monthlyCredential(id: string, fetcher: typeof fetch, now: number, requiredMicro: number) {
   // Normal parallel agent turns only read the existing entitlement/key. Serialize
@@ -1683,13 +1761,14 @@ async function monthlyCredential(id: string, fetcher: typeof fetch, now: number,
   // provisioning below never switches its key back on (M5).
   const held = existing && riskState(existing)
   if (held) throw riskRefusal(held)
-  if (existing) {
+  // A key replacement or plan change in progress resumes under the lease, never on the fast path.
+  if (existing && !existing.transition && !existing.upgrade && !existing.keyCreation) {
     const listed = await subscriptions(existing.customer, fetcher)
     const paid = governingPaid(listed, id, now)
     // A renewal still being collected keeps the month that just ended, and its key, serving (M11).
     const renewing = paid ? undefined : renewingPeriod(id, existing, listed, now)
     if (renewing) {
-      const ready = await readyKey(id, renewing.key, renewing.governing.end, requiredMicro, fetcher)
+      const ready = await readyKey(id, renewing.key, renewing.governing.end, fetcher)
       if (ready) return ready
     } else {
       if (!paid && !existing.key)
@@ -1708,7 +1787,7 @@ async function monthlyCredential(id: string, fetcher: typeof fetch, now: number,
           )
       }
       if (paid && existing.key?.subscription === paid.id && existing.key.start === paid.start) {
-        const ready = await readyKey(id, existing.key, paid.end, requiredMicro, fetcher)
+        const ready = await readyKey(id, existing.key, paid.end, fetcher)
         if (ready) return ready
       }
     }
@@ -1728,14 +1807,17 @@ async function monthlyCredential(id: string, fetcher: typeof fetch, now: number,
       if (renewing) {
         // The previous period's key, brought back to what its pool says and to its grace-extended expiry.
         const end = renewing.governing.end
-        const converged = await convergeKey(id, account, renewing.key, verify, fetcher, {
+        const resumed = await abandonReplacement(id, account, verify, fetcher, now)
+        const converged = await convergeKey(id, resumed, renewing.key, verify, fetcher, {
           expiresAt: keyExpiresAt(end),
         })
-        requireMonthlyCredits(converged.limitMicro - converged.usageMicro, requiredMicro)
         return {
           key: revealModelPlanKey(renewing.key.encrypted, `${id}:${renewing.key.subscription}:${renewing.key.start}`),
           pool: renewing.key.hash,
           baseMicro: converged.creditsMicro + converged.carryMicro - converged.usageMicro,
+          totalMicro: converged.creditsMicro + converged.carryMicro,
+          subscription: renewing.key.subscription,
+          start: renewing.key.start,
           end,
         }
       }
@@ -1756,11 +1838,13 @@ async function monthlyCredential(id: string, fetcher: typeof fetch, now: number,
         : { creditsMicro: usdToMicro(codiumKeyLimitUsd(paid.plan.credits)), carryMicro: 0 }
       if (most.creditsMicro + most.carryMicro < requiredMicro) throw monthlyShortfall()
       const funding = await provisionMonthlyKey(id, account, paid, fetcher, verify, now)
-      requireMonthlyCredits(funding.limitMicro - funding.usageMicro, requiredMicro)
       return {
         key: funding.key,
         pool: funding.pool,
         baseMicro: funding.creditsMicro + funding.carryMicro - funding.usageMicro,
+        totalMicro: funding.creditsMicro + funding.carryMicro,
+        subscription: paid.id,
+        start: paid.start,
         end: paid.end,
       }
     },
@@ -1771,9 +1855,10 @@ async function monthlyCredential(id: string, fetcher: typeof fetch, now: number,
 /**
  * A period's key as it is, when it needs no repair: switched on, at the limit the pool last set (M1, within half a
  * cent), never resetting, counting the buyer's own keys, and expiring at the period's end plus the grace. Undefined when
- * anything there differs, which the lease's path repairs. Throws the shortfall when the pool cannot pay for the request.
+ * anything there differs, which the lease's path repairs. It decides nothing about what the pool can pay: HOLD and
+ * ADMIT do, against the committed floor as well as this usage (M3).
  */
-async function readyKey(id: string, key: AccountKey, end: number, requiredMicro: number, fetcher: typeof fetch) {
+async function readyKey(id: string, key: AccountKey, end: number, fetcher: typeof fetch) {
   if (key.provisioning) return undefined
   const data = (await openRouterManagement(`/${encodeURIComponent(key.hash)}`, undefined, fetcher)).data
   const pool = keyPool(key)
@@ -1790,11 +1875,13 @@ async function readyKey(id: string, key: AccountKey, end: number, requiredMicro:
   )
     return undefined
   const usage = usdToMicro(data.usage)
-  requireMonthlyCredits(pool.limitMicro - usage, requiredMicro)
   return {
     key: revealModelPlanKey(key.encrypted, `${id}:${key.subscription}:${key.start}`),
     pool: key.hash,
     baseMicro: pool.creditsMicro + pool.carryMicro - usage,
+    totalMicro: pool.creditsMicro + pool.carryMicro,
+    subscription: key.subscription,
+    start: key.start,
     end,
   }
 }
@@ -1827,6 +1914,8 @@ async function provisionMonthlyKey(
   // M11: the key outlives its period by the renewal grace; a paid renewal replaces it, anything else switches it off.
   const expires = keyExpiresAt(paid.end)
   if (account.key?.subscription === paid.id && account.key.start === paid.start) {
+    account = await abandonReplacement(id, account, verify, fetcher, now)
+    account = await initializePendingSpend(id, account, verify, fetcher)
     account = await refreshCarry(id, account, fetcher, verify)
     await finishUpgrade(id, account, paid, fetcher, verify, now)
     const desiredCredits = monthlyCreditsMicro(account, paid, now)
@@ -1847,6 +1936,12 @@ async function provisionMonthlyKey(
       carryMicro: converged.carryMicro,
       limitMicro: converged.limitMicro,
     }
+  }
+  // The barrier goes first, before anything below observes the source key's balances (handoff 8.7 item 1).
+  if (account.transition?.subscription !== paid.id || account.transition.start !== paid.start) {
+    account = { ...account, transition: { subscription: paid.id, start: paid.start, at: now } }
+    await verify()
+    await saveAccount(id, account, fetcher)
   }
   account = await refreshCarry(id, account, fetcher, verify)
   const upgrade = await prepareUpgrade(id, account, paid, fetcher, verify, now)
@@ -1887,18 +1982,41 @@ async function provisionMonthlyKey(
     fetcher,
     "raise",
   )
+  const forPaid = (creation: typeof KeyCreation.Type) =>
+    creation.subscription === paid.id && creation.start === paid.start && creation.end === paid.end
+  // A creation abandoned for this same period may have made its key with the answer lost: its nonce (and request) is
+  // reused, so OpenRouter's idempotent create answers that key instead of making a second funded one.
+  const creation = (account.keyCreation && forPaid(account.keyCreation) ? account.keyCreation : undefined) ??
+    account.abandonedCreations?.find(forPaid) ?? {
+      nonce: randomUUID(),
+      subscription: paid.id,
+      start: paid.start,
+      end: paid.end,
+      limitMicro,
+      expiresAt: expires,
+    }
+  if (account.keyCreation !== creation) {
+    // A creation for another period replaced here is kept aside as an abandoned one is, until its key would expire.
+    const abandoned = [
+      ...(account.abandonedCreations ?? []),
+      ...(account.keyCreation ? [account.keyCreation] : []),
+    ].filter((entry) => entry !== creation && Date.parse(entry.expiresAt) > now)
+    account = { ...account, keyCreation: creation, abandonedCreations: abandoned.length ? abandoned : undefined }
+    await verify()
+    await saveAccount(id, account, fetcher)
+  }
   const result = await openRouterManagement(
     "",
     {
       name: openRouterKeyName([id, paid.id, paid.start]),
-      limit: limitUsd(limitMicro),
+      limit: limitUsd(creation.limitMicro),
       limit_reset: null,
       include_byok_in_limit: true,
-      expires_at: expires,
+      expires_at: creation.expiresAt,
     },
     fetcher,
     "POST",
-    `vector-codium-key-${stripeMode()}-${digest(context)}`,
+    `vector-codium-pool-v1-${stripeMode()}-${creation.nonce}`,
   )
   if (
     !stripeRecord(result.data) ||
@@ -1909,11 +2027,14 @@ async function provisionMonthlyKey(
     throw new ApiError(503, "MODEL_PLAN_KEY_INVALID", "Your model allowance could not be created.")
   const updated = {
     ...account,
+    transition: undefined,
     upgrade: undefined,
+    keyCreation: undefined,
     key: {
       hash: result.data.hash,
       // The fast credential path must wait for the lease until carry has been revalidated and its limit converged.
       provisioning: true,
+      spendGenesis: { nonce: creation.nonce, state: "pending" as const },
       encrypted: protectModelPlanKey(result.key, context),
       subscription: paid.id,
       start: paid.start,
@@ -1922,11 +2043,12 @@ async function provisionMonthlyKey(
       creditsMicro,
       fullCreditsMicro,
       ...(carried ? { carry: carried } : {}),
-      limitMicro,
+      limitMicro: creation.limitMicro,
     },
   }
   await saveAccount(id, updated, fetcher)
-  const checked = await refreshCarry(id, updated, fetcher, verify)
+  const initialized = await initializePendingSpend(id, updated, verify, fetcher)
+  const checked = await refreshCarry(id, initialized, fetcher, verify)
   const converged = await convergeKey(id, checked, checked.key!, verify, fetcher)
   await finishUpgrade(id, converged.account, paid, fetcher, verify, now)
   const published = await publishKey(id, converged.account, verify, fetcher)
@@ -1939,6 +2061,69 @@ async function provisionMonthlyKey(
     carryMicro: converged.carryMicro,
     limitMicro: converged.limitMicro,
   }
+}
+
+/**
+ * Every replacement intent is cleared by the save that publishes its new key, so one still present while the current
+ * key's own period governs (or is renewing) belongs to a replacement whose target stopped governing first: a refunded
+ * upgrade, a reversed renewal. It created no key anyone holds and granted no carry. Clearing it lets the current key
+ * serve again (M11, M12: a paying user is never locked out); the caller's converge re-enables that key. Its key
+ * creation is kept aside until that key would have expired: OpenRouter may have made the key with the answer lost, and
+ * the same period's next creation reuses the nonce rather than making a second key.
+ */
+async function abandonReplacement(
+  id: string,
+  account: Account,
+  verify: () => Promise<void>,
+  fetcher: typeof fetch,
+  now: number,
+) {
+  if (!account.transition && !account.upgrade && !account.keyCreation) return account
+  const kept = [...(account.abandonedCreations ?? []), ...(account.keyCreation ? [account.keyCreation] : [])].filter(
+    (entry) => Date.parse(entry.expiresAt) > now,
+  )
+  const abandoned = {
+    ...account,
+    transition: undefined,
+    upgrade: undefined,
+    keyCreation: undefined,
+    abandonedCreations: kept.length ? kept : undefined,
+  }
+  await verify()
+  await saveAccount(id, abandoned, fetcher)
+  return abandoned
+}
+
+/** Only a nonce from the fresh creation path may establish zero spend; lost/corrupt ready ledgers never reset. */
+async function initializePendingSpend(
+  id: string,
+  account: Account,
+  verify: () => Promise<void>,
+  fetcher: typeof fetch,
+) {
+  const key = account.key
+  if (!key || key.spendGenesis?.state !== "pending") return account
+  await verify()
+  await initializeFreshModelPool(
+    {
+      account: id,
+      pool: key.hash,
+      subscription: key.subscription,
+      start: key.start,
+      end: key.end,
+      creation: key.spendGenesis.nonce,
+    },
+    fetcher,
+  )
+  await verify()
+  const initialized = await readModelPlanAccount(id, fetcher)
+  if (
+    initialized?.key?.hash !== key.hash ||
+    initialized.key.spendGenesis?.state !== "ready" ||
+    initialized.key.spendGenesis.nonce !== key.spendGenesis.nonce
+  )
+    throw new ApiError(503, "MODEL_PLAN_POOL_UNAVAILABLE", "Your model allowance could not be verified.")
+  return initialized
 }
 
 /** Only a fully checked key is visible to concurrent model admissions. */
@@ -2094,12 +2279,6 @@ export async function auditModelPlanKey(id: string, fetcher: typeof fetch = fetc
   )
 }
 
-// `available` is the pool's credits and carry less its applied debits and usage; the hold itself then takes the live
-// holds off as well (M3).
-function requireMonthlyCredits(availableMicro: number, requiredMicro: number) {
-  if (availableMicro <= 0 || availableMicro < requiredMicro) throw monthlyShortfall()
-}
-
 /** A hold on an account's pool for a charge made outside OpenRouter: a hosted block, or any other pool charge. */
 export type PoolHold = {
   ticket: string
@@ -2117,15 +2296,34 @@ export type PoolHold = {
 
 /**
  * Holds `usd` of an account's pool for `ttlMs` for a charge made outside OpenRouter (§4.7 `holdPool`): the same held
- * set and the same available figure as model requests (M2, M3), so a hosted block can never spend what a request is
- * holding, nor the other way round. Refused with the same answer as any other shortfall.
+ * set, the same fence and the same available figure as model admissions (M2, M3), so a hosted block can never spend
+ * what a request is holding, nor the other way round. Refused with the same answer as any other shortfall.
+ *
+ * It reads no Stripe state on its hot path (M4): the period comes from the entitlement snapshot, the caller's
+ * (`snapshot`, whose version the fence then also requires) or the stored one read by `readEntitlement`'s rules (a
+ * missing or stale one is reconciled on demand, as chat's is), and only reconcile provisions or repairs the key. A
+ * snapshot whose plan state cannot use Codium gets `requireEntitlement`'s final answer (402, 403, 409), not a retry. A
+ * key that is not ready gets at most one on-demand reconcile (once a minute per account), as chat does; a reconcile
+ * that changed the snapshot means the caller reads it again (503 `MODEL_PLAN_RENEWING`). The hold's lifetime starts
+ * when it is placed, after every credential read, not before: the clock is read again then. There is deliberately no
+ * fixed `now` option, because a timestamp taken before those awaits would date the hold's deadline and the fence's
+ * period check in the past; `clock` is a test seam and must return the current time on every call.
+ *
+ * Producers (WP A51 and later) must hold their worst case and never settle above it: a charge settled above its hold
+ * spends from the pool the hold was placed on, and a second upgrade inside the carry true-up delay counts a live hold
+ * as spent at its held amount. The day, Brain and run shares are not enforced here (codium-a17-admission-notes.md).
  */
 export async function holdPool(
   account: string,
   usd: number,
   ttlMs: number,
   purpose: PoolPurpose,
-  options: { runId?: string; fetcher?: typeof fetch; now?: number } = {},
+  options: {
+    runId?: string
+    fetcher?: typeof fetch
+    clock?: () => number
+    snapshot?: EntitlementSnapshot
+  } = {},
 ): Promise<PoolHold> {
   if (
     !Number.isFinite(usd) ||
@@ -2138,19 +2336,31 @@ export async function holdPool(
   )
     throw new ApiError(500, "MODEL_PLAN_POOL_INVALID", "This Codium charge could not be held.")
   const fetcher = options.fetcher ?? fetch
-  const now = options.now ?? Date.now()
+  const clock = options.clock ?? Date.now
   const required = usdToMicroCeil(usd)
-  const funding = await monthlyCredential(account, fetcher, now, required)
+  const snapshot = requireUsableSnapshot(
+    options.snapshot ?? (await readEntitlement(account, fetcher, clock())),
+    clock(),
+  )
+  const funding =
+    (await snapshotPoolCredential(account, snapshot, fetcher, clock())) ??
+    (await reconcileOnDemand(account, fetcher, clock()).then((fresh) =>
+      fresh && requireUsableSnapshot(fresh, clock()).version === snapshot.version
+        ? snapshotPoolCredential(account, fresh, fetcher, clock())
+        : undefined,
+    ))
+  if (!funding) throw modelSpendStale()
+  const now = clock()
   const ticket = await placeHold(
     {
       account,
-      pool: funding.pool,
-      baseMicro: funding.baseMicro,
+      funding,
       requiredMicro: required,
       purpose,
       run: options.runId,
       ttlMs,
       now,
+      ...(options.snapshot ? { version: options.snapshot.version } : {}),
     },
     fetcher,
   )
@@ -2342,15 +2552,18 @@ async function prepareUpgrade(
     throw new ApiError(503, "MODEL_PLAN_KEY_INVALID", "Your remaining allowance could not be verified.")
   const ledger = await readPoolLedger(id, key.hash, now, fetcher)
   const fromVisibleLimitMicro = expectedLimitMicro(keyPool(key), ledger.appliedMicro)
-  const fullBase = (key.fullCreditsMicro ?? keyPool(key).creditsMicro) + carryPotential(key.carry)
-  const fromLimitMicro = Math.max(0, fullBase - ledger.appliedMicro)
-  const micro = carryMicro(fromVisibleLimitMicro, usdToMicro(data.usage), ledger.heldMicro)
-  const fullMicro = carryMicro(fromLimitMicro, usdToMicro(data.usage))
   // Keep every paid origin across repeated upgrades: a later reversal cannot be laundered through another plan.
   const sourceOrigins = [
     { charge: before.charge, micro: key.fullCreditsMicro ?? keyPool(key).creditsMicro },
-    ...carryPotentialOrigins(key.carry),
+    ...(await settledCarryOrigins(id, key, now, fetcher)),
   ]
+  const fromLimitMicro = Math.max(0, sourceOrigins.reduce((sum, origin) => sum + origin.micro, 0) - ledger.appliedMicro)
+  // The source's model spend is the larger of its lagging usage and the committed floor, never their sum. Live holds
+  // and abandoned reservations (unknown outcomes) are not carried; the true-up returns what they did not spend. So
+  // `fullMicro` is an upper bound (deferred allowance stays funded) until this carry's own true-up settles it.
+  const spent = Math.max(usdToMicro(data.usage), ledger.committedMicro)
+  const micro = carryMicro(fromVisibleLimitMicro, spent, ledger.heldMicro + ledger.abandonedMicro)
+  const fullMicro = carryMicro(fromLimitMicro, spent, ledger.abandonedMicro)
   const visibleOrigins = [
     { charge: before.charge, micro: keyPool(key).creditsMicro },
     ...(key.carry?.origins ?? (key.carry?.micro ? [{ charge: key.carry.fromCharge, micro: key.carry.micro }] : [])),
@@ -2426,15 +2639,65 @@ function allocateCarry(micro: number, origins: readonly { charge: string; micro:
   })
 }
 
-function carryPotentialOrigins(carried: AccountKey["carry"]) {
-  if (!carried) return []
+function carryPotentialOrigins(carried: AccountKey["carry"], potentialMicro = carried?.fullMicro ?? carried?.micro) {
+  if (!carried || potentialMicro === undefined) return []
   return allocateCarry(
-    carried.fullMicro ?? carried.micro,
+    potentialMicro,
     carried.sourceOrigins ?? [{ charge: carried.fromCharge, micro: carried.micro }],
   ).filter((origin) => !carried.revokedOrigins?.includes(origin.charge))
 }
 function carryPotential(carried: AccountKey["carry"]) {
   return carryPotentialOrigins(carried).reduce((sum, origin) => sum + origin.micro, 0)
+}
+
+/**
+ * What a key's carry is worth to the next upgrade. Before its true-up, `fullMicro` is only an upper bound (its source's
+ * live holds may still spend), and once the key is replaced that true-up never runs: the next upgrade would grant the
+ * held amount again. So an untrued carry is settled here from its source's current standing, counting live holds as
+ * spent. Allowance a live hold later leaves unspent is not returned, and is never granted twice.
+ */
+async function settledCarryOrigins(id: string, key: AccountKey, now: number, fetcher: typeof fetch) {
+  const carried = key.carry
+  if (!carried?.fromHash || carried.fromLimitMicro === undefined || carried.trued) return carryPotentialOrigins(carried)
+  const source = await carrySource(id, carried.fromHash, carried.fromAppliedMicro, now, fetcher)
+  const potential = carryMicro(
+    Math.max(0, carried.fromLimitMicro - source.lateDebits),
+    source.finalUsage,
+    source.ledger.heldMicro,
+  )
+  // A shortfall debit already charged to this key (a true-up interrupted before its save) is in this key's applied.
+  const recorded = await recordedShortfall(id, key.hash, carried.fromHash, fetcher)
+  return carryPotentialOrigins(carried, potential + recorded)
+}
+
+/**
+ * A replaced source pool's standing, by its immutable identity: late settlements still land there (old-pool identity).
+ * Model spend is the larger of the final provider usage and the committed floor plus abandoned reservations, a max and
+ * never a sum: a settled charge is in both once the provider catches up. Replaced keys no longer get their limits
+ * PATCHed when hosted debits settle, so the durable debit delta since the upgrade is returned separately.
+ */
+async function carrySource(
+  id: string,
+  fromHash: string,
+  fromAppliedMicro: number | undefined,
+  now: number,
+  fetcher: typeof fetch,
+) {
+  const data = (await openRouterManagement(`/${encodeURIComponent(fromHash)}`, undefined, fetcher)).data
+  if (
+    !stripeRecord(data) ||
+    data.disabled !== true ||
+    typeof data.usage !== "number" ||
+    !Number.isFinite(data.usage) ||
+    data.usage < 0
+  )
+    throw new ApiError(503, "MODEL_PLAN_KEY_INVALID", "Your remaining allowance could not be verified.")
+  const ledger = await readPoolLedger(id, fromHash, now, fetcher)
+  return {
+    ledger,
+    lateDebits: Math.max(0, ledger.appliedMicro - (fromAppliedMicro ?? 0)),
+    finalUsage: Math.max(usdToMicro(data.usage), ledger.committedMicro + ledger.abandonedMicro),
+  }
 }
 
 /** Every originating payment remains accountable after repeated upgrades, not just the latest subscription. */
@@ -2559,43 +2822,48 @@ registerAction("carry-trueup", async (action, fetcher) => {
         action.now < carried.trueupAt
       )
         return
-      const data = (await openRouterManagement(`/${encodeURIComponent(carried.fromHash)}`, undefined, fetcher)).data
-      if (
-        !stripeRecord(data) ||
-        data.disabled !== true ||
-        typeof data.usage !== "number" ||
-        !Number.isFinite(data.usage) ||
-        data.usage < 0
-      )
-        throw new ApiError(503, "MODEL_PLAN_KEY_INVALID", "Your remaining allowance could not be verified.")
-      const ledger = await readPoolLedger(id, carried.fromHash, action.now, fetcher)
-      // Pending requests or pool debits still reserve the source; retry instead of releasing their money early.
-      if (ledger.heldMicro || ledger.pendingMicro)
+      const source = await carrySource(id, carried.fromHash, carried.fromAppliedMicro, action.now, fetcher)
+      // Live holds (nonmodel holds and model reservations before their deadline) or pending debits still reserve the
+      // source; retry instead of releasing their money early. An abandoned reservation has no live request left to
+      // wait for: it counts as consumed at its full amount (in `finalUsage`).
+      if (source.ledger.heldMicro || source.ledger.pendingMicro)
         throw new ApiError(503, "MODEL_PLAN_CARRY_PENDING", "Your remaining allowance is being updated.")
-      // Replaced keys no longer get their limits PATCHed when hosted debits settle. Subtract that durable debit delta.
-      const lateDebits = Math.max(0, ledger.appliedMicro - (carried.fromAppliedMicro ?? 0))
+      const lateDebits = source.lateDebits
+      const finalUsage = source.finalUsage
       const limited = carried.rampUntil !== undefined && action.now < carried.rampUntil
       const finalLimit = Math.max(
         0,
         (limited ? (carried.fromVisibleLimitMicro ?? carried.fromLimitMicro) : carried.fromLimitMicro) - lateDebits,
       )
-      const fullMicro = carryMicro(Math.max(0, carried.fromLimitMicro - lateDebits), usdToMicro(data.usage))
       // Allocate historical spend against the original origin order before excluding reversed payments.
       // Filtering that order first could resurrect an older allowance that was already consumed.
       const candidates = allocateCarry(
-        carryMicro(finalLimit, usdToMicro(data.usage)),
+        carryMicro(finalLimit, finalUsage),
         (limited ? carried.visibleOrigins : carried.sourceOrigins) ?? [
           { charge: carried.fromCharge, micro: finalLimit },
         ],
       ).filter((origin) => !carried.revokedOrigins?.includes(origin.charge))
-      const proposed = Math.max(
-        carried.micro,
-        candidates.reduce((sum, origin) => sum + origin.micro, 0),
-      )
+      const supported = candidates.reduce((sum, origin) => sum + origin.micro, 0)
+      // Carry only rises (M6), so what this pool really holds of it is `carried.micro` less the shortfall debits
+      // already charged to it. When the source finally spent more than it held at the upgrade (a charge settled above
+      // its hold or reservation), the carry granted that difference twice: once here, once by the source's own spend.
+      // The excess over `supported` is charged to this successor pool as a debit, once per cumulative amount. A later
+      // true-up that supports more (the full limit once the ramp ends) raises the carry over what was charged instead,
+      // so nothing is granted twice and no overspend is charged twice.
+      const recorded = await recordedShortfall(id, key.hash, carried.fromHash, fetcher)
+      const charged = Math.max(recorded, carried.micro - supported)
+      await chargeCarryShortfall(id, key, carried.fromHash, charged, recorded, action.now, verify, fetcher)
+      const proposed = Math.max(carried.micro, supported + charged)
       const credits = keyPool(key).creditsMicro
       const raised = Math.min(proposed, usdToMicro(codiumKeyLimitUsd(microToUsd(credits + proposed))) - credits)
       const origins = proposed > carried.micro ? allocateCarry(raised, candidates) : carried.origins
-      const updated = { ...account, key: { ...key, carry: { ...carried, micro: raised, fullMicro, origins } } }
+      // Settled potential for the next upgrade, in the same units as `micro` (gross of this pool's shortfall debits,
+      // which that upgrade subtracts as applied debits). `trued` tells the next upgrade it may trust it.
+      const fullMicro = carryMicro(Math.max(0, carried.fromLimitMicro - lateDebits), finalUsage) + charged
+      const updated = {
+        ...account,
+        key: { ...key, carry: { ...carried, micro: raised, fullMicro, origins, trued: true } },
+      }
       await verify()
       await saveAccount(id, updated, fetcher)
       const converged = await convergeKey(id, updated, updated.key, verify, fetcher)
@@ -2604,6 +2872,41 @@ registerAction("carry-trueup", async (action, fetcher) => {
     fetcher,
   )
 })
+
+/** Carry shortfall debits already charged to `pool` for the carry from `fromHash`. */
+async function recordedShortfall(id: string, pool: string, fromHash: string, fetcher: typeof fetch) {
+  return (await readDebits(id, pool, fetcher))
+    .filter((debit) => debit.ref.startsWith(`carry-shortfall-${fromHash}-`))
+    .reduce((sum, debit) => sum + debit.micro, 0)
+}
+
+/**
+ * Records carry the source pool could not support as a debit on the successor key, up to the cumulative
+ * `shortfallMicro`. Refs carry that cumulative amount, and only the part not already `recorded` (read under the same
+ * lease) is charged, so a retried or second true-up never charges twice and a crash between the debit and the account
+ * save loses nothing. Callers hold the lease and converge after.
+ */
+async function chargeCarryShortfall(
+  id: string,
+  key: AccountKey,
+  fromHash: string,
+  shortfallMicro: number,
+  recorded: number,
+  now: number,
+  verify: () => Promise<void>,
+  fetcher: typeof fetch,
+) {
+  const micro = shortfallMicro - recorded
+  if (micro <= 0) return
+  const ref = `carry-shortfall-${fromHash}-${shortfallMicro}`
+  const member = holdMember(debitHoldTicket(ref), "chat", undefined, micro)
+  await verify()
+  await recordDebit(
+    { account: id, pool: key.hash, ticket: debitHoldTicket(ref), member, purpose: "chat", micro },
+    { ref, micro, keepUntil: key.end * 1000 + DEBITS_KEEP_MS, now },
+    fetcher,
+  )
+}
 
 export async function modelPlanChange(
   user: AccountUser,
@@ -3128,7 +3431,11 @@ export async function refundEndModelPlanAccount(
           (key) => expected[key as keyof OwnerRefundQuote] !== confirmed[key as keyof OwnerRefundQuote],
         )
       )
-        throw new ApiError(409, "CODIUM_REFUND_CHANGED", "The current payment changed. Refresh and confirm the updated payment.")
+        throw new ApiError(
+          409,
+          "CODIUM_REFUND_CHANGED",
+          "The current payment changed. Refresh and confirm the updated payment.",
+        )
       const intent = {
         id: randomUUID(),
         at: now,

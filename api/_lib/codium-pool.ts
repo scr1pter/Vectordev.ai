@@ -1,17 +1,33 @@
 import { createHash, randomUUID } from "node:crypto"
 import { Option, Schema } from "effect"
 import { codiumKey } from "./codium-keys.js"
+import { renewalGraceMinutes } from "./codium-limits.js"
 import { ApiError } from "./http.js"
+import { stripeMode } from "./model-plan-stripe.js"
 import { persistentStore } from "./persistent-store.js"
+import {
+  MODEL_SPEND_LUA,
+  modelSpendKeys,
+  modelSpendStale,
+  modelSpendUnavailable,
+  readModelSpendLedger,
+  runPoolKey,
+} from "./codium-spend-ledger.js"
 
 /*
  * A Codium account's pool: the month's model spend its OpenRouter key may make, counted in integer micro-dollars
  * (1 USD = 1,000,000). Contract §4.7 and invariants M1–M3:
  *
  * - total     = credits + carry                         (what the month holds; carry comes with an upgrade, WP A09)
- * - spent     = key usage + debits                      (debits: hosted blocks and other charges made off OpenRouter)
+ * - model     = max(key usage, committed)               (committed: the durable floor of settled model charges, A17)
+ * - spent     = model + debits                          (debits: hosted blocks and other charges made off OpenRouter)
  * - limit     = credits + carry − applied debits        (the key's limit, the hard cap, M1)
- * - available = credits + carry − applied debits − usage − held   (M3)
+ * - available = credits + carry − applied debits − model − held − abandoned   (M3)
+ *
+ * Provider usage can lag a finished request. The committed floor (codium-spend-ledger.ts) records every model charge
+ * the gateway settled, so a lagging usage figure never reopens money; it is never used to lower the provider key's
+ * limit (M1) or the provider liability funding reports. Abandoned model reservations (open past their deadline, outcome
+ * unknown) keep counting at their full amount.
  *
  * A debit is written unapplied with a hold of the same amount in the pool's held set, and stays held until the key's
  * limit has been lowered by it (applied), so an unapplied debit is counted once, as held, and an applied one once, in
@@ -28,11 +44,6 @@ export const MICRO_PER_USD = 1_000_000
 export const HALF_CENT_MICRO = 5_000
 /** The gateway gives a provider request 600 seconds; its hold lapses a minute after that. */
 export const MODEL_HOLD_MS = 660_000
-/**
- * The provider adds a finished request to the key's usage a little after the answer ends, so its charge stays held
- * this long, and a request sent meanwhile cannot spend it a second time.
- */
-export const SETTLED_HOLD_MS = 30_000
 /** The longest hold a pool charge may ask for: a 12-hour cloud-computer job with room to settle. */
 export const MAX_POOL_HOLD_MS = 2 * 86_400_000
 /** An unapplied debit stays held this long, past the end of the month it belongs to, so it never stops counting. */
@@ -103,28 +114,48 @@ export function limitMatches(limit: unknown, expectedMicro: number) {
 /** What a key's own allowance is made of. */
 export type PoolBase = { creditsMicro: number; carryMicro: number }
 
-/** What the store holds against one key: live holds, and the debits already applied to its limit or still pending. */
-export type PoolLedger = { heldMicro: number; appliedMicro: number; pendingMicro: number }
+/**
+ * What the store holds against one key: live holds (nonmodel holds and model reservations before their deadline),
+ * abandoned model reservations, the committed model floor, and the debits already applied to its limit or still pending.
+ */
+export type PoolLedger = {
+  heldMicro: number
+  abandonedMicro: number
+  committedMicro: number
+  appliedMicro: number
+  pendingMicro: number
+}
 
-export const EMPTY_LEDGER: PoolLedger = Object.freeze({ heldMicro: 0, appliedMicro: 0, pendingMicro: 0 })
+export const EMPTY_LEDGER: PoolLedger = Object.freeze({
+  heldMicro: 0,
+  abandonedMicro: 0,
+  committedMicro: 0,
+  appliedMicro: 0,
+  pendingMicro: 0,
+})
 
 /** The key's limit: credits plus carry, less every debit already applied to it (§4.7 `expectedLimit`). */
 export function expectedLimitMicro(base: PoolBase, appliedDebitsMicro: number) {
   return Math.max(0, base.creditsMicro + base.carryMicro - appliedDebitsMicro)
 }
 
-/** Every figure of one pool, from the key's usage and the store's ledger. */
+/**
+ * Every figure of one pool, from the key's usage and the store's ledger. Model spend is the larger of the provider's
+ * usage and the committed floor, never their sum: each settled model charge is in both once the provider catches up.
+ */
 export function poolFigures(base: PoolBase, usageMicro: number, ledger: PoolLedger) {
   const totalMicro = base.creditsMicro + base.carryMicro
+  const modelMicro = Math.max(usageMicro, ledger.committedMicro)
   const debitsMicro = ledger.appliedMicro + ledger.pendingMicro
   return {
     totalMicro,
-    spentMicro: usageMicro + debitsMicro,
+    spentMicro: modelMicro + debitsMicro,
     limitMicro: expectedLimitMicro(base, ledger.appliedMicro),
     /** What is left of the month, ignoring holds: what status shows as the share left. */
-    remainingMicro: totalMicro - usageMicro - debitsMicro,
-    /** What a new hold may take (M3). A pending debit is in `heldMicro`, so it is counted once. */
-    availableMicro: totalMicro - ledger.appliedMicro - usageMicro - ledger.heldMicro,
+    remainingMicro: totalMicro - modelMicro - debitsMicro,
+    /** What a new hold may take (M3), as HOLD and ADMIT compute it. A pending debit is in `heldMicro`, counted once. */
+    availableMicro:
+      totalMicro - ledger.appliedMicro - modelMicro - ledger.heldMicro - ledger.abandonedMicro,
   }
 }
 
@@ -196,24 +227,42 @@ export type PoolDebit = typeof Debit.Type & { ref: string }
 
 // ── Scripts ────────────────────────────────────────────────────────────────────────────────────────────────────────
 
-// The sum of the held set's members (KEYS[1]), each one's amount being its last field.
-const HELD_SUM =
-  "local held = 0 for _, member in ipairs(redis.call('ZRANGE', KEYS[1], 0, -1)) do held = held + (tonumber(string.match(member, ':(%d+)$')) or 0) end "
-// The sum of the debits (KEYS[2]) already applied to the key's limit.
-const APPLIED_SUM = `local applied = 0 local debits = redis.call('HGETALL', KEYS[2]) for i = 2, #debits, 2 do if string.find(debits[i], '"applied":true', 1, true) then applied = applied + (tonumber(string.match(debits[i], '"micro":(%d+)')) or 0) end end `
 // A set's lifetime only ever grows: a short hold never cuts short a longer one already in it.
 const growTtl = (key: string, ms: string) =>
   `if redis.call('PTTL', ${key}) < tonumber(${ms}) then redis.call('PEXPIRE', ${key}, ${ms}) end `
 
 /**
- * HOLD. Drops lapsed holds and adds this one (ARGV[5], lapsing at ARGV[4]) only while the pool's base (ARGV[2]:
- * credits + carry − usage) less the applied debits and every live hold covers it (ARGV[3]), in one step, so requests
- * and charges made at the same moment cannot each pass against the same balance. The set lives at least ARGV[6] ms.
+ * HOLD. The common hold for hosted blocks and every other pool charge (§4.7 `holdPool`). ARGV[1] is one JSON payload:
+ * the member, its amount, deadline and set lifetime, an optional run, the observed provider usage, and the fence (the
+ * private account record, key, period and snapshot the caller priced against). In one step it applies the same fence
+ * and the same floor as model ADMIT (codium-spend-ledger.ts), so a hold observed before a key replacement, an upgrade
+ * intent or a new period can never land after the source balances were read, and a lagging usage figure or an
+ * abandoned model reservation can never be spent twice. Answers 'ok', 'monthly', 'stale', 'runexpired' or
+ * 'unavailable'; every refusal is decided before the first write.
  */
-const HOLD = `redis.call('ZREMRANGEBYSCORE', KEYS[1], '-inf', ARGV[1]) ${HELD_SUM}${APPLIED_SUM}if tonumber(ARGV[2]) - applied - held < tonumber(ARGV[3]) then return 0 end redis.call('ZADD', KEYS[1], ARGV[4], ARGV[5]) ${growTtl("KEYS[1]", "ARGV[6]")}return 1`
-
-/** SETTLE. A finished model request's hold (ARGV[1]) becomes its charge (ARGV[3], lapsing at ARGV[2]). */
-const SETTLE = `redis.call('ZREM', KEYS[1], ARGV[1]) redis.call('ZADD', KEYS[1], ARGV[2], ARGV[3]) ${growTtl("KEYS[1]", "ARGV[4]")}return 1`
+const HOLD =
+  MODEL_SPEND_LUA +
+  `
+local p = object(ARGV[1])
+if not p or type(p.fence) ~= 'table' or not integer(p.now) or p.fence.now ~= p.now or p.fence.pool ~= p.pool or p.fence.account ~= p.account or not integer(p.required) or p.required == 0 or not integer(p.deadline) or p.deadline <= p.now or not integer(p.ttl) or p.ttl == 0 or not integer(p.observedMicro) or type(p.member) ~= 'string' or (p.run ~= nil and type(p.run) ~= 'string') then return 'unavailable' end
+local parsed = member(p.member)
+if not parsed or parsed.micro ~= p.required or parsed.run ~= (p.run or '-') then return 'unavailable' end
+local spend = model_spend_read(KEYS[3], KEYS[4], KEYS[1], KEYS[2], p.now, p.account, p.pool)
+if not spend or spend.records[parsed.ticket] then return 'unavailable' end
+local refusal = model_pool_fence(KEYS[6], KEYS[7], p.fence, spend)
+if refusal then return refusal end
+if p.run and not model_run_pool(KEYS[5], p.pool) then return 'runexpired' end
+local burden = plus(plus(plus(math.max(p.observedMicro, spend.committed), spend.reserved), spend.nonmodelHeld), spend.applied)
+if not burden then return 'unavailable' end
+if p.fence.totalMicro - burden < p.required then return 'monthly' end
+model_spend_compact(spend, KEYS[3], KEYS[4])
+redis.call('ZREMRANGEBYSCORE', KEYS[1], '-inf', p.now)
+local fresh = redis.call('EXISTS', KEYS[1]) == 0
+redis.call('ZADD', KEYS[1], p.deadline, p.member)
+if fresh then redis.call('PEXPIREAT', KEYS[1], p.now + p.ttl) else grow(KEYS[1], p.now + p.ttl, p.now) end
+if p.run then model_bind_run_pool(KEYS[5], p.pool, math.max(p.now + 259200000, p.deadline), p.now) end
+return 'ok'
+`
 
 /**
  * DEBIT. A pool charge's hold (ARGV[1]) becomes an unapplied debit (ref ARGV[2], record ARGV[3]) held by a member of
@@ -231,14 +280,11 @@ const DEBIT = `local recorded = redis.call('HGET', KEYS[2], ARGV[2]) if recorded
  */
 const APPLY = `for i = 3, #ARGV, 2 do local debit = redis.call('HGET', KEYS[1], ARGV[i]) if debit then redis.call('HSET', KEYS[1], ARGV[i], (string.gsub(debit, '"applied":false', '"applied":true', 1))) end redis.call('ZREM', KEYS[2], ARGV[i + 1]) end if ARGV[1] ~= '' then redis.call('SET', KEYS[3], ARGV[1]) end local pending = 0 for _, debit in ipairs(redis.call('HVALS', KEYS[1])) do if string.find(debit, '"applied":false', 1, true) then pending = pending + 1 end end if pending == 0 then redis.call('ZREM', KEYS[4], ARGV[2]) end return pending`
 
-/** READ. The live holds (lapsing after ARGV[1]) and the applied and pending debits, without changing anything. */
-const READ = `local held = 0 for _, member in ipairs(redis.call('ZRANGEBYSCORE', KEYS[1], '(' .. ARGV[1], '+inf')) do held = held + (tonumber(string.match(member, ':(%d+)$')) or 0) end local applied, pending = 0, 0 local debits = redis.call('HGETALL', KEYS[2]) for i = 2, #debits, 2 do local micro = tonumber(string.match(debits[i], '"micro":(%d+)')) or 0 if string.find(debits[i], '"applied":true', 1, true) then applied = applied + micro else pending = pending + micro end end return {held, applied, pending}`
-
 /** DEBITS. One key's debits as a flat list of ref, record, … whatever protocol the store speaks. */
 const DEBITS = "return redis.call('HGETALL', KEYS[1])"
 
-/** The scripts, for the tests and any store fake that has to recognise them. */
-export const POOL_SCRIPTS = Object.freeze({ HOLD, SETTLE, DEBIT, APPLY, READ, DEBITS })
+/** The scripts, for the tests and any store fake that has to recognise them. The pool's READ is the ledger's. */
+export const POOL_SCRIPTS = Object.freeze({ HOLD, DEBIT, APPLY, DEBITS })
 
 // ── Store operations ───────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -253,30 +299,72 @@ export type PoolTicket = {
   micro: number
 }
 
+/** The private record and pool a hold is priced against (the fence both HOLD and ADMIT compare). */
+export type PoolFunding = {
+  pool: string
+  /** credits + carry − the provider usage observed with the record. */
+  baseMicro: number
+  totalMicro: number
+  subscription: string
+  start: number
+  end: number
+  accountRecord: string
+}
+
+/** What the shared Lua fence compares: the observed private record and pool, at `now` (both scripts, one shape). */
+export function poolFence(
+  funding: PoolFunding,
+  at: { account: string; now: number; version?: number },
+) {
+  return {
+    account: at.account,
+    accountRecord: funding.accountRecord,
+    pool: funding.pool,
+    subscription: funding.subscription,
+    start: funding.start,
+    end: funding.end,
+    totalMicro: funding.totalMicro,
+    livemode: stripeMode() === "live",
+    graceMs: renewalGraceMinutes() * 60_000,
+    now: at.now,
+    ...(at.version === undefined ? {} : { version: at.version }),
+  }
+}
+
 /**
- * Places a hold of `requiredMicro` on the pool when what is available covers it: `baseMicro` is the key's credits plus
- * carry less its usage, and the script takes off the applied debits and every live hold. Undefined when it does not.
+ * Places a hold of `requiredMicro` on the pool when what is available covers it, in the HOLD script's one step.
+ * Undefined when it does not (the shortfall); throws the fence's answers: 503 RENEWING (retry) when the private record,
+ * key or period moved on since `fence` was observed, 401 RUN_EXPIRED for a run bound to another pool, and 503
+ * POOL_UNAVAILABLE for an untrusted ledger.
  */
 export async function placeHold(
   input: {
     account: string
-    pool: string
-    baseMicro: number
+    funding: PoolFunding
     requiredMicro: number
     purpose: PoolPurpose
     run?: string
     ttlMs: number
     now: number
+    /** The snapshot version the caller's decisions used; omitted, the fence checks the live snapshot's state only. */
+    version?: number
   },
   fetcher: typeof fetch = fetch,
 ): Promise<PoolTicket | undefined> {
+  const observedMicro = input.funding.totalMicro - input.funding.baseMicro
   if (
-    !Number.isSafeInteger(input.baseMicro) ||
+    !Number.isSafeInteger(input.funding.baseMicro) ||
+    !Number.isSafeInteger(input.funding.totalMicro) ||
+    input.funding.totalMicro < 0 ||
+    !Number.isSafeInteger(observedMicro) ||
+    observedMicro < 0 ||
     !Number.isSafeInteger(input.requiredMicro) ||
     input.requiredMicro <= 0 ||
     !Number.isSafeInteger(input.ttlMs) ||
     input.ttlMs <= 0 ||
-    input.ttlMs > DEBIT_HOLD_MS
+    input.ttlMs > DEBIT_HOLD_MS ||
+    !Number.isSafeInteger(input.now) ||
+    input.now < 0
   )
     throw invalidCharge()
   const ticket = randomUUID()
@@ -285,22 +373,37 @@ export async function placeHold(
     [
       "EVAL",
       HOLD,
-      2,
-      heldKey(input.pool),
-      debitsKey(input.account, input.pool),
-      input.now,
-      input.baseMicro,
-      input.requiredMicro,
-      input.now + input.ttlMs,
-      member,
-      input.ttlMs,
+      7,
+      heldKey(input.funding.pool),
+      debitsKey(input.account, input.funding.pool),
+      modelSpendKeys(input.funding.pool).ledger,
+      modelSpendKeys(input.funding.pool).reservations,
+      runPoolKey(input.run ?? "-"),
+      codiumKey("account", input.account),
+      codiumKey("ent", input.account),
+      JSON.stringify({
+        now: input.now,
+        account: input.account,
+        pool: input.funding.pool,
+        member,
+        required: input.requiredMicro,
+        deadline: input.now + input.ttlMs,
+        ttl: input.ttlMs,
+        observedMicro,
+        ...(input.run === undefined ? {} : { run: input.run }),
+        fence: poolFence(input.funding, { account: input.account, now: input.now, version: input.version }),
+      }),
     ],
     fetcher,
   )
-  if (held !== 1) return undefined
+  if (held === "runexpired")
+    throw new ApiError(401, "MODEL_PLAN_RUN_EXPIRED", "This run must start again for the new Codium period.")
+  if (held === "stale") throw modelSpendStale()
+  if (held === "monthly") return undefined
+  if (held !== "ok") throw modelSpendUnavailable()
   return {
     account: input.account,
-    pool: input.pool,
+    pool: input.funding.pool,
     ticket,
     member,
     purpose: input.purpose,
@@ -312,15 +415,6 @@ export async function placeHold(
 /** Gives a hold back unspent: the request or block never reached anything that bills. */
 export async function releaseHold(hold: PoolTicket, fetcher: typeof fetch = fetch) {
   await persistentStore(["ZREM", heldKey(hold.pool), hold.member], fetcher)
-}
-
-/** A finished model request keeps only what it was charged, for SETTLED_HOLD_MS, until the key's usage shows it. */
-export async function settleHold(hold: PoolTicket, chargedMicro: number, now: number, fetcher: typeof fetch = fetch) {
-  const member = holdMember(hold.ticket, hold.purpose, hold.run, Math.max(0, chargedMicro))
-  await persistentStore(
-    ["EVAL", SETTLE, 1, heldKey(hold.pool), hold.member, now + SETTLED_HOLD_MS, member, SETTLED_HOLD_MS],
-    fetcher,
-  )
 }
 
 /**
@@ -392,18 +486,24 @@ export async function readDebits(
   })
 }
 
-/** The live holds and the applied and pending debits of one key, read without changing anything. */
+/**
+ * One key's ledger (codium-spend-ledger.ts READ): live holds, abandoned reservations, the committed model floor and the
+ * applied and pending debits. A key without a trusted genesis, or any record that cannot be read, fails closed.
+ */
 export async function readPoolLedger(
   account: string,
   keyHash: string,
   now: number,
   fetcher: typeof fetch = fetch,
 ): Promise<PoolLedger> {
-  const result = await persistentStore(["EVAL", READ, 2, heldKey(keyHash), debitsKey(account, keyHash), now], fetcher)
-  const values = Array.isArray(result) ? result.map(Number) : []
-  if (values.length !== 3 || values.some((value) => !Number.isSafeInteger(value) || value < 0))
-    throw ledgerUnavailable()
-  return { heldMicro: values[0]!, appliedMicro: values[1]!, pendingMicro: values[2]! }
+  const ledger = await readModelSpendLedger(account, keyHash, now, fetcher)
+  return {
+    heldMicro: ledger.nonmodelHeldMicro + ledger.reservedMicro - ledger.abandonedMicro,
+    abandonedMicro: ledger.abandonedMicro,
+    committedMicro: ledger.committedMicro,
+    appliedMicro: ledger.appliedMicro,
+    pendingMicro: ledger.pendingMicro,
+  }
 }
 
 /**

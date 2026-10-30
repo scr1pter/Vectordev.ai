@@ -9,6 +9,7 @@ import { PRIORITY_LEAD_MS, readSnapshot } from "../api/_lib/codium-snapshot"
 import { readSwitch, switchKey } from "../api/_lib/codium-switches"
 import type { ApiRequest, ApiResponse } from "../api/_lib/http"
 import {
+  holdPool,
   keyExpiresAt,
   modelPlanCredential,
   modelPlanStatus,
@@ -89,6 +90,14 @@ function seed(fixture: StripeFixture, options: { now?: number } = {}) {
       credits,
       creditsMicro: credits * 1_000_000,
       limitMicro: credits * 1_000_000,
+      // Provisioned fresh since A17: its pool has a trusted ledger genesis.
+      spendGenesis: fakes.store.seedSpendGenesis({
+        account: fixture.accountId,
+        pool: SEEDED,
+        subscription,
+        start,
+        end,
+      }),
     }
   }
   fakes.store.set(codiumKey("account", fixture.accountId), JSON.stringify(record))
@@ -482,13 +491,13 @@ describe("M11: a renewal never locks out someone who pays", () => {
     funding(fakes, end)
     const invoice = fixture.objects.invoices!.find((value) => value.id === "in_renewal")!
 
-    // Every minute between the period's end and the end of its grace: the old key, never a 402.
+    // Every minute between the period's end and the end of its grace, the production hold path (the entitlement
+    // snapshot, its credential and the shared fence ADMIT also applies) holds on the old key's pool, never a 402 or 503.
     for (let minute = 0; minute <= 119; minute += 7) {
-      const at = end + minute * MINUTE + 1
-      fakes.clock.now = at
-      const credential = await modelPlanCredential(id, fakes.fetcher, at, 0.01)
-      expect(credential.key).toBe("seeded-secret")
-      await credential.release()
+      fakes.clock.now = end + minute * MINUTE + 1
+      const hold = await holdPool(id, 0.01, MINUTE, "chat", { fetcher: fakes.fetcher, clock: () => fakes.clock.now })
+      expect([...fakes.store.zset(codiumKey("held", SEEDED)).keys()]).toEqual([`${hold.ticket}:chat:-:10000`])
+      await hold.release()
     }
     expect(await modelPlanStatus(id, fakes.fetcher, end + 30 * MINUTE)).toMatchObject({
       active: true,
@@ -537,7 +546,6 @@ describe("M11: a renewal never locks out someone who pays", () => {
     expect(fresh).toMatchObject({ disabled: false, limit: 48, usage: 0 })
     const credential = await modelPlanCredential(id, fakes.fetcher, paidAt + MINUTE, 0.01)
     expect(credential.key).not.toBe("seeded-secret")
-    await credential.release()
 
     // invoice.paid arrives afterwards and changes nothing.
     const version = snapshot!.version

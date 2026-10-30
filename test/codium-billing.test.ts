@@ -110,6 +110,8 @@ function seed(fixture: StripeFixture) {
       credits,
       creditsMicro: credits * 1_000_000,
       limitMicro: credits * 1_000_000,
+      // Provisioned fresh since A17: its pool has a trusted ledger genesis.
+      spendGenesis: fakes.store.seedSpendGenesis({ account: fixture.accountId, pool: SEEDED, subscription, start, end }),
     }
   }
   fakes.store.set(accountKey(fixture.accountId), JSON.stringify(record))

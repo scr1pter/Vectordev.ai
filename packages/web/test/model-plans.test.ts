@@ -134,11 +134,12 @@ describe("subscription configuration", () => {
       [5, 50],
     ])
   })
-  test("premium models reserve their full context and reply at the reviewed prices", () => {
+  test("captured premium models reserve their native window and reply at every captured rate tier", () => {
     delete process.env.MODEL_PLAN_MODELS_JSON
     for (const id of ["moonshotai/kimi-k3.1-pro", "google/gemini-4-argon"]) {
       const model = configuredPlanModels().find((model) => model.id === id)!
-      expect(modelPlanRequestCredits(model)).toBeCloseTo(0.33792, 8)
+      expect(modelPlanRequestCredits(model, "vector-50")).toBe(2.179072)
+      expect(modelPlanRequestCredits(model, "vector-100")).toBe(4.358144)
       expect(model.description).toContain("Uses credits faster")
     }
   })
@@ -412,6 +413,21 @@ describe("gateway request policy", () => {
       ).rejects.toMatchObject({ statusCode: status })
       expect(response.getHeader("retry-after")).toBe("300")
     }
+  })
+  test("a client that stops reading cannot hold the stream past the request's deadline", async () => {
+    // An unattached response never drains, as a connection whose client stopped reading but stayed open.
+    const response = new ServerResponse(new IncomingMessage(new Socket()))
+    const frame = new TextEncoder().encode(
+      `data: ${JSON.stringify({ choices: [{ delta: { content: "fixture" } }] })}\n\n`,
+    )
+    const upstream = new Response(new ReadableStream({ pull: (controller) => controller.enqueue(frame) }), {
+      headers: { "content-type": "text/event-stream" },
+    })
+    const streamed = streamModelPlanResponse(upstream, response, undefined, AbortSignal.timeout(50)).then(
+      () => "returned",
+      () => "ended",
+    )
+    expect(await Promise.race([streamed, Bun.sleep(5_000).then(() => "stalled")])).toBe("ended")
   })
   test("preserves coding tools but pins model, pricing, privacy, and generation budget", () => {
     const result = modelPlanRequest(

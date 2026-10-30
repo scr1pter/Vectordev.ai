@@ -521,6 +521,7 @@ describe("enqueueAction and action handlers", () => {
       "pool-ramp",
       "pause-collection",
       "debit-apply",
+      "model-settle",
     ])
     const id = "finalize-renewal:in_renewal"
     await enqueueAction("finalize-renewal", "in_renewal", { try: 1 }, T0 + HOUR, fakes.fetcher, T0)

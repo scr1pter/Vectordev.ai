@@ -1,5 +1,5 @@
 import { CodiumRunTrigger } from "../../packages/schema/src/codium-run-trigger.js"
-import { isPoolPurpose, type PoolPurpose } from "./codium-pool.js"
+import { isPoolPurpose, validRunId, type PoolPurpose } from "./codium-pool.js"
 import { modelPlanRequireMarkedTokens, modelPlansMinClient } from "./model-plan-config.js"
 import { ApiError, type ApiRequest } from "./http.js"
 import { requireUnrevokedAccount, requireUnrevokedCliToken } from "./revocation.js"
@@ -50,7 +50,9 @@ export function createRunVerifierRegistry() {
         !isPoolPurpose(caller.purpose) ||
         !caller.run ||
         typeof caller.run.id !== "string" ||
-        !ID.test(caller.run.id) ||
+        // One grammar with admission: the run id is part of every held member and of `run:<id>` (§4.6), so a verifier
+        // must mint ids without ':' and at most 128 characters, unique across accounts.
+        !validRunId(caller.run.id) ||
         ![...CodiumRunTrigger.ENABLED_SOURCES].some((source) => source === caller.run!.source) ||
         !Number.isSafeInteger(caller.run.deadline) ||
         caller.run.deadline <= now ||

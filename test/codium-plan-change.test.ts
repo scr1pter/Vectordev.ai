@@ -1,13 +1,13 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { checkoutConsentFields, CODIUM_TERMS_DATE } from "../api/_lib/codium-consent"
-import { placeHold, recordDebit } from "../api/_lib/codium-pool"
+import { holdMember, POOL_SCRIPTS, readDebits, readPoolLedger } from "../api/_lib/codium-pool"
 import { codiumKey } from "../api/_lib/codium-keys"
 import { carryMicro, releaseDowngrade } from "../api/_lib/codium-plan-change"
-import { drainOutbox } from "../api/_lib/codium-provision"
+import { MODEL_SPEND_SCRIPTS } from "../api/_lib/codium-spend-ledger"
+import { drainOutbox, enqueueAction } from "../api/_lib/codium-provision"
 import {
-  applyPoolDebits,
+  holdPool,
   modelPlanChange,
-  modelPlanCredential,
   modelPlanPortal,
   readModelPlanAccount,
   reconcileModelPlanAccount,
@@ -98,6 +98,33 @@ async function active(fakes: CodiumFakes) {
   return (await readModelPlanAccount(id, fakes.fetcher))!.key!
 }
 
+/** An open model reservation on `key`'s pool, as ADMIT records it, with its live member while before `deadline`. */
+function reserve(fakes: CodiumFakes, key: { hash: string; end: number }, micro: number, deadline: number) {
+  const ticket = crypto.randomUUID()
+  const member = holdMember(ticket, "chat", undefined, micro)
+  const record = {
+    account: id,
+    pool: key.hash,
+    ticket,
+    member,
+    purpose: "chat",
+    micro: String(micro),
+    day: new Date(deadline).toISOString().slice(0, 10),
+    epoch: "fixture",
+    version: "1",
+    deadline: String(deadline),
+    admittedAt: String(deadline - 660_000),
+    periodEnd: String(key.end * 1000),
+    runUntil: String(deadline),
+    state: "open",
+  }
+  fakes.store.hash(codiumKey("model-reservations", key.hash)).set(ticket, JSON.stringify(record))
+  const ledger = fakes.store.hash(codiumKey("model-spend", key.hash))
+  ledger.set("reserved", String(Number(ledger.get("reserved")) + micro))
+  ledger.set("openCount", String(Number(ledger.get("openCount")) + 1))
+  if (deadline > fakes.clock.now) fakes.store.zset(codiumKey("held", key.hash)).set(member, deadline)
+}
+
 function funded(fakes: CodiumFakes) {
   fakes.store.set(
     codiumKey("funding"),
@@ -174,26 +201,53 @@ describe("Codium plan change", () => {
   test("late hosted debits on a replaced key stay spent after true-up", async () => {
     const fakes = seed()
     const old = await active(fakes)
-    const hold = await placeHold(
-      {
-        account: id,
-        pool: old.hash,
-        baseMicro: 4_000_000,
-        requiredMicro: 1_000_000,
-        ttlMs: 60_000,
-        purpose: "hosted",
-        now,
-      },
-      fakes.fetcher,
-    )
+    const hold = await holdPool(id, 1, 60_000, "hosted", { fetcher: fakes.fetcher, clock: () => fakes.clock.now })
     paidUpgrade(fakes)
     await reconcileModelPlanAccount(id, fakes.fetcher, now)
     expect((await readModelPlanAccount(id, fakes.fetcher))!.key!.carry!.micro).toBe(3_000_000)
-    await recordDebit(hold!, { ref: "hosted:late", micro: 1_000_000, now, keepUntil: now + 86400_000 }, fakes.fetcher)
-    await applyPoolDebits(id, old.hash, fakes.fetcher)
+    // The settle lands on the hold's own (replaced) pool: its identity never moves to the successor.
+    expect(await hold.settle(1, "hosted:late")).toEqual({ recorded: true, applied: true })
+    expect(await readPoolLedger(id, old.hash, fakes.clock.now, fakes.fetcher)).toMatchObject({
+      appliedMicro: 1_000_000,
+    })
     fakes.clock.advance(12 * 60_000)
     await drainOutbox({ now: fakes.clock.now, fetcher: fakes.fetcher })
-    expect((await readModelPlanAccount(id, fakes.fetcher))!.key!.carry!.micro).toBe(3_000_000)
+    const key = (await readModelPlanAccount(id, fakes.fetcher))!.key!
+    expect(key.carry!.micro).toBe(3_000_000)
+    expect(await readDebits(id, key.hash, fakes.fetcher)).toEqual([])
+  })
+
+  test("a source charge settled above its hold after an upgrade is charged once, to the successor pool", async () => {
+    const fakes = seed()
+    const old = await active(fakes)
+    const hold = await holdPool(id, 1, 60_000, "hosted", { fetcher: fakes.fetcher, clock: () => fakes.clock.now })
+    paidUpgrade(fakes)
+    await reconcileModelPlanAccount(id, fakes.fetcher, now)
+    const replaced = (await readModelPlanAccount(id, fakes.fetcher))!.key!
+    expect(replaced.carry!.micro).toBe(3_000_000)
+    // The producer charged 1.5 against a 1.0 hold. The carry already granted the 0.5 it did not hold.
+    expect(await hold.settle(1.5, "hosted:over")).toEqual({ recorded: true, applied: true })
+    fakes.clock.advance(12 * 60_000)
+    await drainOutbox({ now: fakes.clock.now, fetcher: fakes.fetcher })
+    const key = (await readModelPlanAccount(id, fakes.fetcher))!.key!
+    // Carry never goes down (M6); the 0.5 is a debit on the successor, so the source's 4.0 is granted exactly once.
+    expect(key.carry!.micro).toBe(3_000_000)
+    const debits = await readDebits(id, key.hash, fakes.fetcher)
+    expect(debits.map((debit) => [debit.micro, debit.applied])).toEqual([[500_000, true]])
+    const source = await readPoolLedger(id, old.hash, fakes.clock.now, fakes.fetcher)
+    expect(key.carry!.micro - 500_000 + source.appliedMicro).toBeLessThanOrEqual(4_000_000)
+    expect(fakes.openRouter.keys.get(key.hash)!.limit).toBe(24.5)
+    // A second pass (the ramp's true-up, or a retry) charges nothing again.
+    await enqueueAction(
+      "carry-trueup",
+      `${id}:${key.hash}:again`,
+      { account: id, hash: key.hash },
+      fakes.clock.now,
+      fakes.fetcher,
+      fakes.clock.now,
+    )
+    await drainOutbox({ now: fakes.clock.now, fetcher: fakes.fetcher })
+    expect((await readDebits(id, key.hash, fakes.fetcher)).map((debit) => debit.micro)).toEqual([500_000])
   })
 
   test("repeated upgrades retain payment ancestry, and a source refund cannot be hidden by another upgrade", async () => {
@@ -217,6 +271,45 @@ describe("Codium plan change", () => {
     await drainOutbox({ now: fakes.clock.now, fetcher: fakes.fetcher })
     expect((await readModelPlanAccount(id, fakes.fetcher))!.key!.carry!.micro).toBe(22_000_000)
     expect(fakes.openRouter.keys.get(current.hash)!.limit).toBe(70)
+  })
+
+  test("a second upgrade before the first true-up never grants the first source's held spend again", async () => {
+    // [what the first pool's 1.0 hold does before the second upgrade, the carry that upgrade's true-up may grant]
+    const cases = [
+      ["spent", 24_750_000],
+      ["released", 25_750_000],
+      ["still held", 24_750_000],
+    ] as const
+    for (const [outcome, final] of cases) {
+      const fakes = seed()
+      const first = await active(fakes)
+      fakes.openRouter.keys.get(first.hash)!.usage = 0.25
+      // A live 1.0 hold on the first pool at the first upgrade: not carried, the true-up would return what it left.
+      const hold = await holdPool(id, 1, 600_000, "hosted", { fetcher: fakes.fetcher, clock: () => fakes.clock.now })
+      paidUpgrade(fakes)
+      await reconcileModelPlanAccount(id, fakes.fetcher, now)
+      const middle = (await readModelPlanAccount(id, fakes.fetcher))!.key!
+      expect(middle.carry).toMatchObject({ micro: 2_750_000, fullMicro: 3_750_000 })
+      // Then a second upgrade lands within the true-up delay, so the middle key's own true-up never runs.
+      if (outcome === "spent") expect(await hold.settle(1, "hosted:spent")).toEqual({ recorded: true, applied: true })
+      if (outcome === "released") await hold.release()
+      paidUpgrade(fakes, 100, "sub_second", "sub_upgrade")
+      await reconcileModelPlanAccount(id, fakes.fetcher, now)
+      const last = (await readModelPlanAccount(id, fakes.fetcher))!.key!
+      // The middle pool spent nothing and shows 22 + 2.75. A hold still live now counts as spent: it can never be
+      // returned by the middle key's true-up, so returning it later would rest on a value nobody re-checks.
+      expect(last.carry!.micro).toBe(24_750_000)
+      expect(last.carry!.fromLimitMicro).toBe(final)
+      if (outcome === "still held") await hold.release()
+      fakes.clock.advance(12 * 60_000)
+      await drainOutbox({ now: fakes.clock.now, fetcher: fakes.fetcher })
+      const trued = (await readModelPlanAccount(id, fakes.fetcher))!.key!
+      // Spent: the first pool had 4.0 − 0.25 − 1.0 = 2.75 left. Released before the upgrade: 3.75, granted once.
+      expect(trued.carry!.micro).toBe(final)
+      expect(fakes.openRouter.keys.get(trued.hash)!.limit).toBe(48 + final / 1_000_000)
+      // The next upgrade from here starts from the settled value, not the first key's upper bound.
+      expect(trued.carry).toMatchObject({ fullMicro: final, trued: true })
+    }
   })
 
   test("true-up cannot resurrect an older allowance consumed before an intermediate source was refunded", async () => {
@@ -273,7 +366,7 @@ describe("Codium plan change", () => {
     expect(fakes.openRouter.keys.get(key.hash)!.limit).toBe(22)
   })
 
-  test("concurrent model admission waits until a replacement's carry is validated", async () => {
+  test("a hold during a replacement waits for its lease and never spends a carry before it is validated", async () => {
     const fakes = seed()
     await active(fakes)
     paidUpgrade(fakes)
@@ -307,9 +400,12 @@ describe("Codium plan change", () => {
     const reconcile = reconcileModelPlanAccount(id, fetcher, now)
     await paused
     Object.assign(fakes.stripe.charge("ch_active")!, { refunded: true, amount_refunded: 1000 })
-    const admission = modelPlanCredential(id, fetcher, now, 25).then(
+    // The production hold path (chat's credential and fence too): the replacement's key is still provisioning with an
+    // unvalidated carry, so the hold gets no credential and its one on-demand reconcile waits for the lease.
+    const clock = () => fakes.clock.now
+    const admission = holdPool(id, 25, 60_000, "hosted", { fetcher, clock }).then(
       () => "admitted",
-      () => "refused",
+      (error: { code?: string }) => error.code,
     )
     try {
       expect(await Promise.race([lease.then(() => "lease"), admission])).toBe("lease")
@@ -317,7 +413,244 @@ describe("Codium plan change", () => {
       resume()
     }
     await reconcile
-    expect(await admission).toBe("refused")
+    expect(await admission).toBe("MODEL_PLAN_RENEWING")
+    // Read again, the validated carry is gone with its refunded source: 25 is more than the new pool holds.
+    await expect(holdPool(id, 25, 60_000, "hosted", { fetcher: fakes.fetcher, clock })).rejects.toMatchObject({
+      code: "MODEL_PLAN_EXHAUSTED",
+    })
+    const replaced = (await readModelPlanAccount(id, fakes.fetcher))!.key!
+    expect(replaced.carry?.micro ?? 0).toBe(0)
+    expect(await readPoolLedger(id, replaced.hash, fakes.clock.now, fakes.fetcher)).toMatchObject({ heldMicro: 0 })
+  })
+
+  test("a hold delayed past an upgrade's barrier never lands on the source after its balances were read", async () => {
+    const fakes = seed()
+    const old = await active(fakes)
+    paidUpgrade(fakes)
+    let parked = () => {}
+    let release = () => {}
+    const reached = new Promise<void>((resolve) => (parked = resolve))
+    const gate = new Promise<void>((resolve) => (release = resolve))
+    // The hold prices itself against the record as it is just before the replacement's first write or observation,
+    // while the source key is still on; its HOLD is delayed until the instant after the source ledger was read.
+    const delayed: typeof fetch = async (input, init) => {
+      const body = typeof init?.body === "string" ? JSON.parse(init.body) : undefined
+      if (Array.isArray(body) && body[0] === "EVAL" && body[1] === POOL_SCRIPTS.HOLD) {
+        parked()
+        await gate
+      }
+      return fakes.fetcher(input, init)
+    }
+    let hold: Promise<unknown> | undefined
+    let landed = false
+    const reconciling: typeof fetch = async (input, init) => {
+      const body = typeof init?.body === "string" ? JSON.parse(init.body) : undefined
+      const barrier =
+        Array.isArray(body) && body[0] === "SET" && body[1] === accountKey && String(body[2]).includes('"transition"')
+      // Whichever comes first: the barrier, or the replacement's first look at the source (its subscription).
+      if (!hold && (barrier || String(input).includes("/subscriptions/sub_active?"))) {
+        hold = holdPool(id, 1, 60_000, "hosted", { fetcher: delayed, clock: () => fakes.clock.now }).catch(
+          (error: unknown) => error,
+        )
+        await Promise.race([reached, hold])
+      }
+      const response = await fakes.fetcher(input, init)
+      const sourceRead =
+        Array.isArray(body) &&
+        body[0] === "EVAL" &&
+        body[1] === MODEL_SPEND_SCRIPTS.READ &&
+        body[3] === codiumKey("model-spend", old.hash)
+      if (sourceRead && !landed) {
+        landed = true
+        release()
+        await hold
+      }
+      return response
+    }
+    await reconcileModelPlanAccount(id, reconciling, now)
+    expect(landed).toBe(true)
+    const key = (await readModelPlanAccount(id, fakes.fetcher))!.key!
+    // Nothing was held when the source was read, so the whole 4.0 carries.
+    expect(key.carry!.micro).toBe(4_000_000)
+    expect(await hold).toMatchObject({ statusCode: 503, code: "MODEL_PLAN_RENEWING" })
+    const source = await readPoolLedger(id, old.hash, fakes.clock.now, fakes.fetcher)
+    expect(source).toMatchObject({ heldMicro: 0, appliedMicro: 0, pendingMicro: 0 })
+    // The carry plus everything the source can still spend stays within its 4.0.
+    expect(key.carry!.micro + source.heldMicro + source.appliedMicro + source.committedMicro).toBeLessThanOrEqual(
+      4_000_000,
+    )
+  })
+
+  test("a hold gets one on-demand repair for a key that is not ready, and a final answer for its plan state", async () => {
+    const fakes = seed()
+    const key = await active(fakes)
+    // The key is off at the provider until reconcile repairs it: one on-demand reconcile, then the hold is placed.
+    fakes.openRouter.keys.get(key.hash)!.disabled = true
+    const hold = await holdPool(id, 1, 60_000, "hosted", { fetcher: fakes.fetcher, clock: () => fakes.clock.now })
+    expect(hold.micro).toBe(1_000_000)
+    expect(fakes.openRouter.keys.get(key.hash)!.disabled).toBe(false)
+    await hold.release()
+    // That minute's reconcile is spent: the next unready key is a retryable answer, not a second Stripe read.
+    fakes.openRouter.keys.get(key.hash)!.disabled = true
+    const reads = fakes.stripe.calls.length
+    await expect(
+      holdPool(id, 1, 60_000, "hosted", { fetcher: fakes.fetcher, clock: () => fakes.clock.now }),
+    ).rejects.toMatchObject({
+      statusCode: 503,
+      code: "MODEL_PLAN_RENEWING",
+      retryAfterSeconds: 1,
+    })
+    expect(fakes.stripe.calls).toHaveLength(reads)
+    // A failed payment is final for a producer exactly as for chat: 402 with its action, never an endless retry.
+    fakes.stripe.subscription("sub_active")!.status = "past_due"
+    await reconcileModelPlanAccount(id, fakes.fetcher, now)
+    await expect(
+      holdPool(id, 1, 60_000, "hosted", { fetcher: fakes.fetcher, clock: () => fakes.clock.now }),
+    ).rejects.toMatchObject({
+      statusCode: 402,
+      code: "MODEL_PLAN_PAYMENT_REQUIRED",
+      detail: { reason: "payment_failed", action: "update-card" },
+    })
+    expect(await readPoolLedger(id, key.hash, fakes.clock.now, fakes.fetcher)).toMatchObject({ heldMicro: 0 })
+  })
+
+  test("a replacement interrupted after its barrier resumes with one carry, and nothing lands on the source meanwhile", async () => {
+    const fakes = seed()
+    const old = await active(fakes)
+    paidUpgrade(fakes)
+    // The source subscription cannot be read: the barrier is saved, nothing was observed or switched off yet.
+    fakes.stripe.fail = (call) =>
+      call.method === "GET" && call.path === "subscriptions/sub_active"
+        ? new Response("{}", { status: 503 })
+        : undefined
+    await expect(reconcileModelPlanAccount(id, fakes.fetcher, now)).rejects.toBeDefined()
+    const interrupted = (await readModelPlanAccount(id, fakes.fetcher))!
+    expect(interrupted.transition).toMatchObject({ subscription: "sub_upgrade" })
+    expect(interrupted.upgrade).toBeUndefined()
+    expect(interrupted.key!.hash).toBe(old.hash)
+    // A hold is refused: its one on-demand reconcile resumes the replacement, which still cannot read the source.
+    await expect(
+      holdPool(id, 1, 60_000, "hosted", { fetcher: fakes.fetcher, clock: () => fakes.clock.now }),
+    ).rejects.toMatchObject({
+      code: "BILLING_UPSTREAM",
+    })
+    expect(await readPoolLedger(id, old.hash, fakes.clock.now, fakes.fetcher)).toMatchObject({ heldMicro: 0 })
+    fakes.stripe.fail = undefined
+    await reconcileModelPlanAccount(id, fakes.fetcher, now)
+    const key = (await readModelPlanAccount(id, fakes.fetcher))!
+    expect(key.transition).toBeUndefined()
+    expect(key.key!.hash).not.toBe(old.hash)
+    expect(key.key!.carry!.micro).toBe(4_000_000)
+    expect(await readPoolLedger(id, old.hash, fakes.clock.now, fakes.fetcher)).toMatchObject({ heldMicro: 0 })
+  })
+
+  test("a replacement whose target stops governing is abandoned: the source serves again and nothing carries", async () => {
+    const fakes = seed()
+    const old = await active(fakes)
+    paidUpgrade(fakes)
+    // Key creation fails after the barrier, the upgrade intent and the disabled source.
+    fakes.openRouter.fail = (call) =>
+      call.method === "POST" ? new Response("unavailable", { status: 503 }) : undefined
+    await expect(reconcileModelPlanAccount(id, fakes.fetcher, now)).rejects.toMatchObject({
+      code: "MODEL_PLAN_UPSTREAM",
+    })
+    const stuck = (await readModelPlanAccount(id, fakes.fetcher))!
+    expect(stuck.transition).toMatchObject({ subscription: "sub_upgrade" })
+    expect(stuck.upgrade).toBeDefined()
+    expect(fakes.openRouter.keys.get(old.hash)!.disabled).toBe(true)
+    // A hold is refused: its one on-demand reconcile resumes the replacement, whose key creation still fails.
+    await expect(
+      holdPool(id, 1, 60_000, "hosted", { fetcher: fakes.fetcher, clock: () => fakes.clock.now }),
+    ).rejects.toMatchObject({
+      code: "MODEL_PLAN_UPSTREAM",
+    })
+    expect(await readPoolLedger(id, old.hash, fakes.clock.now, fakes.fetcher)).toMatchObject({ heldMicro: 0 })
+    // The target stops superseding the source before it ever got a key. A refunded or cancelled target still
+    // supersedes (governingStanding), so the only such case is a target Stripe reports as never having started.
+    fakes.openRouter.fail = undefined
+    Object.assign(fakes.stripe.subscription("sub_upgrade")!, { status: "incomplete_expired" })
+    await reconcileModelPlanAccount(id, fakes.fetcher, now)
+    const resumed = (await readModelPlanAccount(id, fakes.fetcher))!
+    expect(resumed.transition).toBeUndefined()
+    expect(resumed.upgrade).toBeUndefined()
+    expect(resumed.keyCreation).toBeUndefined()
+    expect(resumed.key!.hash).toBe(old.hash)
+    expect(resumed.key!.carry).toBeUndefined()
+    expect(fakes.openRouter.keys.get(old.hash)!.disabled).toBe(false)
+    expect(
+      (await holdPool(id, 1, 60_000, "hosted", { fetcher: fakes.fetcher, clock: () => fakes.clock.now })).micro,
+    ).toBe(1_000_000)
+  })
+
+  test("a key made for an abandoned replacement is the one its period gets if it governs again, never a second", async () => {
+    const fakes = seed()
+    const old = await active(fakes)
+    paidUpgrade(fakes)
+    // OpenRouter makes the replacement's key, but its answer never arrives.
+    let lose = true
+    const lossy: typeof fetch = async (input, init) => {
+      const answer = await fakes.fetcher(input, init)
+      if (!lose || init?.method !== "POST" || !String(input).startsWith("https://openrouter.ai/api/v1/keys"))
+        return answer
+      lose = false
+      return new Response("lost", { status: 503 })
+    }
+    await expect(reconcileModelPlanAccount(id, lossy, now)).rejects.toMatchObject({ code: "MODEL_PLAN_UPSTREAM" })
+    const made = [...fakes.openRouter.keys.keys()].filter((hash) => hash !== old.hash)
+    expect(made).toHaveLength(1)
+    // The target stops governing before its key was published: the replacement is abandoned and the source serves.
+    Object.assign(fakes.stripe.subscription("sub_upgrade")!, { status: "incomplete_expired" })
+    await reconcileModelPlanAccount(id, fakes.fetcher, now)
+    const abandoned = (await readModelPlanAccount(id, fakes.fetcher))!
+    expect(abandoned.key!.hash).toBe(old.hash)
+    expect(abandoned.keyCreation).toBeUndefined()
+    expect(abandoned.abandonedCreations).toMatchObject([{ subscription: "sub_upgrade" }])
+    // The listing flaps back and the target governs again. Its creation reuses the abandoned nonce, so OpenRouter
+    // answers the key it already made: one funded key for that period, never a second one counted as owed.
+    Object.assign(fakes.stripe.subscription("sub_upgrade")!, { status: "active" })
+    await reconcileModelPlanAccount(id, fakes.fetcher, now)
+    const replaced = (await readModelPlanAccount(id, fakes.fetcher))!
+    expect(replaced.key!.hash).toBe(made[0])
+    expect([...fakes.openRouter.keys.keys()].filter((hash) => hash !== old.hash)).toEqual(made)
+    expect(replaced.abandonedCreations).toBeUndefined()
+    expect(replaced.key!.carry!.micro).toBe(4_000_000)
+  })
+
+  test("carry and true-up use the committed floor and abandoned reservations, once, and wait only for live ones", async () => {
+    const fakes = seed()
+    const old = await active(fakes)
+    // Provider usage lags at 0.25 while 1.0 of model charges were settled durably; 0.5 was reserved by a request whose
+    // outcome is unknown (past its deadline) and 0.25 by one still running.
+    fakes.openRouter.keys.get(old.hash)!.usage = 0.25
+    const ledger = fakes.store.hash(codiumKey("model-spend", old.hash))
+    ledger.set("committed", "1000000")
+    ledger.set("compacted", "1000000")
+    reserve(fakes, old, 500_000, now - 1)
+    reserve(fakes, old, 250_000, now + 600_000)
+    paidUpgrade(fakes)
+    await reconcileModelPlanAccount(id, fakes.fetcher, now)
+    const key = (await readModelPlanAccount(id, fakes.fetcher))!.key!
+    expect(key.carry!.micro).toBe(4_000_000 - 1_000_000 - 500_000 - 250_000)
+    // At the true-up the running request is still live: it waits instead of releasing its money.
+    fakes.clock.advance(5 * 60_000)
+    await enqueueAction(
+      "carry-trueup",
+      `${id}:${key.hash}:early`,
+      { account: id, hash: key.hash },
+      fakes.clock.now,
+      fakes.fetcher,
+      fakes.clock.now,
+    )
+    await drainOutbox({ now: fakes.clock.now, fetcher: fakes.fetcher })
+    expect((await readModelPlanAccount(id, fakes.fetcher))!.key!.carry!.micro).toBe(2_250_000)
+    // Past every deadline both reservations are abandoned: counted as consumed with the floor, never summed with a
+    // provider usage that already shows the same charges.
+    fakes.clock.advance(12 * 60_000)
+    fakes.openRouter.keys.get(old.hash)!.usage = 1.4
+    await drainOutbox({ now: fakes.clock.now, fetcher: fakes.fetcher })
+    const trued = (await readModelPlanAccount(id, fakes.fetcher))!.key!
+    expect(trued.carry!.micro).toBe(4_000_000 - Math.max(1_400_000, 1_000_000 + 750_000))
+    expect(await readDebits(id, trued.hash, fakes.fetcher)).toEqual([])
   })
 
   test("combined base and carry respect the test-mode key cap", async () => {

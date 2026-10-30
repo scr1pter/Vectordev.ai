@@ -324,6 +324,10 @@ describe("run verifier domains", () => {
     { patch: { purpose: "unknown" } },
     { patch: { run: undefined } },
     { patch: { run: { ...run.run, id: "" } } },
+    // The admission grammar (§4.6 held member and `run:<id>`): no ':', at most 128 characters, never '-'.
+    { patch: { run: { ...run.run, id: "github:12345:7" } } },
+    { patch: { run: { ...run.run, id: "x".repeat(129) } } },
+    { patch: { run: { ...run.run, id: "-" } } },
     { patch: { run: { ...run.run, source: "slack" } } },
     { patch: { run: { ...run.run, deadline: now } } },
     { patch: { run: { ...run.run, deadline: Infinity } } },

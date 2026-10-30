@@ -7,6 +7,7 @@ import { recordCodiumCharge } from "../api/_lib/codium-ledger"
 import { codiumKeyLimitUsd, codiumLimitProblems, renewalGraceMinutes, trustRampDays } from "../api/_lib/codium-limits"
 import { RAMP_SCRIPTS } from "../api/_lib/codium-ramp"
 import { POOL_SCRIPTS } from "../api/_lib/codium-pool"
+import { MODEL_SPEND_SCRIPTS } from "../api/_lib/codium-spend-ledger"
 import { SNAPSHOT_SCRIPTS } from "../api/_lib/codium-snapshot"
 import {
   cancelModelPlanAccount,
@@ -182,8 +183,15 @@ function store(input: unknown[]) {
     if (script === RAMP_SCRIPTS.READ) return [world.store.get(args[3]!) ?? "0", [...hash(key)].flat()]
     // The pool's scripts (codium-pool.ts): every hold fits, and no key here has debits (test/codium-pool.test.ts runs
     // them for real).
-    if (script === POOL_SCRIPTS.HOLD || script === POOL_SCRIPTS.SETTLE || script === POOL_SCRIPTS.DEBIT) return 1
-    if (script === POOL_SCRIPTS.READ) return [0, 0, 0]
+    // A fresh key's ledger genesis (codium-spend-ledger.ts; its Lua runs for real in model-plan-admit.test.ts and
+    // codium-pool.test.ts): the account's marker turns ready. These pools hold nothing and have no debits.
+    if (script === MODEL_SPEND_SCRIPTS.GENESIS) {
+      world.store.set(key, world.store.get(key)!.replace('"state":"pending"', '"state":"ready"'))
+      hash(args[3]!).set("genesis", args[5]!)
+      return 1
+    }
+    if (script === MODEL_SPEND_SCRIPTS.READ) return [0, 0, 0, 0, 0, 0]
+    if (script === POOL_SCRIPTS.DEBIT) return 1
     if (script === POOL_SCRIPTS.DEBITS) return [...hash(key)].flat()
     if (script === POOL_SCRIPTS.APPLY) return 0
     // Reconcile's snapshot write (WP A05; test/codium-billing.test.ts covers it): the snapshot is all these tests see.
@@ -350,8 +358,7 @@ async function lifecycle(user: { id: string; email: string }) {
   await checkCodiumFunding(fetcher)
   expect((await modelPlanCheckout(user, "vector-10", fetcher)).url).toStartWith("https://checkout.stripe.com/")
   world.subscriptions = [paidSubscription(user)]
-  const credential = await modelPlanCredential(user.id, fetcher, Date.now(), 0.01)
-  await credential.release(0.001)
+  await modelPlanCredential(user.id, fetcher, Date.now(), 0.01)
   const status = await modelPlanStatus(user.id, fetcher)
   charge(user)
   expect(await recordCodiumCharge(user.id, "ch_mode", fetcher)).toMatchObject({ charge: "ch_mode", credits: 400 })
@@ -363,6 +370,7 @@ const kinds = (user: { id: string }) => [
   `account:${user.id}`,
   `lease:${user.id}`,
   "held:hash_mode1",
+  "model-spend:hash_mode1",
   "funding",
   "funding:lock",
   "funding:reserved",
@@ -583,7 +591,7 @@ describe("live mode", () => {
       name: `Vector ${buyer.id} sub_mode ${period().start}`,
       limit: 4,
     })
-    expect(created[0]!.headers.get("idempotency-key")).toStartWith("vector-codium-key-live-")
+    expect(created[0]!.headers.get("idempotency-key")).toStartWith("vector-codium-pool-v1-live-")
   })
 })
 

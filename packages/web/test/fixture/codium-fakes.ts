@@ -9,6 +9,8 @@ import { OWNER_AUDIT_SCRIPT } from "../../../../api/_lib/codium-owner"
 import { ABUSE_RATE_LIMIT_SCRIPT } from "../../../../api/_lib/abuse"
 import { SWITCH_SCRIPTS } from "../../../../api/_lib/codium-switches"
 import { SNAPSHOT_SCRIPTS } from "../../../../api/_lib/codium-snapshot"
+import { modelSpendKeys } from "../../../../api/_lib/codium-spend-ledger"
+import { readyGenesisFields, spendScripts } from "./codium-spend-emulation"
 
 /*
  * In-memory fakes for Codium's billing tests: Stripe (at the pinned API version), OpenRouter's key management API, the
@@ -93,6 +95,17 @@ export class FakeStore {
   set(key: string, value: string) {
     this.data.set(key, { kind: "string", value })
     this.expires.delete(key)
+  }
+
+  /**
+   * The ledger of a pool whose key was created fresh (A17 GENESIS), for a test that seeds a key record directly
+   * instead of provisioning one. Returns the `spendGenesis` marker that key record carries.
+   */
+  seedSpendGenesis(input: { account: string; pool: string; subscription: string; start: number; end: number }) {
+    const nonce = `seed-${input.pool}`
+    const ledger = this.hash(modelSpendKeys(input.pool).ledger)
+    for (const [field, value] of readyGenesisFields({ ...input, nonce })) ledger.set(field, value)
+    return { nonce, state: "ready" as const }
   }
 
   /** Every live key, for assertions. */
@@ -272,8 +285,6 @@ export class FakeStore {
   }
 
   private registerBuiltInScripts() {
-    const last = (member: string) => Number(/:(\d+)$/.exec(member)?.[1] ?? 0)
-    const microOf = (debit: string) => Number(/"micro":(\d+)/.exec(debit)?.[1] ?? 0)
     const reservations = (key: string, argv: string[]) => {
       const values = this.hash(key)
       let reserved = 0
@@ -430,35 +441,6 @@ export class FakeStore {
         },
       ],
       [
-        POOL_SCRIPTS.HOLD,
-        ([held, debits], [now, base, required, score, member, ttl]) => {
-          const set = this.zset(held!)
-          for (const [value, at] of set) if (at <= Number(now)) set.delete(value)
-          const holding = [...set.keys()].reduce((sum, value) => sum + last(value), 0)
-          const applied = [...this.hash(debits!).values()]
-            .filter((value) => value.includes('"applied":true'))
-            .reduce((sum, value) => sum + microOf(value), 0)
-          this.prune(debits!)
-          if (Number(base) - applied - holding < Number(required)) {
-            this.prune(held!)
-            return 0
-          }
-          set.set(member!, Number(score))
-          this.growTtl(held!, ttl!)
-          return 1
-        },
-      ],
-      [
-        POOL_SCRIPTS.SETTLE,
-        ([held], [old, score, member, ttl]) => {
-          const set = this.zset(held!)
-          set.delete(old!)
-          set.set(member!, Number(score))
-          this.growTtl(held!, ttl!)
-          return 1
-        },
-      ],
-      [
         POOL_SCRIPTS.DEBIT,
         ([held, debits, due], [old, ref, record, score, member, ttl, expireAt, dueMember, dueAt]) => {
           const entries = this.hash(debits!)
@@ -497,25 +479,6 @@ export class FakeStore {
             this.prune(due!)
           }
           return pending
-        },
-      ],
-      [
-        POOL_SCRIPTS.READ,
-        ([held, debits], [now]) => {
-          const holding = this.between(this.zset(held!), `(${now}`, "+inf").reduce(
-            (sum, [value]) => sum + last(value),
-            0,
-          )
-          const values = [...this.hash(debits!).values()]
-          const applied = values.filter((value) => value.includes('"applied":true'))
-          const pending = values.filter((value) => !value.includes('"applied":true'))
-          this.prune(held!)
-          this.prune(debits!)
-          return [
-            holding,
-            applied.reduce((sum, value) => sum + microOf(value), 0),
-            pending.reduce((sum, value) => sum + microOf(value), 0),
-          ]
         },
       ],
       [
@@ -625,6 +588,23 @@ export class FakeStore {
       ],
     ]
     for (const [text, run] of scripts) this.scripts.set(text, run)
+    // A17's ledger, fence and common hold (codium-spend-emulation.ts), on this store's values and clock.
+    const spend = spendScripts({
+      read: (key) => this.live(key),
+      setString: (key, value, keepTtl) => {
+        const at = this.expires.get(key)
+        this.set(key, value)
+        if (keepTtl && at !== undefined) this.expires.set(key, at)
+      },
+      hash: (key) => this.hash(key),
+      zset: (key) => this.zset(key),
+      prune: (key) => this.prune(key),
+      pttl: (key) => this.pttl(key),
+      expireAt: (key, at) => {
+        if (this.live(key)) this.expires.set(key, at)
+      },
+    })
+    for (const [text, run] of spend) this.scripts.set(text, run)
   }
 }
 

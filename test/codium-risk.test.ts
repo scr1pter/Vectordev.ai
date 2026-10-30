@@ -6,7 +6,13 @@ import { codiumKey } from "../api/_lib/codium-keys"
 import { createActionRegistry, drainOutbox } from "../api/_lib/codium-provision"
 import { authenticatedCharge, checkoutRiskFields } from "../api/_lib/codium-risk"
 import { readSnapshot } from "../api/_lib/codium-snapshot"
-import { modelPlanCredential, readModelPlanAccount, reconcileModelPlanAccount } from "../api/_lib/model-plan-account"
+import { readDebits } from "../api/_lib/codium-pool"
+import {
+  holdPool,
+  modelPlanCredential,
+  readModelPlanAccount,
+  reconcileModelPlanAccount,
+} from "../api/_lib/model-plan-account"
 import {
   codiumFakes,
   codiumTestEnvironment,
@@ -338,8 +344,7 @@ describe("A10 trust and pool ramps", () => {
     for (const upgrading of [false, true]) {
       const fakes = seed()
       if (upgrading) {
-        const previous = await modelPlanCredential(id, fakes.fetcher, now, 0.01)
-        await previous.release()
+        await modelPlanCredential(id, fakes.fetcher, now, 0.01)
       }
       month(fakes, 100, upgrading ? { subscription: "sub_max", supersedes: "sub_active" } : {})
       await modelPlanCredential(id, fakes.fetcher, now, 0.01)
@@ -397,6 +402,45 @@ describe("A10 trust and pool ramps", () => {
     const patches = fakes.openRouter.calls.filter((call) => call.method === "PATCH").length
     await drainOutbox({ now: fakes.clock.now + 1000, fetcher: fakes.fetcher })
     expect(fakes.openRouter.calls.filter((call) => call.method === "PATCH")).toHaveLength(patches)
+  })
+
+  test("an overspend charged by the ramped true-up is not charged again when the ramp ends", async () => {
+    const fakes = seed()
+    month(fakes, 100)
+    await reconcileModelPlanAccount(id, fakes.fetcher, now)
+    const original = (await readModelPlanAccount(id, fakes.fetcher))!.key!
+    fakes.openRouter.keys.get(original.hash)!.usage = 10
+    const hold = await holdPool(id, 2, 600_000, "hosted", { fetcher: fakes.fetcher, clock: () => fakes.clock.now })
+    month(fakes, 200, {
+      subscription: "sub_ultra",
+      start: fixture.now,
+      secure: "authenticated",
+      supersedes: "sub_active",
+    })
+    await reconcileModelPlanAccount(id, fakes.fetcher, now)
+    const upgraded = (await readModelPlanAccount(id, fakes.fetcher))!
+    // Visible source limit 14.4 (ramped), full 48; 10 used and 2 held at the upgrade.
+    expect(upgraded.key!.carry).toMatchObject({ micro: 2_400_000, fullMicro: 38_000_000 })
+    // The producer charges 3 against its 2 hold on the replaced pool: 1 above what the carry left for it.
+    expect(await hold.settle(3, "hosted:over")).toEqual({ recorded: true, applied: true })
+    fakes.clock.advance(12 * 60_000)
+    await drainOutbox({ now: fakes.clock.now, fetcher: fakes.fetcher })
+    const limited = (await readModelPlanAccount(id, fakes.fetcher))!.key!
+    // Ramped support is 14.4 − 3 − 10 = 1.4: the 1.0 granted above it is charged once, to the successor pool.
+    expect(limited.carry!.micro).toBe(2_400_000)
+    expect((await readDebits(id, limited.hash, fakes.fetcher)).map((debit) => debit.micro)).toEqual([1_000_000])
+    expect(fakes.openRouter.keys.get(limited.hash)!.limit).toBe(31.4)
+    // Everything owed for both months: the full source left 48 − 3 − 10 = 35, plus Ultra's 100.
+    expect((await checkCodiumFunding(fakes.fetcher, fakes.clock.now)).owed).toBe(13_500)
+    fakes.clock.now = upgraded.poolRamp!.until
+    await drainOutbox({ now: fakes.clock.now, fetcher: fakes.fetcher })
+    const released = (await readModelPlanAccount(id, fakes.fetcher))!.key!
+    const debits = await readDebits(id, released.hash, fakes.fetcher)
+    expect(debits.map((debit) => debit.micro)).toEqual([1_000_000])
+    // Full support is 35, granted exactly once: the carry rises over the 1.0 already charged instead of keeping it.
+    expect(released.carry!.micro - 1_000_000).toBe(35_000_000)
+    expect(fakes.openRouter.keys.get(released.hash)!.limit).toBe(135)
+    expect((await checkCodiumFunding(fakes.fetcher, fakes.clock.now)).owed).toBe(13_500)
   })
 })
 

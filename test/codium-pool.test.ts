@@ -2,6 +2,8 @@ import { RAMP_SCRIPTS } from "../api/_lib/codium-ramp"
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { RedisClient } from "bun"
 import {
+  EMPTY_LEDGER,
+  MODEL_HOLD_MS,
   DEBIT_HOLD_MS,
   DEBIT_RETRY_MS,
   debitHoldTicket,
@@ -29,6 +31,8 @@ import {
   reconcileModelPlanAccount,
 } from "../api/_lib/model-plan-account"
 import { SNAPSHOT_SCRIPTS } from "../api/_lib/codium-snapshot"
+import { renewalGraceMinutes } from "../api/_lib/codium-limits"
+import { readyGenesisFields, spendScripts } from "../packages/web/test/fixture/codium-spend-emulation"
 import { modelPlanBalance } from "../api/_lib/model-plan-status"
 
 // Invariants M1–M3 (WP A03): the OpenRouter key is the hard cap, spend is held before it starts, and what is available
@@ -125,8 +129,6 @@ function between(set: Map<string, number>, min: string, max: string) {
     ([, score]) => (low.open ? score > low.at : score >= low.at) && (high.open ? score < high.at : score <= high.at),
   )
 }
-const last = (member: string) => Number(/:(\d+)$/.exec(member)?.[1] ?? 0)
-const microOf = (debit: string) => Number(/"micro":(\d+)/.exec(debit)?.[1] ?? 0)
 function growTtl(key: string, ms: string) {
   if (pttl(key) < Number(ms)) memory.expires.set(key, Date.now() + Number(ms))
 }
@@ -159,35 +161,6 @@ const scripts = new Map<string, (keys: string[], argv: string[]) => unknown>([
       const entries = [...hash(owed!)].flat()
       prune(owed!)
       return [current?.kind === "string" ? current.value : "0", entries]
-    },
-  ],
-  [
-    POOL_SCRIPTS.HOLD,
-    ([held, debits], [now, base, required, score, member, ttl]) => {
-      const set = zset(held!)
-      for (const [value, at] of set) if (at <= Number(now)) set.delete(value)
-      const holding = [...set.keys()].reduce((sum, value) => sum + last(value), 0)
-      const applied = [...hash(debits!).values()]
-        .filter((value) => value.includes('"applied":true'))
-        .reduce((sum, value) => sum + microOf(value), 0)
-      prune(debits!)
-      if (Number(base) - applied - holding < Number(required)) {
-        prune(held!)
-        return 0
-      }
-      set.set(member!, Number(score))
-      growTtl(held!, ttl!)
-      return 1
-    },
-  ],
-  [
-    POOL_SCRIPTS.SETTLE,
-    ([held], [old, score, member, ttl]) => {
-      const set = zset(held!)
-      set.delete(old!)
-      set.set(member!, Number(score))
-      growTtl(held!, ttl!)
-      return 1
     },
   ],
   [
@@ -235,18 +208,6 @@ const scripts = new Map<string, (keys: string[], argv: string[]) => unknown>([
     },
   ],
   [
-    POOL_SCRIPTS.READ,
-    ([held, debits], [now]) => {
-      const holding = between(zset(held!), `(${now}`, "+inf").reduce((sum, [value]) => sum + last(value), 0)
-      const values = [...hash(debits!).values()]
-      const applied = values.filter((value) => value.includes('"applied":true'))
-      const pending = values.filter((value) => !value.includes('"applied":true'))
-      prune(held!)
-      prune(debits!)
-      return [holding, applied.reduce((s, v) => s + microOf(v), 0), pending.reduce((s, v) => s + microOf(v), 0)]
-    },
-  ],
-  [
     POOL_SCRIPTS.DEBITS,
     ([debits]) => {
       const flat = [...hash(debits!)].flat()
@@ -254,6 +215,23 @@ const scripts = new Map<string, (keys: string[], argv: string[]) => unknown>([
       return flat
     },
   ],
+  // A17's ledger, fence and common hold, shared with the billing fakes (codium-spend-emulation.ts).
+  ...spendScripts({
+    read: (key) => live(key),
+    setString: (key, value, keepTtl) => {
+      const at = memory.expires.get(key)
+      memory.data.set(key, { kind: "string", value })
+      if (keepTtl && at !== undefined) memory.expires.set(key, at)
+      else memory.expires.delete(key)
+    },
+    hash,
+    zset,
+    prune,
+    pttl,
+    expireAt: (key, at) => {
+      if (live(key)) memory.expires.set(key, at)
+    },
+  }),
   [
     "if redis.call('GET', KEYS[1]) ~= ARGV[1] then return -1 end; return redis.call('PTTL', KEYS[1])",
     ([key], [token]) => {
@@ -312,6 +290,7 @@ function memoryCommand(command: string[]): unknown {
     return "OK"
   }
   if (name === "PTTL") return pttl(args[0]!)
+  if (name === "DEL") return args.reduce((count, key) => count + (live(key) ? (remove(key), 1) : 0), 0)
   if (name === "HSET") {
     hash(args[0]!).set(args[1]!, args[2]!)
     return 1
@@ -462,7 +441,9 @@ function subscription(price: (typeof PRICES)[number]) {
 
 /**
  * A paid month on `price`'s plan whose key already exists: the account record as the pool keeps it, the OpenRouter key
- * at `limit` with `usage` spent, and `applied` debits already taken off it.
+ * at `limit` with `usage` spent, and `applied` debits already taken off it. A current key was created fresh, so its
+ * pool has a trusted genesis (A17), optionally with a `committed` model floor; a `legacy` one predates both. The
+ * account is then reconciled once, as the webhook would, which writes its snapshot; the calls that made are forgotten.
  */
 async function seed(options: {
   price: (typeof PRICES)[number]
@@ -471,6 +452,7 @@ async function seed(options: {
   carryMicro?: number
   applied?: number[]
   legacy?: boolean
+  committed?: number
 }) {
   const { start, end } = period()
   const credits = Number(CREDITS[options.price])
@@ -486,6 +468,7 @@ async function seed(options: {
     ...(options.legacy
       ? {}
       : {
+          spendGenesis: { nonce: "seed-genesis", state: "ready" },
           creditsMicro,
           limitMicro: creditsMicro + (options.carryMicro ?? 0) - appliedMicro,
           ...(options.carryMicro
@@ -501,6 +484,17 @@ async function seed(options: {
         }),
   }
   await redis(["SET", `vector:codium:test:account:${user.id}`, JSON.stringify({ customer: "cus_pool", key })])
+  if (!options.legacy)
+    for (const [field, value] of readyGenesisFields({
+      account: user.id,
+      pool: HASH,
+      subscription: "sub_pool",
+      start,
+      end,
+      nonce: "seed-genesis",
+      committedMicro: options.committed,
+    }))
+      await redis(["HSET", `vector:codium:test:model-spend:${HASH}`, field, value])
   for (const [index, micro] of (options.applied ?? []).entries())
     await redis([
       "HSET",
@@ -526,6 +520,9 @@ async function seed(options: {
     // As provisioning makes it since WP A07: the period's end plus the renewal grace (M11).
     expires_at: keyExpiresAt(end),
   })
+  await reconcileModelPlanAccount(user.id, fetcher)
+  world.openRouter.length = 0
+  world.stripe = 0
 }
 
 const heldMembers = async () => (await redis(["ZRANGE", `vector:codium:test:held:${HASH}`, 0, -1])) as string[]
@@ -593,11 +590,14 @@ describe("pool arithmetic", () => {
   })
 
   test("every figure comes from credits, carry, usage, debits and holds", () => {
-    const figures = poolFigures({ creditsMicro: 48_000_000, carryMicro: 2_500_000 }, 10_000_000, {
+    const ledger = {
       heldMicro: 1_500_000,
+      abandonedMicro: 0,
+      committedMicro: 0,
       appliedMicro: 564_000,
       pendingMicro: 1_000_000,
-    })
+    }
+    const figures = poolFigures({ creditsMicro: 48_000_000, carryMicro: 2_500_000 }, 10_000_000, ledger)
     expect(figures).toEqual({
       totalMicro: 50_500_000,
       spentMicro: 11_564_000,
@@ -607,6 +607,26 @@ describe("pool arithmetic", () => {
       availableMicro: 50_500_000 - 564_000 - 10_000_000 - 1_500_000,
     })
     expect(poolShareUsed(figures)).toBe(0.23)
+    // Model spend is the larger of lagging usage and the committed floor, never their sum; an abandoned reservation
+    // (unknown outcome) is held at its full amount, and neither lowers the provider key's limit.
+    const floored = poolFigures({ creditsMicro: 48_000_000, carryMicro: 2_500_000 }, 10_000_000, {
+      ...ledger,
+      committedMicro: 12_000_000,
+      abandonedMicro: 700_000,
+    })
+    expect(floored).toEqual({
+      totalMicro: 50_500_000,
+      spentMicro: 13_564_000,
+      limitMicro: 49_936_000,
+      remainingMicro: 36_936_000,
+      availableMicro: 50_500_000 - 564_000 - 12_000_000 - 1_500_000 - 700_000,
+    })
+    expect(
+      poolFigures({ creditsMicro: 4_000_000, carryMicro: 0 }, 3_000_000, {
+        ...EMPTY_LEDGER,
+        committedMicro: 2_000_000,
+      }),
+    ).toMatchObject({ spentMicro: 3_000_000, availableMicro: 1_000_000 })
   })
 
   test("the share used is a whole percent, and used + left is exactly 100", () => {
@@ -642,13 +662,13 @@ describe("M1: the provider key is the hard cap", () => {
     // Max: 48 of credits, 2.50 carried from an upgrade, 0.564 of hosted debits applied: 49.936, set as 49.94.
     await seed({ price: 100, limit: 49.94, usage: 10, carryMicro: 2_500_000, applied: [564_000] })
     await reconcileModelPlanAccount(user.id, fetcher)
-    await (await modelPlanCredential(user.id, fetcher, Date.now(), 0.01)).release()
+    await modelPlanCredential(user.id, fetcher, Date.now(), 0.01)
     expect(patches()).toEqual([])
     expect(world.keys.get(HASH)?.limit).toBe(49.94)
 
     // A key whose limit drifted, here back to the plan's credits, is set to the pool's limit, not to the credits.
     world.keys.get(HASH)!.limit = 48
-    await (await modelPlanCredential(user.id, fetcher, Date.now(), 0.01)).release()
+    await modelPlanCredential(user.id, fetcher, Date.now(), 0.01)
     expect(patches()).toHaveLength(1)
     expect(patches()[0]!.body).toMatchObject({ limit: 49.94, disabled: false })
     expect(world.keys.get(HASH)?.limit).toBe(49.94)
@@ -664,7 +684,7 @@ describe("M1: the provider key is the hard cap", () => {
   test("a switched-off key is switched back on at the pool's limit, its usage kept", async () => {
     await seed({ price: 10, limit: 3.5, usage: 2, applied: [500_000] })
     world.keys.get(HASH)!.disabled = true
-    await (await modelPlanCredential(user.id, fetcher, Date.now(), 0.01)).release()
+    await modelPlanCredential(user.id, fetcher, Date.now(), 0.01)
     expect(world.keys.get(HASH)).toMatchObject({ disabled: false, limit: 3.5, usage: 2 })
     expect(patches().map((call) => call.body.limit)).toEqual([3.5])
   })
@@ -696,40 +716,97 @@ describe("M1: the provider key is the hard cap", () => {
 // ── M2 ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 describe("M2: spend is held before it starts", () => {
-  test("model requests and pool charges hold in one set, and a 12 h hold survives a later 660 s one", async () => {
+  test("every pool charge holds in one set, and a 12 h hold survives a later 660 s one", async () => {
     await seed({ price: 100, limit: 48 })
     const block = await holdPool(user.id, 1, 12 * HOUR, "hosted", { fetcher, runId: "job_1" })
-    const request = await modelPlanCredential(user.id, fetcher, Date.now(), 0.5)
+    const short = await holdPool(user.id, 0.5, MODEL_HOLD_MS, "review", { fetcher })
     const members = (await heldMembers()).map((member) => parseHoldMember(member))
-    expect(members.map((member) => member?.purpose).sort()).toEqual(["chat", "hosted"])
+    expect(members.map((member) => member?.purpose).sort()).toEqual(["hosted", "review"])
     expect(members.find((member) => member?.purpose === "hosted")).toMatchObject({ run: "job_1", micro: 1_000_000 })
-    expect(members.find((member) => member?.purpose === "chat")).toMatchObject({ micro: 500_000 })
-    // The model request's shorter hold did not shorten the set's lifetime.
+    expect(members.find((member) => member?.purpose === "review")).toMatchObject({ micro: 500_000 })
+    // The shorter hold did not shorten the set's lifetime.
     expect(Number(await redis(["PTTL", `vector:codium:test:held:${HASH}`]))).toBeGreaterThan(12 * HOUR - 60_000)
 
-    // Eleven minutes on, the model request's hold has lapsed and the 12-hour one has not.
-    const later = await holdPool(user.id, 0.25, 60_000, "hosted", { fetcher, now: Date.now() + 700_000 })
+    // Eleven minutes on, the short hold has lapsed and the 12-hour one has not.
+    const later = await holdPool(user.id, 0.25, 60_000, "hosted", { fetcher, clock: () => Date.now() + 700_000 })
     const after = (await heldMembers()).map((member) => parseHoldMember(member)?.ticket)
     expect(after.sort()).toEqual([block.ticket, later.ticket].sort())
-    await request.release()
+    await short.release()
     await block.release()
     await later.release()
     expect(await heldMembers()).toEqual([])
   })
 
-  test("a pool charge cannot spend what a model request holds, nor the other way round", async () => {
+  test("a charge cannot spend what another holds, by the figure a model credential checks too", async () => {
     await seed({ price: 10, limit: 4, usage: 1 })
     const block = await holdPool(user.id, 2.9, HOUR, "hosted", { fetcher })
     await expect(modelPlanCredential(user.id, fetcher, Date.now(), 0.2)).rejects.toMatchObject({
       statusCode: 402,
       code: "MODEL_PLAN_EXHAUSTED",
     })
+    await expect(holdPool(user.id, 0.2, MODEL_HOLD_MS, "chat", { fetcher })).rejects.toMatchObject({
+      code: "MODEL_PLAN_EXHAUSTED",
+    })
     await block.release()
-    const request = await modelPlanCredential(user.id, fetcher, Date.now(), 0.2)
+    const request = await holdPool(user.id, 0.2, MODEL_HOLD_MS, "chat", { fetcher })
     await expect(holdPool(user.id, 2.9, HOUR, "hosted", { fetcher })).rejects.toMatchObject({
       code: "MODEL_PLAN_EXHAUSTED",
     })
     await request.release()
+    // A model credential holds nothing itself: model requests are held by ADMIT (model-plan-admit.ts).
+    await modelPlanCredential(user.id, fetcher, Date.now(), 0.2)
+    expect(await heldMembers()).toEqual([])
+  })
+
+  test("a model reservation, live or abandoned, holds what a pool charge cannot spend until it is settled", async () => {
+    await seed({ price: 10, limit: 4, usage: 1 })
+    const ledgerKey = `vector:codium:test:model-spend:${HASH}`
+    const reservationsKey = `vector:codium:test:model-reservations:${HASH}`
+    // A model request reserved 2.5 of the 3 available, recorded as ADMIT records it (model-plan-admit.ts).
+    const deadline = Date.now() + MODEL_HOLD_MS
+    const ticket = crypto.randomUUID()
+    const member = holdMember(ticket, "chat", undefined, 2_500_000)
+    const record = {
+      account: user.id,
+      pool: HASH,
+      ticket,
+      member,
+      purpose: "chat",
+      micro: "2500000",
+      day: new Date(deadline).toISOString().slice(0, 10),
+      epoch: "fixture",
+      version: "1",
+      deadline: String(deadline),
+      admittedAt: String(deadline - MODEL_HOLD_MS),
+      periodEnd: String(period().end * 1000),
+      runUntil: String(deadline),
+      state: "open",
+    }
+    await redis(["HSET", reservationsKey, ticket, JSON.stringify(record)])
+    await redis(["HSET", ledgerKey, "reserved", "2500000"])
+    await redis(["HSET", ledgerKey, "openCount", "1"])
+    await redis(["ZADD", `vector:codium:test:held:${HASH}`, deadline, member])
+    expect(await ledger()).toMatchObject({ heldMicro: 2_500_000, abandonedMicro: 0 })
+    await expect(holdPool(user.id, 0.6, HOUR, "hosted", { fetcher })).rejects.toMatchObject({
+      code: "MODEL_PLAN_EXHAUSTED",
+    })
+    // Past its deadline the request's outcome is unknown: abandoned, it keeps counting at its full amount.
+    const later = () => deadline + 1
+    await expect(holdPool(user.id, 0.6, HOUR, "hosted", { fetcher, clock: later })).rejects.toMatchObject({
+      code: "MODEL_PLAN_EXHAUSTED",
+    })
+    await (await holdPool(user.id, 0.5, HOUR, "hosted", { fetcher, clock: later })).release()
+    // Settled as a cancel (nothing was dispatched), as SETTLE records it: what it held is free again.
+    await redis([
+      "HSET",
+      reservationsKey,
+      ticket,
+      JSON.stringify({ ...record, state: "done", kind: "cancel", charge: "0", gcAt: String(deadline + 86_400_000) }),
+    ])
+    await redis(["HSET", ledgerKey, "reserved", "0"])
+    await redis(["HSET", ledgerKey, "openCount", "0"])
+    await redis(["ZREM", `vector:codium:test:held:${HASH}`, member])
+    expect((await holdPool(user.id, 0.6, HOUR, "hosted", { fetcher, clock: later })).micro).toBe(600_000)
   })
 
   test("two settles racing lose no debit, and a replayed settle records nothing new", async () => {
@@ -755,7 +832,13 @@ describe("M2: spend is held before it starts", () => {
     expect(await again.settle(0.75, "block-a")).toEqual({ recorded: false, applied: true })
     expect(world.keys.get(HASH)?.limit).toBe(46)
     expect(await heldMembers()).toEqual([])
-    expect(await ledger()).toEqual({ heldMicro: 0, appliedMicro: 2_000_000, pendingMicro: 0 })
+    expect(await ledger()).toEqual({
+      heldMicro: 0,
+      abandonedMicro: 0,
+      committedMicro: 0,
+      appliedMicro: 2_000_000,
+      pendingMicro: 0,
+    })
   })
 
   test("a failed PATCH is retried, and the charge stays held, counted once, until it is applied", async () => {
@@ -772,7 +855,13 @@ describe("M2: spend is held before it starts", () => {
     expect(Number(await redis(["ZSCORE", `vector:codium:test:held:${HASH}`, held[0]!]))).toBeGreaterThan(
       Date.now() + DEBIT_HOLD_MS - 60_000,
     )
-    expect(await ledger()).toEqual({ heldMicro: 2_500_000, appliedMicro: 0, pendingMicro: 2_500_000 })
+    expect(await ledger()).toEqual({
+      heldMicro: 2_500_000,
+      abandonedMicro: 0,
+      committedMicro: 0,
+      appliedMicro: 0,
+      pendingMicro: 2_500_000,
+    })
     expect((await status()).monthly).toMatchObject({ credits: 4, used: 3, remaining: 1, available: 1 })
     await expect(modelPlanCredential(user.id, fetcher, Date.now(), 1.1)).rejects.toMatchObject({
       code: "MODEL_PLAN_EXHAUSTED",
@@ -786,7 +875,13 @@ describe("M2: spend is held before it starts", () => {
     })
     expect(world.keys.get(HASH)?.limit).toBe(1.5)
     expect(await heldMembers()).toEqual([])
-    expect(await ledger()).toEqual({ heldMicro: 0, appliedMicro: 2_500_000, pendingMicro: 0 })
+    expect(await ledger()).toEqual({
+      heldMicro: 0,
+      abandonedMicro: 0,
+      committedMicro: 0,
+      appliedMicro: 2_500_000,
+      pendingMicro: 0,
+    })
     expect((await status()).monthly).toMatchObject({ credits: 4, used: 3, remaining: 1, available: 1 })
     await expect(modelPlanCredential(user.id, fetcher, Date.now(), 1.1)).rejects.toMatchObject({
       code: "MODEL_PLAN_EXHAUSTED",
@@ -806,11 +901,23 @@ describe("M2: spend is held before it starts", () => {
       applied: 0,
       retried: 1,
     })
-    expect(await ledger()).toEqual({ heldMicro: 1_000_000, appliedMicro: 0, pendingMicro: 1_000_000 })
+    expect(await ledger()).toEqual({
+      heldMicro: 1_000_000,
+      abandonedMicro: 0,
+      committedMicro: 0,
+      appliedMicro: 0,
+      pendingMicro: 1_000_000,
+    })
     // Any pass under the lease applies it too: here the account's next provisioning.
     await reconcileModelPlanAccount(user.id, fetcher)
     expect(world.keys.get(HASH)?.limit).toBe(3)
-    expect(await ledger()).toEqual({ heldMicro: 0, appliedMicro: 1_000_000, pendingMicro: 0 })
+    expect(await ledger()).toEqual({
+      heldMicro: 0,
+      abandonedMicro: 0,
+      committedMicro: 0,
+      appliedMicro: 1_000_000,
+      pendingMicro: 0,
+    })
     // ...which also took the key off the retry queue.
     expect(await drainDebitApplies({ fetcher, now: Date.now() + 10 * DEBIT_RETRY_MS })).toEqual({
       applied: 0,
@@ -826,21 +933,45 @@ describe("M2: spend is held before it starts", () => {
     // The caller retries the same settle while the key still cannot be updated: nothing new is recorded, and the
     // pending debit is still counted, once, as held.
     expect(await block.settle(1, "block-1")).toEqual({ recorded: false, applied: false })
-    expect(await ledger()).toEqual({ heldMicro: 1_000_000, appliedMicro: 0, pendingMicro: 1_000_000 })
+    expect(await ledger()).toEqual({
+      heldMicro: 1_000_000,
+      abandonedMicro: 0,
+      committedMicro: 0,
+      appliedMicro: 0,
+      pendingMicro: 1_000_000,
+    })
     expect((await heldMembers()).map((member) => parseHoldMember(member)?.ticket)).toEqual([debitHoldTicket("block-1")])
     expect(await applyPoolDebits(user.id, HASH, fetcher)).toEqual({ applied: 1, pending: 0 })
     expect(world.keys.get(HASH)?.limit).toBe(3)
-    expect(await ledger()).toEqual({ heldMicro: 0, appliedMicro: 1_000_000, pendingMicro: 0 })
+    expect(await ledger()).toEqual({
+      heldMicro: 0,
+      abandonedMicro: 0,
+      committedMicro: 0,
+      appliedMicro: 1_000_000,
+      pendingMicro: 0,
+    })
 
     // Two charges settled on one hold, with the same amount and different refs, are two debits, each held.
     const twice = await holdPool(user.id, 1, HOUR, "hosted", { fetcher })
     world.failPatches = 2
     expect(await twice.settle(0.5, "block-2")).toEqual({ recorded: true, applied: false })
     expect(await twice.settle(0.5, "block-3")).toEqual({ recorded: true, applied: false })
-    expect(await ledger()).toEqual({ heldMicro: 1_000_000, appliedMicro: 1_000_000, pendingMicro: 1_000_000 })
+    expect(await ledger()).toEqual({
+      heldMicro: 1_000_000,
+      abandonedMicro: 0,
+      committedMicro: 0,
+      appliedMicro: 1_000_000,
+      pendingMicro: 1_000_000,
+    })
     expect(await applyPoolDebits(user.id, HASH, fetcher)).toEqual({ applied: 2, pending: 0 })
     expect(world.keys.get(HASH)?.limit).toBe(2)
-    expect(await ledger()).toEqual({ heldMicro: 0, appliedMicro: 2_000_000, pendingMicro: 0 })
+    expect(await ledger()).toEqual({
+      heldMicro: 0,
+      abandonedMicro: 0,
+      committedMicro: 0,
+      appliedMicro: 2_000_000,
+      pendingMicro: 0,
+    })
     expect(debitHoldTicket("block-2")).not.toBe(debitHoldTicket("block-3"))
   })
 
@@ -908,7 +1039,7 @@ describe("M3: available is the same figure everywhere", () => {
     await expect(modelPlanCredential(user.id, fetcher, Date.now(), 1.5)).rejects.toMatchObject({
       code: "MODEL_PLAN_EXHAUSTED",
     })
-    await (await modelPlanCredential(user.id, fetcher, Date.now(), 0.9)).release()
+    await modelPlanCredential(user.id, fetcher, Date.now(), 0.9)
 
     // Under the lease (the key's limit had drifted back up), the answer is the same and the key is set right again.
     world.keys.get(HASH)!.limit = 4
@@ -917,18 +1048,254 @@ describe("M3: available is the same figure everywhere", () => {
     })
     expect(world.keys.get(HASH)?.limit).toBe(2)
     world.keys.get(HASH)!.limit = 4
-    await (await modelPlanCredential(user.id, fetcher, Date.now(), 0.9)).release()
+    await modelPlanCredential(user.id, fetcher, Date.now(), 0.9)
     expect(world.keys.get(HASH)?.limit).toBe(2)
     expect(await heldMembers()).toEqual([])
   })
 
-  test("a finished request keeps its charge held briefly, and status counts spend, not running requests", async () => {
-    await seed({ price: 10, limit: 4, usage: 1 })
-    const request = await modelPlanCredential(user.id, fetcher, Date.now(), 0.5)
-    expect((await status()).monthly).toMatchObject({ remaining: 3, available: 2.5 })
-    // The provider charged 0.2; until the key's usage shows it, it stays held.
-    await request.release(0.2)
-    expect((await heldMembers()).map((member) => parseHoldMember(member)?.micro)).toEqual([200_000])
-    expect((await status()).monthly).toMatchObject({ remaining: 3, available: 2.8 })
+  test("a committed model floor counts while provider usage lags, in status, holds and credentials alike", async () => {
+    // 2.5 of model charges settled durably; the provider still reports only 1.
+    await seed({ price: 10, limit: 4, usage: 1, committed: 2_500_000 })
+    expect((await status()).monthly).toMatchObject({ credits: 4, used: 2.5, remaining: 1.5, available: 1.5 })
+    await expect(holdPool(user.id, 1.6, HOUR, "hosted", { fetcher })).rejects.toMatchObject({
+      code: "MODEL_PLAN_EXHAUSTED",
+    })
+    await expect(modelPlanCredential(user.id, fetcher, Date.now(), 1.6)).rejects.toMatchObject({
+      code: "MODEL_PLAN_EXHAUSTED",
+    })
+    const hold = await holdPool(user.id, 1.5, HOUR, "hosted", { fetcher })
+    // Once usage catches up the figure is the same, not double: model spend is max(usage, committed).
+    world.keys.get(HASH)!.usage = 2.5
+    expect((await status()).monthly).toMatchObject({ used: 2.5, remaining: 1.5, available: 0 })
+    await hold.release()
+    world.keys.get(HASH)!.usage = 3
+    expect((await status()).monthly).toMatchObject({ used: 3, remaining: 1, available: 1 })
+    // The provider key's limit is never lowered by the floor (M1).
+    await reconcileModelPlanAccount(user.id, fetcher)
+    expect(patches()).toEqual([])
+  })
+})
+
+describe("A17: the common hold's fence", () => {
+  const accountKey = `vector:codium:test:account:${user.id}`
+  const snapshotKey = `vector:codium:test:ent:${user.id}`
+
+  test("a hold observed before a billing write to the private record is refused, and retried once read again", async () => {
+    await seed({ price: 100, limit: 48 })
+    let paused = () => {}
+    let release = () => {}
+    const reached = new Promise<void>((resolve) => (paused = resolve))
+    const gate = new Promise<void>((resolve) => (release = resolve))
+    // The HOLD is delayed after its credential read, while another writer changes the record (here: a transition
+    // barrier, as a key replacement saves before reading any source balance).
+    const delayed = (async (input, init) => {
+      const body = init?.body === undefined ? "" : String(init.body)
+      if (body.startsWith('["EVAL"') && body.includes("model_pool_fence") && body.includes('\\"required\\"')) {
+        paused()
+        await gate
+      }
+      return fetcher(input, init)
+    }) as typeof fetch
+    const held = holdPool(user.id, 1, HOUR, "hosted", { fetcher: delayed }).catch((error: unknown) => error)
+    await reached
+    const saved = JSON.parse(String(await redis(["GET", accountKey])))
+    await redis([
+      "SET",
+      accountKey,
+      JSON.stringify({ ...saved, transition: { subscription: "sub_next", start: 1, at: Date.now() } }),
+    ])
+    release()
+    expect(await held).toMatchObject({ statusCode: 503, code: "MODEL_PLAN_RENEWING", retryAfterSeconds: 1 })
+    expect(await heldMembers()).toEqual([])
+    // While the barrier stands every new hold is refused the same retryable way, before any provider read. (Here
+    // another request already holds this minute's on-demand reconcile, as the replacement's own reconcile would.)
+    world.openRouter.length = 0
+    await redis(["SET", `vector:codium:test:reconcile:${user.id}`, "taken", "PX", 60_000])
+    await expect(holdPool(user.id, 1, HOUR, "hosted", { fetcher })).rejects.toMatchObject({
+      code: "MODEL_PLAN_RENEWING",
+    })
+    expect(world.openRouter).toEqual([])
+    await redis(["SET", accountKey, JSON.stringify(saved)])
+    expect((await holdPool(user.id, 1, HOUR, "hosted", { fetcher })).micro).toBe(1_000_000)
+  })
+
+  test("a hold landing after its period, snapshot or ledger moved on is refused before any write", async () => {
+    await seed({ price: 100, limit: 48 })
+    const snapshot = JSON.parse(String(await redis(["GET", snapshotKey])))
+    const ledgerKey = `vector:codium:test:model-spend:${HASH}`
+    // Each change lands between the credential read and the HOLD, as a concurrent reconcile or corruption would.
+    const race = async (change: () => Promise<unknown>) => {
+      let paused = () => {}
+      let release = () => {}
+      const reached = new Promise<void>((resolve) => (paused = resolve))
+      const gate = new Promise<void>((resolve) => (release = resolve))
+      const delayed = (async (input, init) => {
+        const body = init?.body === undefined ? "" : String(init.body)
+        if (body.startsWith('["EVAL"') && body.includes('\\"required\\"')) {
+          paused()
+          await gate
+        }
+        return fetcher(input, init)
+      }) as typeof fetch
+      const held = holdPool(user.id, 1, HOUR, "hosted", { fetcher: delayed }).catch((error: unknown) => error)
+      await reached
+      await change()
+      release()
+      return held
+    }
+    const restore = async () => {
+      await redis(["SET", snapshotKey, JSON.stringify(snapshot)])
+      for (const [field, value] of readyGenesisFields({
+        account: user.id,
+        pool: HASH,
+        subscription: "sub_pool",
+        start: snapshot.periodStart / 1000,
+        end: snapshot.periodEnd / 1000,
+        nonce: "seed-genesis",
+      }))
+        await redis(["HSET", ledgerKey, field, value])
+    }
+    for (const state of ["paused", "frozen", "ended"]) {
+      expect(
+        await race(() =>
+          redis(["SET", snapshotKey, JSON.stringify({ ...snapshot, state, version: snapshot.version + 1 })]),
+        ),
+      ).toMatchObject({ code: "MODEL_PLAN_RENEWING" })
+      await restore()
+    }
+    expect(
+      await race(() =>
+        redis([
+          "SET",
+          snapshotKey,
+          JSON.stringify({ ...snapshot, subscription: "sub_next", meterEpoch: "sub_next:1" }),
+        ]),
+      ),
+    ).toMatchObject({ code: "MODEL_PLAN_RENEWING" })
+    await restore()
+    expect(await race(() => redis(["DEL", snapshotKey]))).toMatchObject({ code: "MODEL_PLAN_RENEWING" })
+    await restore()
+    // A ledger that no longer proves this key's genesis, or that cannot be read, is final.
+    const foreign = JSON.parse(
+      readyGenesisFields({
+        account: user.id,
+        pool: HASH,
+        subscription: "sub_pool",
+        start: 1,
+        end: 2,
+        nonce: "other",
+      })[0][1],
+    )
+    expect(
+      await race(() =>
+        redis([
+          "HSET",
+          ledgerKey,
+          "genesis",
+          JSON.stringify({ ...foreign, start: snapshot.periodStart / 1000, end: snapshot.periodEnd / 1000 }),
+        ]),
+      ),
+    ).toMatchObject({
+      code: "MODEL_PLAN_POOL_UNAVAILABLE",
+    })
+    await restore()
+    expect(await race(() => redis(["HSET", ledgerKey, "committed", "1.5"]))).toMatchObject({
+      code: "MODEL_PLAN_POOL_UNAVAILABLE",
+    })
+    expect(await heldMembers()).toEqual([])
+  })
+
+  test("a renewing snapshot holds through its grace and never past it; an active one stops at its period's end (M11)", async () => {
+    await seed({ price: 100, limit: 48 })
+    const stored = JSON.parse(String(await redis(["GET", snapshotKey])))
+    const end: number = stored.periodEnd
+    const grace = renewalGraceMinutes() * 60_000
+    let at = 0
+    const hold = (snapshot: typeof stored, from: number, fetch = fetcher) => {
+      at = from
+      return holdPool(user.id, 1, HOUR, "hosted", { fetcher: fetch, clock: () => at, snapshot })
+    }
+    // The credential's provider read lasts until `after`, so the HOLD is placed then: the fence decides at that time.
+    const late = (snapshot: typeof stored, from: number, after: number) =>
+      hold(snapshot, from, (async (input, init) => {
+        if (String(input).startsWith("https://openrouter.ai")) at = after
+        return fetcher(input, init)
+      }) as typeof fetch).catch((error: unknown) => error)
+    await (await hold(stored, end - 1)).release()
+    expect(await late(stored, end - 1, end)).toMatchObject({ code: "MODEL_PLAN_RENEWING" })
+    // Reconcile says renewing while the renewal is collected: the period's key keeps serving through the grace.
+    const renewing = { ...stored, state: "renewing", version: stored.version + 1 }
+    await redis(["SET", snapshotKey, JSON.stringify(renewing)])
+    for (const offset of [0, 30 * 60_000, grace - 1]) await (await hold(renewing, end + offset)).release()
+    // A hold priced inside the grace that lands at its end is refused by the fence; one asked past it never reaches a
+    // credential.
+    expect(await late(renewing, end + grace - 1, end + grace)).toMatchObject({ code: "MODEL_PLAN_RENEWING" })
+    expect(await hold(renewing, end + grace).catch((error: unknown) => error)).toMatchObject({
+      code: "MODEL_PLAN_RENEWING",
+    })
+    expect(await heldMembers()).toEqual([])
+  })
+
+  test("a key without a trusted genesis fails closed and is never given a fresh zero", async () => {
+    await seed({ price: 100, limit: 48, legacy: true })
+    await expect(holdPool(user.id, 1, HOUR, "hosted", { fetcher })).rejects.toMatchObject({
+      code: "MODEL_PLAN_POOL_UNAVAILABLE",
+    })
+    await expect(readPoolLedger(user.id, HASH, Date.now(), fetcher)).rejects.toMatchObject({
+      code: "MODEL_PLAN_POOL_UNAVAILABLE",
+    })
+    expect(await redis(["GET", `vector:codium:test:model-spend:${HASH}`])).toBeNull()
+  })
+
+  test("a hold reads its snapshot by the entitlement rules: a missing one is reconciled, not a final 402", async () => {
+    await seed({ price: 100, limit: 48 })
+    // Right after checkout (before the webhook's reconcile wrote it), after a store flush, or unreadable: no snapshot.
+    await redis(["DEL", snapshotKey])
+    const hold = await holdPool(user.id, 1, HOUR, "hosted", { fetcher })
+    expect(hold.micro).toBe(1_000_000)
+    expect(world.stripe).toBeGreaterThan(0)
+    expect(JSON.parse(String(await redis(["GET", snapshotKey])))).toMatchObject({ state: "active" })
+    await hold.release()
+    // A fresh stored snapshot is used as it is: no further Stripe read (M4).
+    const reads = world.stripe
+    await (await holdPool(user.id, 1, HOUR, "hosted", { fetcher })).release()
+    expect(world.stripe).toBe(reads)
+  })
+
+  test("a hold's lifetime starts after its credential reads, not when it was asked for", async () => {
+    await seed({ price: 100, limit: 48 })
+    let at = Date.now()
+    // Every store or provider call takes a simulated 40 seconds.
+    const slow = (async (input, init) => {
+      at += 40_000
+      return fetcher(input, init)
+    }) as typeof fetch
+    const asked = at
+    const hold = await holdPool(user.id, 1, 60_000, "hosted", { fetcher: slow, clock: () => at })
+    const score = Number(await redis(["ZSCORE", `vector:codium:test:held:${HASH}`, (await heldMembers())[0]!]))
+    expect(score).toBeGreaterThan(asked + 60_000)
+    expect(hold.expiresAt).toBe(score)
+    await hold.release()
+  })
+})
+
+describe("A51 obligation: nonmodel producers", () => {
+  // The common HOLD enforces the month and the run's pool binding only. Any producer that starts calling holdPool
+  // (hosted blocks, WP A51 and later) must first enforce the shared day, Brain and run caps atomically, keep its run
+  // binding as long as it runs, hold its worst case (a charge settled above its hold is charged to the pool it was
+  // placed on, or, after an upgrade, to the successor as a carry shortfall) and settle within the carry true-up's retry
+  // window. This tripwire fails when a production module calls holdPool, or reaches the same HOLD through placeHold
+  // or the script itself, so that obligation is reviewed, not lost.
+  test("no production module places a pool hold until its producer is reviewed against the shared caps", async () => {
+    // The only reviewed call is holdPool's own HOLD. Adding a producer here is that producer's review.
+    const reviewed = ["_lib/model-plan-account.ts: placeHold("]
+    const root = new URL("../api/", import.meta.url).pathname
+    const calls: string[] = []
+    for await (const file of new Bun.Glob("**/*.ts").scan({ cwd: root }))
+      for (const match of (await Bun.file(root + file).text()).matchAll(
+        /(?<!function )\b(?:holdPool|placeHold)\(|\bPOOL_SCRIPTS\.HOLD\b/g,
+      ))
+        calls.push(`${file}: ${match[0]}`)
+    expect(calls.sort()).toEqual(reviewed)
   })
 })

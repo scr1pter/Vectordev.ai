@@ -1,6 +1,14 @@
 import { modelPlanStatus } from "./model-plan-account.js"
 import { requireBillingUser } from "./model-plan-billing.js"
-import { configuredPlanModels, modelPlanRequestCredits, modelPlans, modelPlansEnabled } from "./model-plan-config.js"
+import {
+  configuredPlanModels,
+  modelPlanRequestCredits,
+  nominalModelPlanRequestCredits,
+  modelPlans,
+  modelPlansEnabled,
+} from "./model-plan-config.js"
+import { capturedReservationMicro } from "./codium-reservations.js"
+import { CodiumPlan } from "../../packages/schema/src/codium-plan.js"
 import { handleApiError, json, requireMethod, type ApiRequest, type ApiResponse } from "./http.js"
 
 export async function handleModelPlanStatus(request: ApiRequest, response: ApiResponse, fetcher: typeof fetch = fetch) {
@@ -36,7 +44,13 @@ export function modelPlanBalance(status: Awaited<ReturnType<typeof modelPlanStat
   const remaining = status.active ? status.remaining : 0
   // The gateway refuses a request unless the credits available cover the model's largest request, so below the
   // cheapest such amount in the catalog every request is refused.
-  const requests = configuredPlanModels().map((model) => modelPlanRequestCredits(model))
+  const plan = status.active && CodiumPlan.isPlanId(status.plan) ? status.plan : undefined
+  // An unqualified custom catalog can retain a read-only legacy status; its nominal estimate grants no admission.
+  const requests = configuredPlanModels().map((model) =>
+    capturedReservationMicro(model) === undefined
+      ? nominalModelPlanRequestCredits(model, plan)
+      : modelPlanRequestCredits(model, plan),
+  )
   const cheapest = requests.length ? Math.min(...requests) : 0
   const empty = remaining !== undefined && (remaining <= 0 || remaining < cheapest)
   return {

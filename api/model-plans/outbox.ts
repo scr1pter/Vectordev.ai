@@ -3,6 +3,8 @@ import { drainOutbox } from "../_lib/codium-provision.js"
 import { queueCollectionSweep } from "../_lib/codium-collection.js"
 // Registers the `finalize-renewal` action this cron runs (contract §4.4).
 import "../_lib/codium-renewal.js"
+// Registers `model-settle`: a model settlement whose answer was lost twice is retried here.
+import "../_lib/model-plan-admit.js"
 import { drainDebitApplies } from "../_lib/model-plan-account.js"
 import { ApiError, handleApiError, json, requireMethod, type ApiRequest, type ApiResponse } from "../_lib/http.js"
 
