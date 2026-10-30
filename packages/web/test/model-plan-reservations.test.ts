@@ -55,10 +55,11 @@ test.each([
 test("historical bounds never fabricate acceptance or a native bound for absent models and fast routes", () => {
   expect(ROUTE_ACCEPTANCES).toEqual([])
   expect(gatewayPlanModels().some(verifiedGatewayModel)).toBe(false)
+  // Sol stays staged until its OpenRouter ZDR endpoint is captured (owner, 30 Oct): no bound is invented for it.
   for (const id of [
-    "openai/gpt-6.1-terra",
+    "openai/gpt-6.1-sol",
     "openai/gpt-6.1-sol:deep",
-    "openai/gpt-6-astra",
+    "openai/gpt-6.1-sol:deepest",
     "moonshotai/kimi-k3.1-pro:fast",
     "google/gemini-4-argon:fast",
   ])

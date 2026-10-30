@@ -2,7 +2,7 @@
 
 Written 27 Oct 2026. This file is the contract for every engineer-agent session that builds Vector Codium. It merges the five group designs (billing pipeline, gateway and models, cloud agents, hosted services, product perks, website/legal/docs) and applies their critiques. Appendix A lists the few corrections that were changed or rejected, with the reason.
 
-**Precedence.** Owner decisions of 27 Oct (in the task and in `codium-tiers-v3-changes.md` §6–7) win. Then this file. Where this file is silent: `codium-tiers-v3.md`, then `codium-tiers-v2.md`, then `codium-tiers.md`, then `codium-label-plan.md` and `cloud-envs-plan.md`. All are in `docs/vector/build/`.
+**Precedence.** Owner decisions of 27 and 30 Oct (in the task and in `codium-tiers-v3-changes.md` §6–8) win. Then this file. Where this file is silent: `codium-tiers-v3.md`, then `codium-tiers-v2.md`, then `codium-tiers.md`, then `codium-label-plan.md` and `cloud-envs-plan.md`. All are in `docs/vector/build/`.
 
 **Code anchors.** "main" is `main/` at `42346154`. "self-evolving" is branch `self-evolving` in `self-evolving/` (at `5d39462f` when written; read it only through `git show`/`git diff` on committed refs, because a build is editing its working tree). Line numbers are approximate. Find each anchor again before editing.
 
@@ -43,11 +43,11 @@ Status legend: **L** listed when sales open; **S** listed once shipped (§4.14 g
 | | **Plus $10** | **Pro $50** | **Max $100** | **Ultra $200** |
 |---|---|---|---|---|
 | **Headline perks** | @vector in your GitHub on Codium, no API key (S) · PR reviews checked by a second lab (S) · Codium Brain (S, Track B) · Vector Remote (S) | Second opinion with Pro's judges (L) · Brain Vault (S) · Vector Playbooks (S, Track B) | A cloud computer Vector runs for you (S) · Done by Morning (S) · @vector with more: 2 at once, 40 h, scheduled overnight runs, premium models (S) · Release Guard (S) · Ship Desk (S) | 3 cloud computers, 60 h, 12-hour jobs (S) · On Call (S) · The most Codium agent time: 6 at once, 120 h, 2-hour runs (S) · No daily limit (L) |
-| **Models** (all ZDR) | DeepSeek V4.1 Flash (default), Codium Auto, Claude Haiku 5.5, GPT-6 Luna (256K), GPT-6.1 Terra (optional; single EU route) | + GPT-6.1 Sol, Kimi K3.1 Pro, Gemini 4 Argon, Kimi Long and Argon Long (256K) | + Claude Sonnet 5.5, GPT-6 Astra (128K), Sol Deep, DeepSeek Long, Long contexts to 512K, fast lanes (Kimi, Argon) | + Claude Opus 5.5, GPT-6 Astra Long (256K), Sol Deepest, Long contexts to 768K |
+| **Models** (all ZDR) | DeepSeek V4.1 Flash (default), Codium Auto, Claude Haiku 5.5, GPT-6 Luna (256K) | + GPT-6.1 Sol, Kimi K3.1 Pro, Gemini 4 Argon, Kimi Long and Argon Long (256K) | + Claude Sonnet 5.5, Sol Deep, DeepSeek Long, Long contexts to 512K, fast lanes (Kimi, Argon) | + Claude Opus 5.5, Sol Deepest, Long contexts to 768K |
 | **Coming** (C) | — | — | Vector Velocity | Vector Velocity, Vector Labs |
 | Usage, multiple of Plus | 1x | 5.5x (10% more per dollar) | 12x (20% more) | 25x (25% more) |
-| Longest context | 256K | 256K | 512K (Astra 128K) | 768K, or 512K if the launch test fails (Astra Long 256K) |
-| Codium requests at once (of which Astra) | 3 | 6 | 12 (4) | 24 (8) |
+| Longest context | 256K | 256K | 512K | 768K, or 512K if the launch test fails |
+| Codium requests at once | 3 | 6 | 12 | 24 |
 | Requests a minute | 30 | 60 | 120 | 200 |
 | Daily limit (share of the month per UTC day) | 25% | 25% | 40% | none |
 | When Codium is busy | waits | waits | first in line, one retry | same |
@@ -67,6 +67,8 @@ Status legend: **L** listed when sales open; **S** listed once shipped (§4.14 g
 | Roadmap vote | — | — | vote | vote, plus one nomination a quarter |
 | Reports | paid tag, 15 an hour | same | read first, 30 an hour | same |
 | Founding members (window only) | +10% usage, price lock, mark | same | price lock, mark | price lock, mark |
+
+**Not offered:** GPT-6.1 Terra and GPT-6 Astra (and Astra Long). They are not ZDR on OpenRouter, the only route Vector uses (owner, 30 Oct; `codium-tiers-v3-changes.md` §8). Sol and its Deep and Deepest variants stay, listed once their OpenRouter ZDR endpoint is captured and accepted (§1.2).
 
 **Every plan includes:** ZDR routing; no provider keys; no overage charges; **monthly plans only, no top-ups**; usage only as a whole percentage, with a forecast; "Codium" in place of tokens and prices; "upgrade and keep what's left of this month" (a precondition for opening sales, WP A09). When the month is used up, Codium stops until renewal, and your own keys, Vector Local and free models keep working.
 
@@ -95,7 +97,7 @@ Status legend: **L** listed when sales open; **S** listed once shipped (§4.14 g
 | Codium Brain, Auto that learns, Playbooks, Brain in cloud runs | Track B shipped in a release (1.99.113 or later). Playbooks also need two proven playbooks. |
 | Vector Velocity, Vector Labs | Always shown, always with the "Coming" tag. |
 | Preview models (Ultra) | Only once a catalog entry has a future `previewUntil`. The gate is built, dormant. |
-| GPT-6 Astra | Release-week ZDR re-check on `azure` and `azure/us` passes. |
+| GPT-6.1 Sol, Sol Deep, Sol Deepest | A committed capture of Sol's OpenRouter ZDR endpoint (exact provider tag, native context, output including reasoning, every price tier, `xhigh`/`max` effort) is reviewed and accepted in A60, and `ROUTE_ACCEPTANCES` is filled from it (`codium-tiers-v3-changes.md` §8). |
 
 ### 1.3 Taglines (computed)
 
@@ -208,7 +210,6 @@ export type Entitlements = {
   rank: 1 | 2 | 3 | 4
   usageMultiple: number                       // 1, 5.5, 12, 25 (public; the page renders from it)
   inFlight: number                            // Codium requests at once, all callers
-  groups: { astra?: number }                  // per-model-group in-flight caps
   perMinute: number
   dailyShare: number | null                   // share of the month per UTC day; null = none
   contextMax: number
@@ -242,7 +243,7 @@ export function publicEntitlements(plan: PlanId, listed: ReadonlySet<PerkId>): P
 | Field | Plus | Pro | Max | Ultra |
 |---|---|---|---|---|
 | rank / usageMultiple | 1 / 1 | 2 / 5.5 | 3 / 12 | 4 / 25 |
-| inFlight / groups.astra | 3 / – | 6 / – | 12 / 4 | 24 / 8 |
+| inFlight | 3 | 6 | 12 | 24 |
 | perMinute | 30 | 60 | 120 | 200 |
 | dailyShare | 0.25 | 0.25 | 0.40 | null |
 | contextMax | 262144 | 262144 | 512000 | 768000 |
@@ -388,7 +389,7 @@ One helper, `codiumKey(...parts)` in `api/_lib/codium-keys.ts`, prefixes every C
 | `purpose:<poolHash>` | HASH per purpose for the period |
 | `run:<runId>` | per-run spend (EX 3 days) |
 | `debits:<id>:<keyHash>` | hosted and other pool debits |
-| `inflight:<id>`, `inflight:<id>:astra`, `inflight:global` | ZSETs of in-flight requests |
+| `inflight:<id>`, `inflight:global` | ZSETs of in-flight requests |
 | `meter:<id>:<meterEpoch>:<name>` | per-period counters |
 | `switch:<name>`, `switch:audit`, `models-off`, `perks-off` | runtime switches |
 | `funding`, `funding:history` | funding readings (7 days) |
@@ -406,7 +407,7 @@ One helper, `codiumKey(...parts)` in `api/_lib/codium-keys.ts`, prefixes every C
 ### 4.7 Pool, holds and admission
 
 - `expectedLimit = creditsMicro + carryMicro − Σ applied debits`. Displays use `total = credits + carry`, `spent = key.usage + debits`.
-- **ADMIT** (one Lua script, one round trip, `api/_lib/model-plan-admit.ts`): purge expired members; check, in order, the account in-flight set (`MODEL_PLAN_CONCURRENCY`), the model-group set, the global set whose last `MODEL_PLAN_PRIORITY_RESERVE` is kept for rank ≥3 (`MODEL_PLAN_BUSY`), monthly `available − held ≥ required` (`MODEL_PLAN_EXHAUSTED`), daily `day.total + heldToday + required ≤ dailyShare × total` (`MODEL_PLAN_DAILY_LIMIT`), purpose `brain` share (`MODEL_PLAN_BRAIN_SHARE`), and run `run + runHeld + required ≤ ceiling` (`MODEL_PLAN_RUN_LIMIT`). Then it adds every member with one deadline (admission + 660 s), extending each set's TTL to the larger of current and new.
+- **ADMIT** (one Lua script, one round trip, `api/_lib/model-plan-admit.ts`): purge expired members; check, in order, the account in-flight set (`MODEL_PLAN_CONCURRENCY`), the global set whose last `MODEL_PLAN_PRIORITY_RESERVE` is kept for rank ≥3 (`MODEL_PLAN_BUSY`), monthly `available − held ≥ required` (`MODEL_PLAN_EXHAUSTED`), daily `day.total + heldToday + required ≤ dailyShare × total` (`MODEL_PLAN_DAILY_LIMIT`), purpose `brain` share (`MODEL_PLAN_BRAIN_SHARE`), and run `run + runHeld + required ≤ ceiling` (`MODEL_PLAN_RUN_LIMIT`). Then it adds every member with one deadline (admission + 660 s), extending each set's TTL to the larger of current and new.
 - **SETTLE:** replace the hold with the settled charge for 30 s, `HINCRBY day total` (and `brain`), `INCRBY run`. A stream that breaks off adds the hold amount to the day and run buckets (errs toward refusing).
 - **holdPool(account, usd, ttlMs, purpose)** for hosted and any non-model charge: same set; `settle(chargedUsd, ref)` writes the debit, PATCHes the limit under the lease, then marks it applied; the hold stays until applied.
 
@@ -491,9 +492,9 @@ Paused shape: `{active:true, access:false, plan:{…state:"paused"}, empty:false
 
 ### 4.12 Catalog and `/models`
 
-`ModelPlanModel` (in `api/_lib/model-plan-config.ts`) adds optional: `upstream` (required when the id contains `:`), `minPlan` (default `vector-10`), `previewUntil`, `providerOnly: string[]` (adds `provider.only` and `allow_fallbacks:false`; `zdr:true`, `data_collection:"deny"` and `max_price` always stay), `tierContext: Record<PlanId, number>` (keys at or above `minPlan`, values never falling as rank rises and never above that plan's `contextMax`), `inFlightGroup: "astra"`, `manualOnly`, `lab: "deepseek" | "anthropic" | "openai" | "moonshot" | "google"`, `weight` (public price ratio, DeepSeek = 1). `reasoningEffort` widens to `high | xhigh | max`. `CODIUM_AUTO_ROLES[plan] = {floor, default, ceiling}`: floor Luna, default DeepSeek, ceiling DeepSeek / Sol / Sol Deep / Sol Deepest. `CODIUM_JUDGES[plan]` maps worker → judge from another lab (Pro: Sol judges DeepSeek, Kimi, Haiku and Argon; Argon judges Sol and Luna; Terra → Argon; Max: Sonnet 5.5 judges non-Anthropic workers, Sol Deep judges Anthropic; Ultra: Opus 5.5 and Sol Deepest the same way; never Astra). `CODIUM_REVIEW_PAIRS[plan] = {triage, confirm, panelJudge}`: Plus DeepSeek → Luna, panel Haiku; Pro DeepSeek → Sol, panel Argon; Max DeepSeek → Sol Deep, panel Sonnet 5.5; Ultra DeepSeek → Sol Deepest, panel Opus 5.5.
+`ModelPlanModel` (in `api/_lib/model-plan-config.ts`) adds optional: `upstream` (required when the id contains `:`), `minPlan` (default `vector-10`), `previewUntil`, `providerOnly: string[]` (adds `provider.only` and `allow_fallbacks:false`; `zdr:true`, `data_collection:"deny"` and `max_price` always stay), `tierContext: Record<PlanId, number>` (keys at or above `minPlan`, values never falling as rank rises and never above that plan's `contextMax`), `manualOnly`, `lab: "deepseek" | "anthropic" | "openai" | "moonshot" | "google"`, `weight` (public price ratio, DeepSeek = 1). `reasoningEffort` widens to `high | xhigh | max`. `CODIUM_AUTO_ROLES[plan] = {floor, default, ceiling}`: floor Luna, default DeepSeek, ceiling DeepSeek / Sol / Sol Deep / Sol Deepest. `CODIUM_JUDGES[plan]` maps worker → judge from another lab (Pro: Sol judges DeepSeek, Kimi, Haiku and Argon; Argon judges Sol and Luna; Max: Sonnet 5.5 judges non-Anthropic workers, Sol Deep judges Anthropic; Ultra: Opus 5.5 and Sol Deepest the same way; never a `manualOnly` model). `CODIUM_REVIEW_PAIRS[plan] = {triage, confirm, panelJudge}`: Plus DeepSeek → Luna, panel Haiku; Pro DeepSeek → Sol, panel Argon; Max DeepSeek → Sol Deep, panel Sonnet 5.5; Ultra DeepSeek → Sol Deepest, panel Opus 5.5.
 
-Catalog entries (holds in brackets): DeepSeek V4.1 Flash 1017 (default); Haiku 5.5; Luna 256K [0.040]; Terra `azure/eu` [0.241, manualOnly]; Sol High 128K/8,192 [0.442]; Kimi; Argon; Kimi Long and Argon Long (tierContext 256K/512K/768K) [0.594 / 1.106 / 1.618]; DeepSeek Long (Max 512K, Ultra 768K) [0.173 / 0.250]; Sonnet 5.5 200K/16,384 [0.730]; Sol Deep xhigh 128K/16,384 [0.532]; Astra 128K/16,384, $13.75/$55, `promptTokenLimit 272000`, group astra [2.661]; Kimi Fast `moonshotai/highspeed` $4/$20 [0.676]; Argon Fast `google-vertex/global/priority` $3.60/$18 [0.608]; Opus 5.5 200K/32,768 [1.821]; Sol Deepest max 256K/32,768 [1.064]; Astra Long 256K/32,768 [5.322]. Astra, Astra Long, Terra, Long entries and fast lanes are `manualOnly`: never an Auto role, helper, default judge, swarm or routing target. Velocity has no catalog entry until it launches.
+Catalog entries (holds in brackets): DeepSeek V4.1 Flash 1017 (default); Haiku 5.5; Luna 256K [0.040]; Sol High 128K/8,192 [0.442]; Kimi; Argon; Kimi Long and Argon Long (tierContext 256K/512K/768K) [0.594 / 1.106 / 1.618]; DeepSeek Long (Max 512K, Ultra 768K) [0.173 / 0.250]; Sonnet 5.5 200K/16,384 [0.730]; Sol Deep xhigh 128K/16,384 [0.532]; Kimi Fast `moonshotai/highspeed` $4/$20 [0.676]; Argon Fast `google-vertex/global/priority` $3.60/$18 [0.608]; Opus 5.5 200K/32,768 [1.821]; Sol Deepest max 256K/32,768 [1.064]. Terra, Astra and Astra Long are not catalog entries (owner, 30 Oct; `codium-tiers-v3-changes.md` §8), and the Sol entries stay staged until their OpenRouter ZDR endpoint is accepted. Long entries and fast lanes are `manualOnly`: never an Auto role, helper, default judge, swarm or routing target. Velocity has no catalog entry until it launches.
 
 `GET /api/model-plans/models` reads only the snapshot and the runtime model switches: no Stripe, no OpenRouter. New clients get `{enabled, plan, limits:{inFlight}, models:[{id, name, contextLength, maxOutputTokens, lab, weight, role?, manualOnly?, locked?:{plan, name, previewUntil?}, preview?:{until}, auto?}], judges?, review}` with the synthetic `vector/codium-auto` entry after DeepSeek. Old clients get only unlocked models in the four-field shape (Plus's set without a plan) and no Auto. Below `MODEL_PLANS_MIN_CLIENT`: `{enabled:false, models:[]}`.
 
@@ -677,7 +678,8 @@ Each WP lists: depends, files, changes, tests, done. "Tests" run in CI (WP A00);
 **A15. Catalog.** Depends: A01.
 - Files: `api/_lib/codium-catalog.ts`, `api/_lib/model-plan-config.ts`, `packages/web/scripts/model-plan-catalog.ts`, `packages/web/test/fixtures/codium-endpoints-2026-10-27.json` (new, from public `/models`, `/endpoints`, `/endpoints/zdr` only), `packages/web/test/model-plan-entitlements.test.ts` (new), `packages/web/test/model-plan-catalog.test.ts`.
 - Changes: §4.12 fields, entries, roles, judges, review pairs; `MODEL_PLAN_MODELS_JSON` overrides default `minPlan` to `vector-10`; `effectiveModel(model, plan)`, `modelAccess(model, plan, now)`, `modelPlanRequestCredits(model, plan)`; `CODIUM_CATALOG_UPDATED='2026-10-27'`; audit matches `upstream ?? id`, checks `providerOnly` against ZDR routes, largest `tierContext` and effort support.
-- Tests: holds equal §4.12 to 3 dp; first entry open to Plus; roles unlocked per tier; manualOnly set; judges cross-lab and never Astra; bad overrides rejected.
+- Tests: holds equal §4.12 to 3 dp; first entry open to Plus; roles unlocked per tier; manualOnly set; judges cross-lab and never `manualOnly`; bad overrides rejected.
+- C-SOL (owner, 30 Oct): Terra, Astra and Astra Long leave the staged catalog; `CODIUM_CATALOG_UPDATED='2026-10-30'` and the default audit target is `codium-endpoints-2026-10-30.json`, which pins the same 23 Oct capture (`codium-csol-models-notes.md`).
 - Done: catalog typecheck and tests green.
 
 **A16. Callers and tokens.** Depends: A02.
@@ -689,7 +691,7 @@ Each WP lists: depends, files, changes, tests, done. "Tests" run in CI (WP A00);
 **A17. Admission and chat.** Depends: A03, A05, A15, A16.
 - Files: `api/_lib/model-plan-admit.ts` (new), `api/_lib/model-plan-chat.ts`, `api/_lib/model-plan-account.ts`.
 - Changes: chat order: enabled and client gate → caller → request against catalog minus `models-off` (503 `MODEL_PLAN_MODEL_UNAVAILABLE`) → snapshot (402 before 403; livemode) → per-minute limit by tier → `modelAccess` (403 with recent-checkout reconcile) → context with `effectiveModel` → `beforeAdmit` hooks (computer-use tool refusal for run tokens, hosted live check) → credential → ADMIT (§4.7) with one deadline → upstream (`upstream ?? id`, effort, `providerOnly`) → priority retry for rank ≥3 on 429/503 before any byte, same hold, same deadline → finally release, settle, `afterSettle`.
-- Tests: `packages/web/test/model-plans-api.test.ts` extensions: locked 403 with no hold; 31st Plus request 429; concurrency 429 frees on error, abort and throw; fifth Astra on Max refused; reserve; daily limit and retry-after; run ceiling atomic under parallel requests; brain share; retry rules; fast-lane body; variants send upstream id and effort; disabled model 503; tokens still forwarded and cost stripped.
+- Tests: `packages/web/test/model-plans-api.test.ts` extensions: locked 403 with no hold; 31st Plus request 429; concurrency 429 frees on error, abort and throw; reserve; daily limit and retry-after; run ceiling atomic under parallel requests; brain share; retry rules; fast-lane body; variants send upstream id and effort; disabled model 503; tokens still forwarded and cost stripped.
 - Done: one Valkey round trip for admission (counted in the test).
 
 **A18. `/models`, status and estimate.** Depends: A17.
@@ -700,7 +702,7 @@ Each WP lists: depends, files, changes, tests, done. "Tests" run in CI (WP A00);
 
 **A19. Core and engine clients.** Depends: A18.
 - Files: `packages/core/src/model-plans.ts`, `packages/core/src/model-plan-status.ts`, `packages/core/src/codium-auto.ts` (new), `packages/core/src/session/runner/model-plan-route.ts`, `packages/llm/src/route/executor.ts` (final codes only), `packages/engine/src/provider/error.ts`, `packages/engine/src/session/retry.ts`, `packages/engine/src/provider/provider.ts` (`getSmallModel`), `packages/engine/src/session/prompt.ts` (`createUserMessage`, `currentModel`), `packages/schema/src/model.ts`, `packages/schema/src/v1/session.ts`, `packages/core/src/plugin/provider/vector-plan.ts`, `packages/engine/src/cli/cmd/codium.ts`, `models.ts`; regenerate `packages/sdk` and `packages/client` (never by hand).
-- Changes: headers (§4.9) on catalog, chat, status and the Core V2 runner; error kinds (§4.10); lenient status decode; `AUTO_ID`; Auto resolves once per user message (floor / default / ceiling from size), guards the chosen model's window at 80%, never Astra, stores `selected`; helpers pick floor, then default, never locked, manualOnly or Auto, and skip when none fits; purpose header passes through `createFetch` and the V2 route (titles `title`, judges `judge`, reviews `review`, `modelLearn` `brain`); `vector codium` and `vector models` lines.
+- Changes: headers (§4.9) on catalog, chat, status and the Core V2 runner; error kinds (§4.10); lenient status decode; `AUTO_ID`; Auto resolves once per user message (floor / default / ceiling from size), guards the chosen model's window at 80%, never a `manualOnly` model, stores `selected`; helpers pick floor, then default, never locked, manualOnly or Auto, and skip when none fits; purpose header passes through `createFetch` and the V2 route (titles `title`, judges `judge`, reviews `review`, `modelLearn` `brain`); `vector codium` and `vector models` lines.
 - Tests: `packages/core/test/model-plans.test.ts`, `codium-auto.test.ts` (new), `model-plan-status-compat.test.ts` (new, H7 with frozen 1.99.111/112 decoders), `packages/engine/test/session/retry.test.ts`, `prompt.test.ts`, provider small-model test; Core V2 final codes.
 - Done: H7 green; SDK check passes.
 
@@ -921,7 +923,7 @@ Each WP lists: depends, files, changes, tests, done. "Tests" run in CI (WP A00);
 - Done: @vector listable after the live runs (§1.2).
 
 **A60. Release and go-live.** Depends: all Track A WPs needed for the launch set.
-- Changes: merge `codium/legal` in the release commit with both dates; publish the desktop and npm CLI release; set `MODEL_PLANS_MIN_CLIENT` and the compiled default to it; run the e2e workflow (buy Plus; upgrade to Max with the 3DS card; check carry; schedule a downgrade; renew with a test clock; fail a renewal with 4000 0000 0000 0341; refund; dispute; EFW test card; consent text visible); run the load check against a staging deploy with stubbed OpenRouter (24 in-flight Ultra plus 8 Astra Long holds, 200 rpm, one admission round trip, peak memory on a 4.5 MB body; a 768K request must clear `MAX_BYTES` and 600 s or Ultra ships at 512K); then item Q (1 GB chat function) if peak memory allows.
+- Changes: merge `codium/legal` in the release commit with both dates; publish the desktop and npm CLI release; set `MODEL_PLANS_MIN_CLIENT` and the compiled default to it; run the e2e workflow (buy Plus; upgrade to Max with the 3DS card; check carry; schedule a downgrade; renew with a test clock; fail a renewal with 4000 0000 0000 0341; refund; dispute; EFW test card; consent text visible); run the load check against a staging deploy with stubbed OpenRouter (24 in-flight Ultra holds, 200 rpm, one admission round trip, peak memory on a 4.5 MB body; a 768K request must clear `MAX_BYTES` and 600 s or Ultra ships at 512K); then item Q (1 GB chat function) if peak memory allows.
 - Done: owner checklist in §8.2 steps 15–18.
 
 ### Track B (branch `codium-113` off self-evolving, after the multi-agent build)
@@ -930,7 +932,7 @@ Each WP lists: depends, files, changes, tests, done. "Tests" run in CI (WP A00);
 
 **B02. Label plan C13.** As `codium-label-plan.md` §7 C13 and §11: workflow insight cost cell "Codium", progress without "N of M tokens", the busy note, judges as helpers reading "Codium". Retry wait copy for helpers over Plus's 3 at once says "requests at once", not agents.
 
-**B03. Codium Brain helpers.** Files: `packages/core/src/brain/schema.ts`, `packages/engine/src/session/skill-learn.ts` (`drafts()`), `prompt.ts` (model-learner gate), `packages/core/src/brain/distill.ts`, Settings → Memory, `brain.astro` and privacy text. Changes: `brain.codiumHelpers` asked once after subscribing; gates accept the tier's floor ZDR model (Luna or DeepSeek, never Terra or Astra) with purpose `brain`; distillation becomes a normal setting; "Bootstrap this repo" sends proposals to review; `MODEL_PLAN_BRAIN_SHARE` skips quietly; the decision-8 privacy rewording. Tests: `skill-learn.test.ts`. Done: lists `brain`.
+**B03. Codium Brain helpers.** Files: `packages/core/src/brain/schema.ts`, `packages/engine/src/session/skill-learn.ts` (`drafts()`), `prompt.ts` (model-learner gate), `packages/core/src/brain/distill.ts`, Settings → Memory, `brain.astro` and privacy text. Changes: `brain.codiumHelpers` asked once after subscribing; gates accept the tier's floor ZDR model (Luna or DeepSeek) with purpose `brain`; distillation becomes a normal setting; "Bootstrap this repo" sends proposals to review; `MODEL_PLAN_BRAIN_SHARE` skips quietly; the decision-8 privacy rewording. Tests: `skill-learn.test.ts`. Done: lists `brain`.
 
 **B04. Codium Auto that learns.** Files: `packages/core/src/brain/workflow.ts`, `packages/core/src/plugin/provider/vector-plan.ts`, `packages/core/src/codium-auto.ts`. Changes: catalog `weight` as hidden metadata; `codiumUnits` when every step ran on Codium; Auto chooses roles by MIN_RUNS 6, MARGIN 0.1, CHEAPER 20%; explanations in percentages. Tests: `brain/workflow.test.ts`. Done: lists `auto-learns`.
 
@@ -1030,7 +1032,7 @@ No D1 or Queues are used: per-account Durable Objects hold ops state, and Vercel
 5. **Upgrades create a second subscription for a moment.** A failed supersede would double-bill at the next renewal; the hourly sweep checks for duplicates.
 6. **Upstash is a single point of failure** for accounts, holds, outbox and switches. It fails closed (503); the owner page shows its health.
 7. **Funding check scale:** it lists every key every 10 minutes; at a few thousand subscribers it needs an incremental owed figure.
-8. **Unverified upstream behaviour:** `xhigh` and `max` effort for Sol on Azure; `provider.only` endpoint tags with `zdr:true`; 768K within 4.5 MB and 600 s; Astra's ZDR routes (69% uptime on `azure` over one day; a new Bedrock route with unknown ZDR status). Each needs the audit plus one approved live request.
+8. **Unverified upstream behaviour:** Sol's OpenRouter ZDR endpoint (exact provider tag, limits and prices) and its `xhigh` and `max` effort there; `provider.only` endpoint tags with `zdr:true`; 768K within 4.5 MB and 600 s. Each needs the audit plus one approved live request.
 9. **Merge friction** between `codium` and self-evolving (`task.ts`, `prompt.ts` and the six label files). Merge after A21 and after every later WP that touches them, at the self-evolving build's safe points.
 10. **Codex boundary.** If Codex's interfaces slip, @vector, scheduled runs, ops fix runs and Ship Desk screenshots stay unlisted; the copy follows the listing.
 11. **Write-access spending.** Any writer on a bound repo spends the binder's month; on a busy org repo that is team sharing by the back door, bounded by the caps.
@@ -1066,7 +1068,7 @@ No D1 or Queues are used: per-account Durable Objects hold ops state, and Vercel
 
 ### 8.3 Decisions
 
-**Already taken by this contract** (each is the plan's recommended pick or follows a critique; the owner may override): Terra listed on Plus as optional only; Auto ceilings are Sol variants; 403 for locked models and 429 daily limit at 00:00 UTC; one retry on Max and Ultra; unmarked tokens refused for Codium; Astra on Max and Ultra at the v3 caps, listed after the ZDR re-check; founding window 500 or 90 days with lock and +10% on Plus and Pro; Second opinion off by default; Codium Brain share about 10%, asked once; Auto may switch the main model only inside Auto; report tracker, Race, the review panel and Bootstrap free; no monthly calls and no Labs live; Vault via R2 after the legal read, with the free GitHub backend; Remote on Cloudflare with an outside review; hosted computer on Vercel Sandbox only with a written OK; no server merges in v1; meters reset on every new period including an upgrade; cloud-agent hours do not carry on an upgrade (the new plan's full hours apply).
+**Already taken by this contract** (each is the plan's recommended pick or follows a critique; the owner may override): Sol in, Terra and Astra out (owner, 30 Oct; `codium-tiers-v3-changes.md` §8); Auto ceilings are Sol variants; 403 for locked models and 429 daily limit at 00:00 UTC; one retry on Max and Ultra; unmarked tokens refused for Codium; founding window 500 or 90 days with lock and +10% on Plus and Pro; Second opinion off by default; Codium Brain share about 10%, asked once; Auto may switch the main model only inside Auto; report tracker, Race, the review panel and Bootstrap free; no monthly calls and no Labs live; Vault via R2 after the legal read, with the free GitHub backend; Remote on Cloudflare with an outside review; hosted computer on Vercel Sandbox only with a written OK; no server merges in v1; meters reset on every new period including an upgrade; cloud-agent hours do not carry on an upgrade (the new plan's full hours apply).
 
 **Still open:**
 1. Renewal grace length (default 120 minutes).
@@ -1076,7 +1078,8 @@ No D1 or Queues are used: per-account Durable Objects hold ops state, and Vercel
 5. "Vector Velocity: only on Max and Ultra" binds future pricing: Velocity could not later be sold to Max and Ultra subscribers as an add-on.
 6. Stripe Tax on or off.
 7. The computer-use brand name for the cloud computer.
-8. Whether to list GPT-6 Astra at launch if its `azure` route stays below about 90% uptime.
+8. ~~Whether to list GPT-6 Astra at launch if its `azure` route stays below about 90% uptime.~~ Resolved 30 Oct: Astra is not offered (`codium-tiers-v3-changes.md` §8).
+9. Whether Sol may be accepted if the new capture shows its only OpenRouter ZDR endpoint is OpenRouter's `azure` provider tag, as active Luna's is (`codium-tiers-v3-changes.md` §8, open question). Until then Sol stays staged.
 
 ---
 

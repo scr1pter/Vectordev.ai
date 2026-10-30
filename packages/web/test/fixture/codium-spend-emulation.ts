@@ -191,7 +191,7 @@ export function spendScripts(store: SpendStore): [string, Script][] {
         typeof record.runUntil !== "number" ||
         typeof record.epoch !== "string" ||
         typeof record.version !== "number" ||
-        (record.group !== undefined && record.group !== "astra")
+        record.group !== undefined
       )
         return undefined
       if (record.state === "open") {

@@ -495,7 +495,6 @@ export async function handleModelPlanChat(
         funding,
         requiredMicro: reservation.requiredMicro,
         purpose: caller.purpose,
-        group: effective.inFlightGroup,
         run: caller.run,
         ...limits,
       },

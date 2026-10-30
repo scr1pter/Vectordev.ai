@@ -2,6 +2,8 @@
 
 This is the A15 implementation/evidence record based on P2 at `d04a2808`. Independent static review is closed with no remaining confirmed A15 blocker. Local tests and typechecks passed; canonical push and CI are pending. No provider request, account setting, deployment, model inference or sales change was performed. Source implementation is separate from provider acceptance.
 
+**30 Oct (C-SOL):** Terra, Astra and Astra Long are out (`codium-tiers-v3-changes.md` §8). The staged catalog now holds 15 candidates, `CODIUM_CATALOG_UPDATED` is `2026-10-30`, and the default audit target is the October 30 manifest. The Terra and Astra items below, including the outstanding acceptance list, are historical; current state is in [codium-csol-models-notes.md](codium-csol-models-notes.md).
+
 ## Local validation
 
 The serial batches passed 138 unique test cases across six files:

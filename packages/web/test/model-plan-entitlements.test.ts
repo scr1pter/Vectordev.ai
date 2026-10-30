@@ -31,13 +31,11 @@ const ids = {
   deepseek: "deepseek/deepseek-v4.1-flash-1017",
   haiku: "anthropic/claude-haiku-5.5",
   luna: "openai/gpt-6-luna",
-  terra: "openai/gpt-6.1-terra",
   sol: "openai/gpt-6.1-sol",
   kimi: "moonshotai/kimi-k3.1-pro",
   argon: "google/gemini-4-argon",
   sonnet: "anthropic/claude-sonnet-5.5",
   opus: "anthropic/claude-opus-5.5",
-  astra: "openai/gpt-6-astra",
 } as const
 const candidate = (id: string) => configuredPlanModels({ tiered: true }).find((model) => model.id === id)!
 const base = {
@@ -56,8 +54,8 @@ describe("staged catalog boundary", () => {
     expect(configuredPlanModels()[2]!.contextLength).toBe(128000)
     expect(CODIUM_RUNTIME_CATALOG_UPDATED).toBe("2026-10-23")
     expect(publicModelPlans().catalogUpdated).toBe(CODIUM_RUNTIME_CATALOG_UPDATED)
-    expect(CODIUM_CATALOG_UPDATED).toBe("2026-10-27")
-    expect(configuredPlanModels({ tiered: true })).toHaveLength(18)
+    expect(CODIUM_CATALOG_UPDATED).toBe("2026-10-30")
+    expect(configuredPlanModels({ tiered: true })).toHaveLength(15)
     expect(configuredPlanModels({ tiered: true })[0]!.id).toBe(ids.deepseek)
     expect(modelAccess(candidate(ids.deepseek), "vector-10")).toBe(true)
     expect(candidate(ids.luna).contextLength).toBe(256000)
@@ -69,7 +67,7 @@ describe("staged catalog boundary", () => {
     expect(configuredPlanModels({ tiered: true })[0]).toMatchObject({ minPlan: "vector-10", weight: 1 })
     process.env.MODEL_PLAN_MODELS_JSON = JSON.stringify(CODIUM_TIER_MODELS)
     expect(() => configuredPlanModels()).toThrow()
-    expect(configuredPlanModels({ tiered: true })).toHaveLength(18)
+    expect(configuredPlanModels({ tiered: true })).toHaveLength(15)
   })
 
   test.each([
@@ -78,7 +76,6 @@ describe("staged catalog boundary", () => {
     { field: { previewUntil: Date.UTC(2026, 11) } },
     { field: { providerOnly: ["azure"] } },
     { field: { tierContext: { "vector-10": 128000 } } },
-    { field: { minPlan: "vector-100", inFlightGroup: "astra" } },
     { field: { manualOnly: true } },
     { field: { reasoningEffort: "xhigh" } },
     { field: { reasoningEffort: "max" } },
@@ -91,20 +88,14 @@ describe("staged catalog boundary", () => {
 
 describe("tier access and windows", () => {
   test.each([
-    { plan: "vector-10", expected: [ids.deepseek, ids.haiku, ids.luna, ids.terra] },
+    // Owner, 30 Oct: Sol in; Terra (Plus) and Astra (Max, Ultra) out.
+    { plan: "vector-10", expected: [ids.deepseek, ids.haiku, ids.luna] },
     { plan: "vector-50", expected: [ids.sol, ids.kimi, ids.argon, `${ids.kimi}:long`, `${ids.argon}:long`] },
     {
       plan: "vector-100",
-      expected: [
-        `${ids.deepseek}:long`,
-        ids.sonnet,
-        `${ids.sol}:deep`,
-        ids.astra,
-        `${ids.kimi}:fast`,
-        `${ids.argon}:fast`,
-      ],
+      expected: [`${ids.deepseek}:long`, ids.sonnet, `${ids.sol}:deep`, `${ids.kimi}:fast`, `${ids.argon}:fast`],
     },
-    { plan: "vector-200", expected: [ids.opus, `${ids.sol}:deepest`, `${ids.astra}:long`] },
+    { plan: "vector-200", expected: [ids.opus, `${ids.sol}:deepest`] },
   ] as const)("models first unlock on $plan", ({ plan, expected }) => {
     const models = configuredPlanModels({ tiered: true })
     expect(models.filter((model) => model.minPlan === plan).map((model) => model.id)).toEqual([...expected])
@@ -146,29 +137,31 @@ describe("tier access and windows", () => {
     expect(() => effectiveModel({ ...base, contextLength: 100 }, "vector-10")).toThrow()
   })
 
-  test("manual models and aliases retain the owner routing constraints without a preview Astra", () => {
+  test("manual models and aliases retain the owner routing constraints; Sol is staged and Terra and Astra are gone", () => {
     const models = configuredPlanModels({ tiered: true })
     expect(models.filter((model) => model.manualOnly).map((model) => model.id)).toEqual([
-      ids.terra,
       `${ids.kimi}:long`,
       `${ids.argon}:long`,
       `${ids.deepseek}:long`,
-      ids.astra,
       `${ids.kimi}:fast`,
       `${ids.argon}:fast`,
-      `${ids.astra}:long`,
     ])
     for (const model of models.filter((model) => model.id.includes(":")))
       expect(model.upstream).toBe(model.id.split(":")[0])
-    expect(candidate(ids.terra).providerOnly).toEqual(["azure/eu"])
     expect(candidate(`${ids.kimi}:fast`).providerOnly).toEqual(["moonshotai/highspeed"])
     expect(candidate(`${ids.argon}:fast`).providerOnly).toEqual(["google-vertex/global/priority"])
-    for (const id of [ids.astra, `${ids.astra}:long`]) {
-      expect(candidate(id)).toMatchObject({ inFlightGroup: "astra", manualOnly: true, promptTokenLimit: 272000 })
+    // Sol and its effort variants stay staged on Pro, Max and Ultra; none is manual or a preview.
+    for (const [id, plan, effort] of [
+      [ids.sol, "vector-50", "high"],
+      [`${ids.sol}:deep`, "vector-100", "xhigh"],
+      [`${ids.sol}:deepest`, "vector-200", "max"],
+    ] as const) {
+      expect(candidate(id)).toMatchObject({ minPlan: plan, reasoningEffort: effort, lab: "openai" })
+      expect(candidate(id).manualOnly).not.toBe(true)
       expect(candidate(id)).not.toHaveProperty("previewUntil")
     }
-    expect(candidate(`${ids.sol}:deep`).reasoningEffort).toBe("xhigh")
-    expect(candidate(`${ids.sol}:deepest`).reasoningEffort).toBe("max")
+    // Owner, 30 Oct: neither is ZDR on OpenRouter, the only route Vector uses.
+    expect(models.some((model) => /terra|astra/i.test(model.id))).toBe(false)
     expect(models.some((model) => /velocity/i.test(model.id))).toBe(false)
   })
 })
@@ -176,7 +169,6 @@ describe("tier access and windows", () => {
 describe("captured reservations and unqualified nominal estimates", () => {
   test.each([
     { id: ids.luna, plan: "vector-10", hold: "0.269" },
-    { id: ids.terra, plan: "vector-10", hold: "0.241" },
     { id: ids.sol, plan: "vector-50", hold: "0.442" },
     ...[ids.kimi, ids.argon].flatMap((id) => [
       { id: `${id}:long`, plan: "vector-50", hold: "2.179" },
@@ -187,12 +179,10 @@ describe("captured reservations and unqualified nominal estimates", () => {
     { id: `${ids.deepseek}:long`, plan: "vector-200", hold: "0.668" },
     { id: ids.sonnet, plan: "vector-100", hold: "0.730" },
     { id: `${ids.sol}:deep`, plan: "vector-100", hold: "0.532" },
-    { id: ids.astra, plan: "vector-100", hold: "2.661" },
     { id: `${ids.kimi}:fast`, plan: "vector-100", hold: "0.676" },
     { id: `${ids.argon}:fast`, plan: "vector-100", hold: "0.608" },
     { id: ids.opus, plan: "vector-200", hold: "1.821" },
     { id: `${ids.sol}:deepest`, plan: "vector-200", hold: "1.064" },
-    { id: `${ids.astra}:long`, plan: "vector-200", hold: "5.322" },
   ])(
     "$id on $plan reports $hold; unqualified entries remain nominal and cannot authorize a request",
     ({ id, plan, hold }) => {
@@ -251,7 +241,6 @@ describe("automatic roles remain ordinary unlocked models", () => {
         expect(modelAccess(judge, plan.id)).toBe(true)
         expect(judge.manualOnly).not.toBe(true)
         expect(judge.lab).not.toBe(worker.lab)
-        expect(judge.inFlightGroup).not.toBe("astra")
         if (plan.id === "vector-100") expect(judge.id).toBe(worker.lab === "anthropic" ? `${ids.sol}:deep` : ids.sonnet)
         if (plan.id === "vector-200")
           expect(judge.id).toBe(worker.lab === "anthropic" ? `${ids.sol}:deepest` : ids.opus)
@@ -259,7 +248,7 @@ describe("automatic roles remain ordinary unlocked models", () => {
     }
     const pro: Readonly<Record<string, string>> = CODIUM_JUDGES["vector-50"]
     for (const worker of [ids.deepseek, ids.kimi, ids.haiku, ids.argon]) expect(pro[worker]).toBe(ids.sol)
-    for (const worker of [ids.sol, ids.luna, ids.terra]) expect(pro[worker]).toBe(ids.argon)
+    for (const worker of [ids.sol, ids.luna]) expect(pro[worker]).toBe(ids.argon)
   })
 })
 
@@ -288,7 +277,6 @@ describe("staged override validation", () => {
     { patch: { outputPrice: -1 } },
     { patch: { weight: 0 } },
     { patch: { reasoningEffort: "low" } },
-    { patch: { inFlightGroup: "astra" } },
     { patch: { lab: "unknown" } },
   ])("refuses malformed, decreasing or unavailable routing configuration %j", ({ patch }) => {
     process.env.MODEL_PLAN_MODELS_JSON = JSON.stringify([{ ...base, ...patch }])

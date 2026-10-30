@@ -69,7 +69,6 @@ export function includes(caps: Entitlements, perk: keyof Entitlements) {
     case "rank":
     case "usageMultiple":
     case "inFlight":
-    case "groups":
     case "perMinute":
     case "dailyShare":
     case "contextMax":

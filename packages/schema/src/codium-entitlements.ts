@@ -45,8 +45,6 @@ export type Entitlements = {
   readonly usageMultiple: number
   /** Codium requests at once, across every caller of the account. */
   readonly inFlight: number
-  /** In-flight caps per model group, inside `inFlight`. */
-  readonly groups: { readonly astra?: number }
   readonly perMinute: number
   /** The share of the month one UTC day may use; null means no daily limit. */
   readonly dailyShare: number | null
@@ -133,7 +131,6 @@ export const ENTITLEMENTS: Readonly<Record<PlanId, Entitlements>> = freeze({
     rank: 1,
     usageMultiple: 1,
     inFlight: 3,
-    groups: {},
     perMinute: 30,
     dailyShare: 0.25,
     contextMax: 262_144,
@@ -160,7 +157,6 @@ export const ENTITLEMENTS: Readonly<Record<PlanId, Entitlements>> = freeze({
     rank: 2,
     usageMultiple: 5.5,
     inFlight: 6,
-    groups: {},
     perMinute: 60,
     dailyShare: 0.25,
     contextMax: 262_144,
@@ -187,7 +183,6 @@ export const ENTITLEMENTS: Readonly<Record<PlanId, Entitlements>> = freeze({
     rank: 3,
     usageMultiple: 12,
     inFlight: 12,
-    groups: { astra: 4 },
     perMinute: 120,
     dailyShare: 0.4,
     contextMax: 512_000,
@@ -218,7 +213,6 @@ export const ENTITLEMENTS: Readonly<Record<PlanId, Entitlements>> = freeze({
     rank: 4,
     usageMultiple: 25,
     inFlight: 24,
-    groups: { astra: 8 },
     perMinute: 200,
     dailyShare: null,
     contextMax: 768_000,
@@ -269,7 +263,6 @@ export function publicEntitlements(plan: PlanId, listed: ReadonlySet<PerkId>): P
     rank: caps.rank,
     usageMultiple: caps.usageMultiple,
     inFlight: caps.inFlight,
-    groups: { ...caps.groups },
     perMinute: caps.perMinute,
     dailyShare: caps.dailyShare,
     contextMax: caps.contextMax,

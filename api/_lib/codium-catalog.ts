@@ -4,8 +4,9 @@ import { CodiumPlan } from "../../packages/schema/src/codium-plan.js"
 // These are routing ceilings, not a promise that every provider has this price.
 // The owner approved vendor-native precision for Kimi and the closed models; ZDR remains mandatory.
 export const CODIUM_RUNTIME_CATALOG_UPDATED = "2026-10-23"
-// The owner contract date. Captured provider evidence is tracked separately and is not implied by this date.
-export const CODIUM_CATALOG_UPDATED = "2026-10-27"
+// The owner contract date (30 Oct: Sol in; Terra and Astra out). Captured provider evidence is tracked separately and
+// is not implied by this date.
+export const CODIUM_CATALOG_UPDATED = "2026-10-30"
 export const CODIUM_MODELS = [
   {
     id: "deepseek/deepseek-v4.1-flash-1017",
@@ -88,25 +89,16 @@ export const CODIUM_MODELS = [
   },
 ] as const
 
-/** Owner-approved tier definitions, staged until tier admission/routing and provider acceptance are complete. */
+/**
+ * Owner-approved tier definitions, staged until tier admission/routing and provider acceptance are complete. GPT-6.1
+ * Terra and GPT-6 Astra are not offered (owner, 30 Oct): Vector routes only through OpenRouter, and they are not ZDR
+ * there. GPT-6.1 Sol stays staged; its `providerOnly` tag and request options are the 27 Oct hypothesis, unverified
+ * until a captured OpenRouter ZDR endpoint record is committed.
+ */
 export const CODIUM_TIER_MODELS = [
   { ...CODIUM_MODELS[0], minPlan: "vector-10", lab: "deepseek", weight: 1 },
   { ...CODIUM_MODELS[1], minPlan: "vector-10", lab: "anthropic", weight: (0.22 + 0.55) / 1.5 },
   { ...CODIUM_MODELS[2], contextLength: 256000, minPlan: "vector-10", lab: "openai", weight: (0.1375 + 0.55) / 1.5 },
-  {
-    ...CODIUM_MODELS[2],
-    id: "openai/gpt-6.1-terra",
-    name: "GPT-6.1 Terra",
-    description: "Optional reasoning model on the proposed EU route; selected manually.",
-    contextLength: 128000,
-    inputPrice: 1.5,
-    outputPrice: 6,
-    minPlan: "vector-10",
-    providerOnly: ["azure/eu"],
-    manualOnly: true,
-    lab: "openai",
-    weight: (1.5 + 6) / 1.5,
-  },
   {
     ...CODIUM_MODELS[2],
     id: "openai/gpt-6.1-sol",
@@ -191,21 +183,6 @@ export const CODIUM_TIER_MODELS = [
     weight: (2.75 + 11) / 1.5,
   },
   {
-    ...CODIUM_MODELS[2],
-    id: "openai/gpt-6-astra",
-    name: "GPT-6 Astra",
-    description: "Selected manually; uses your month fastest.",
-    maxOutputTokens: 16384,
-    inputPrice: 13.75,
-    outputPrice: 55,
-    providerOnly: ["azure", "azure/us"],
-    inFlightGroup: "astra",
-    manualOnly: true,
-    minPlan: "vector-100",
-    lab: "openai",
-    weight: (13.75 + 55) / 1.5,
-  },
-  {
     ...CODIUM_MODELS[3],
     id: "moonshotai/kimi-k3.1-pro:fast",
     upstream: "moonshotai/kimi-k3.1-pro",
@@ -272,23 +249,6 @@ export const CODIUM_TIER_MODELS = [
     lab: "openai",
     weight: (2.75 + 11) / 1.5,
   },
-  {
-    ...CODIUM_MODELS[2],
-    id: "openai/gpt-6-astra:long",
-    upstream: "openai/gpt-6-astra",
-    name: "GPT-6 Astra Long",
-    description: "Selected manually; uses your month fastest.",
-    contextLength: 256000,
-    maxOutputTokens: 32768,
-    inputPrice: 13.75,
-    outputPrice: 55,
-    providerOnly: ["azure", "azure/us"],
-    inFlightGroup: "astra",
-    manualOnly: true,
-    minPlan: "vector-200",
-    lab: "openai",
-    weight: (13.75 + 55) / 1.5,
-  },
 ] as const
 
 export const CODIUM_AUTO_ROLES = {
@@ -341,7 +301,6 @@ export const CODIUM_JUDGES = {
     "deepseek/deepseek-v4.1-flash-1017": "openai/gpt-6.1-sol",
     "anthropic/claude-haiku-5.5": "openai/gpt-6.1-sol",
     "openai/gpt-6-luna": "google/gemini-4-argon",
-    "openai/gpt-6.1-terra": "google/gemini-4-argon",
     "openai/gpt-6.1-sol": "google/gemini-4-argon",
     "moonshotai/kimi-k3.1-pro": "openai/gpt-6.1-sol",
     "google/gemini-4-argon": "openai/gpt-6.1-sol",

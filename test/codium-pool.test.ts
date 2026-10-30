@@ -809,6 +809,43 @@ describe("M2: spend is held before it starts", () => {
     expect((await holdPool(user.id, 0.6, HOUR, "hosted", { fetcher, clock: later })).micro).toBe(600_000)
   })
 
+  test("a reservation that names the retired Astra group fails the pool closed instead of counting it", async () => {
+    await seed({ price: 10, limit: 4, usage: 1 })
+    const ledgerKey = `vector:codium:test:model-spend:${HASH}`
+    const reservationsKey = `vector:codium:test:model-reservations:${HASH}`
+    const deadline = Date.now() + MODEL_HOLD_MS
+    const ticket = crypto.randomUUID()
+    const member = holdMember(ticket, "chat", undefined, 1_000_000)
+    const record = {
+      account: user.id,
+      pool: HASH,
+      ticket,
+      member,
+      purpose: "chat",
+      micro: "1000000",
+      day: new Date(deadline).toISOString().slice(0, 10),
+      epoch: "fixture",
+      version: "1",
+      deadline: String(deadline),
+      admittedAt: String(deadline - MODEL_HOLD_MS),
+      periodEnd: String(period().end * 1000),
+      runUntil: String(deadline),
+      state: "open",
+    }
+    await redis(["HSET", reservationsKey, ticket, JSON.stringify(record)])
+    await redis(["HSET", ledgerKey, "reserved", "1000000"])
+    await redis(["HSET", ledgerKey, "openCount", "1"])
+    await redis(["ZADD", `vector:codium:test:held:${HASH}`, deadline, member])
+    // As ADMIT writes it today the record reads and counts, so the counters agree with it.
+    expect(await ledger()).toMatchObject({ heldMicro: 1_000_000 })
+    // Only ADMIT before 30 Oct could add the Astra group. Such a record is malformed now, so nothing is spent past it.
+    await redis(["HSET", reservationsKey, ticket, JSON.stringify({ ...record, group: "astra" })])
+    await expect(ledger()).rejects.toMatchObject({ code: "MODEL_PLAN_POOL_UNAVAILABLE" })
+    await expect(holdPool(user.id, 0.5, HOUR, "hosted", { fetcher })).rejects.toMatchObject({
+      code: "MODEL_PLAN_POOL_UNAVAILABLE",
+    })
+  })
+
   test("two settles racing lose no debit, and a replayed settle records nothing new", async () => {
     await seed({ price: 100, limit: 48 })
     const first = await holdPool(user.id, 1, HOUR, "hosted", { fetcher })

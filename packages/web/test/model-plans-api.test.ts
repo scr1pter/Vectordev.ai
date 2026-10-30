@@ -1984,21 +1984,35 @@ describe("A17 admission and chat", () => {
     expect(Number(await redis(["ZCARD", inflight]))).toBe(0)
   })
 
-  test("Max runs four Astra requests at once and refuses the fifth", async () => {
-    await subscribed(100)
-    state.gatewayModels = [model, priced("fixture/astra", 1, { inFlightGroup: "astra", minPlan: "vector-100" })]
-    state.chatDelay = 200
-    const responses = await Promise.all(
-      Array.from({ length: 5 }, () =>
-        chat({ model: "fixture/astra", messages: [{ role: "user", content: "fixture" }] }),
-      ),
-    )
-    expect(responses.map((response) => response.status).sort()).toEqual([200, 200, 200, 200, 429])
-    expect(await responses.find((response) => response.status === 429)!.json()).toMatchObject({
-      error: { code: "MODEL_PLAN_CONCURRENCY" },
-    })
-    expect(chats()).toHaveLength(4)
-  })
+  // Owner, 30 Oct: Sol stays staged until its OpenRouter ZDR endpoint is captured and accepted; Terra and Astra are
+  // out. Both use the production catalog and qualification, so an Ultra plan that would include Sol changes nothing.
+  test.each(["openai/gpt-6.1-sol", "openai/gpt-6.1-sol:deep", "openai/gpt-6.1-sol:deepest"])(
+    "staged %s is unavailable to Ultra before the snapshot, a credential, an admission or a fetch",
+    async (id) => {
+      await subscribed(200)
+      const response = await chat({ model: id, messages: [{ role: "user", content: "fixture" }] })
+      expect(response.status).toBe(503)
+      expect(await response.json()).toMatchObject({ error: { code: "MODEL_PLAN_MODEL_UNAVAILABLE" } })
+      expect(stripeCalls()).toEqual([])
+      expect(calls.filter((call) => call.path.startsWith("/api/v1/"))).toEqual([])
+      expect(admissions()).toEqual([])
+      expect(commands.filter((command) => command.some((part) => String(part).includes(":ent:")))).toEqual([])
+    },
+  )
+
+  test.each(["openai/gpt-6.1-terra", "openai/gpt-6-astra", "openai/gpt-6-astra:long"])(
+    "removed %s is not a Codium model: 400 with no snapshot, admission or fetch",
+    async (id) => {
+      await subscribed(200)
+      const response = await chat({ model: id, messages: [{ role: "user", content: "fixture" }] })
+      expect(response.status).toBe(400)
+      expect(await response.json()).toMatchObject({ error: { code: "MODEL_PLAN_MODEL" } })
+      expect(stripeCalls()).toEqual([])
+      expect(calls.filter((call) => call.path.startsWith("/api/v1/"))).toEqual([])
+      expect(admissions()).toEqual([])
+      expect(commands.filter((command) => command.some((part) => String(part).includes(":ent:")))).toEqual([])
+    },
+  )
 
   test("the global priority reserve keeps the last slots for Max and Ultra", async () => {
     process.env.MODEL_PLAN_GLOBAL_INFLIGHT = "2"

@@ -103,7 +103,7 @@ describe("A17 admission adapter", () => {
     const ticket = await admitModelPlan(fixture.input, store.fetcher, fixture.now)
     expect(store.commands).toHaveLength(1)
     expect(store.commands[0]![0]).toBe("EVAL")
-    expect(store.commands[0]![2]).toBe(13)
+    expect(store.commands[0]![2]).toBe(12)
     expect(ticket.deadline).toBe(fixture.now + 660_000)
     expect(ticket.member).toBe(holdMember(ticket.ticket, "chat", undefined, fixture.input.requiredMicro))
     expect(JSON.stringify(store.commands)).not.toContain("Bearer")
@@ -230,7 +230,7 @@ describe("A17 admission adapter", () => {
       code: "PERSISTENT_STORE_UNAVAILABLE",
     })
     expect(commands).toHaveLength(2)
-    const admitted = JSON.parse(String(commands[0]![3 + 13]))
+    const admitted = JSON.parse(String(commands[0]![3 + 12]))
     const queue = commands[1]!
     expect(queue[6]).toBe(`model-settle:${admitted.ticket}`)
     expect(queue[8]).toBe(fixture.now + 660_000 + LOST_ADMISSION_CANCEL_MS)
@@ -366,18 +366,45 @@ describe.skipIf(!valkeyURL)("A17 actual admission/settlement Lua on Valkey", () 
       })
     }))
 
-  test("group cap precedes global cap and global reserve admits priority", () =>
+  test("the global reserve keeps its last slots for priority plans, and settling frees the global slot", () =>
     database(async (f) => {
-      await f.snapshot({ inFlight: 10, groups: { astra: 1 }, dailyShare: null })
-      const ticket = await f.admit({ group: "astra", globalLimit: 2, priorityReserve: 0.5 })
-      await expect(f.admit({ group: "astra", globalLimit: 1 })).rejects.toMatchObject({
-        code: "MODEL_PLAN_CONCURRENCY",
-      })
+      await f.snapshot({ inFlight: 10, dailyShare: null })
+      const ticket = await f.admit({ globalLimit: 2, priorityReserve: 0.5 })
       await expect(f.admit({ globalLimit: 2, priorityReserve: 0.5 })).rejects.toMatchObject({ code: "MODEL_PLAN_BUSY" })
       await f.snapshot({ rank: 3 })
       await f.admit({ globalLimit: 2, priorityReserve: 0.5 })
       await settleModelPlan(ticket, { kind: "cancel" }, f.fetcher, f.now + 1)
-      expect(await f.command(["ZCARD", codiumKey("inflight", f.genesis.account, "astra")])).toBe(0)
+      expect(
+        await f.command(["ZSCORE", codiumKey("inflight", "global"), `${ticket.account}:${ticket.ticket}`]),
+      ).toBeNull()
+    }))
+
+  test("another account's live request counts against the global limit, never against this account's own cap", () =>
+    database(async (f) => {
+      await f.snapshot({ inFlight: 10, dailyShare: null })
+      const global = codiumKey("inflight", "global")
+      const account = codiumKey("inflight", f.genesis.account)
+      const other = `${randomUUID()}:${randomUUID()}`
+      await f.command(["ZADD", global, f.now + 60_000, other])
+      try {
+        // This account has nothing in flight; the shared set's one live member fills Plus's share of a limit of 2.
+        await expect(f.admit({ globalLimit: 2, priorityReserve: 0.5 })).rejects.toMatchObject({
+          code: "MODEL_PLAN_BUSY",
+        })
+        expect(await f.command(["ZCARD", account])).toBe(0)
+        await f.snapshot({ rank: 3 })
+        const ticket = await f.admit({ globalLimit: 2, priorityReserve: 0.5 })
+        expect(await f.command(["ZCARD", account])).toBe(1)
+        expect(Number(await f.command(["ZSCORE", global, `${ticket.account}:${ticket.ticket}`]))).toBe(ticket.deadline)
+        await expect(f.admit({ globalLimit: 2, priorityReserve: 0.5 })).rejects.toMatchObject({
+          code: "MODEL_PLAN_BUSY",
+        })
+        await settleModelPlan(ticket, { kind: "cancel" }, f.fetcher, f.now + 1)
+        expect(await f.command(["ZCARD", account])).toBe(0)
+        expect(Number(await f.command(["ZSCORE", global, other]))).toBe(f.now + 60_000)
+      } finally {
+        await f.command(["ZREM", global, other])
+      }
     }))
 
   test("expired concurrency members are purged even by a refused admission, and never counted", () =>
@@ -488,9 +515,9 @@ describe.skipIf(!valkeyURL)("A17 actual admission/settlement Lua on Valkey", () 
 
   test("settlement is one-shot, meters actual above reserve, releases every concurrency index", () =>
     database(async (f) => {
-      await f.snapshot({ inFlight: 20, groups: { astra: 4 }, dailyShare: null })
+      await f.snapshot({ inFlight: 20, dailyShare: null })
       const run = { id: `run-${randomUUID()}`, deadline: f.now + 1000 }
-      const ticket = await f.admit({ group: "astra", run, requiredMicro: 20_000 })
+      const ticket = await f.admit({ run, requiredMicro: 20_000 })
       expect(await settleModelPlan(ticket, { kind: "complete", chargeMicro: 30_000 }, f.fetcher, f.now + 1)).toBe("ok")
       expect(await settleModelPlan(ticket, { kind: "complete", chargeMicro: 30_000 }, f.fetcher, f.now + 2)).toBe(
         "done",
@@ -500,11 +527,7 @@ describe.skipIf(!valkeyURL)("A17 actual admission/settlement Lua on Valkey", () 
       expect(ledger).toMatchObject({ committedMicro: 30_000, reservedMicro: 0, nonmodelHeldMicro: 0 })
       expect(await f.command(["HGET", codiumKey("day", f.genesis.pool, ticket.day), "total"])).toBe("30000")
       expect(await f.command(["GET", codiumKey("run", run.id)])).toBe("30000")
-      for (const key of [
-        codiumKey("inflight", f.genesis.account),
-        codiumKey("inflight", f.genesis.account, "astra"),
-        codiumKey("inflight", "global"),
-      ])
+      for (const key of [codiumKey("inflight", f.genesis.account), codiumKey("inflight", "global")])
         expect(await f.command(["ZSCORE", key, `${ticket.account}:${ticket.ticket}`])).toBeNull()
     }))
 
@@ -617,6 +640,28 @@ describe.skipIf(!valkeyURL)("A17 actual admission/settlement Lua on Valkey", () 
         await settleModelPlan(ticket, { kind: "complete", chargeMicro: 9000 }, f.fetcher, ticket.deadline + 2),
       ).toBe("missing")
       expect(await f.command(["HGET", modelSpendKeys(ticket.pool).ledger, "committed"])).toBe("5000")
+    }))
+
+  test("a reservation recorded by the retired Astra group path fails the pool closed, never settles or counts", () =>
+    database(async (f) => {
+      const ticket = await f.admit()
+      const reservations = modelSpendKeys(ticket.pool).reservations
+      const stored = String(await f.command(["HGET", reservations, ticket.ticket]))
+      // The ledger reads while the record is as ADMIT wrote it, so only the added field can refuse it below.
+      expect((await readModelSpendLedger(ticket.account, ticket.pool, f.now, f.fetcher)).reservedMicro).toBe(
+        ticket.micro,
+      )
+      // Same record, counters still consistent; it only names the group the pre-30 Oct ADMIT could write.
+      await f.command(["HSET", reservations, ticket.ticket, JSON.stringify({ ...JSON.parse(stored), group: "astra" })])
+      await expect(readModelSpendLedger(ticket.account, ticket.pool, f.now, f.fetcher)).rejects.toMatchObject({
+        code: "MODEL_PLAN_POOL_UNAVAILABLE",
+      })
+      await expect(f.admit()).rejects.toMatchObject({ code: "MODEL_PLAN_POOL_UNAVAILABLE" })
+      await expect(settleModelPlan(ticket, { kind: "cancel" }, f.fetcher, f.now + 1)).rejects.toMatchObject({
+        code: "MODEL_PLAN_POOL_UNAVAILABLE",
+      })
+      expect(await f.command(["HGET", modelSpendKeys(ticket.pool).ledger, "reserved"])).toBe(String(ticket.micro))
+      expect(await f.command(["HLEN", reservations])).toBe(1)
     }))
 
   test("missing open records fail closed rather than lose an abandoned reservation", () =>

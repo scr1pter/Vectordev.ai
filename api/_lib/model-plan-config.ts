@@ -37,7 +37,6 @@ export const ModelPlanModel = Schema.Struct({
   previewUntil: Schema.optional(Schema.Number),
   providerOnly: Schema.optional(Schema.Array(Schema.String)),
   tierContext: Schema.optional(Schema.Record(Schema.String, Schema.Number)),
-  inFlightGroup: Schema.optional(Schema.Literals(["astra"])),
   manualOnly: Schema.optional(Schema.Boolean),
   lab: Schema.optional(Schema.Literals(["deepseek", "anthropic", "openai", "moonshot", "google"])),
   weight: Schema.optional(Schema.Number),
@@ -228,7 +227,6 @@ export function configuredPlanModels(options: { tiered?: boolean } = {}) {
             (context, index) =>
               context > ENTITLEMENTS[eligible[index]!.id].contextMax || (index > 0 && context < effective[index - 1]!),
           )) ||
-        (model.inFlightGroup !== undefined && eligible.some((plan) => !ENTITLEMENTS[plan.id].groups.astra)) ||
         // The current gateway sends ids directly and has no tier/preview/provider-pin enforcement yet.
         (!options.tiered &&
           (model.upstream !== undefined ||
@@ -236,7 +234,6 @@ export function configuredPlanModels(options: { tiered?: boolean } = {}) {
             model.previewUntil !== undefined ||
             model.providerOnly !== undefined ||
             model.tierContext !== undefined ||
-            model.inFlightGroup !== undefined ||
             model.manualOnly === true ||
             (model.reasoningEffort !== undefined && model.reasoningEffort !== "high")))
       )

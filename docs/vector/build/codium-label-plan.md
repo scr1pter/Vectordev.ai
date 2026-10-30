@@ -627,7 +627,7 @@ Copy tests to update in the same commit:
   - `CodiumPricing.tsx:22,290-293,567,738-751`
   - `CodiumPricing.test.ts:124-151`
   - Also the gateway's `/config` route, which lists the same models publicly (`api/_lib/model-plan-models.ts:14-17` says so), once models differ by tier.
-- **Plus models** (owner, 26 Oct): DeepSeek V4.1 Flash, GPT-6.1 Terra, Claude Haiku 5.5 and GPT-6 Luna. Each one reads "Codium" like any other Codium model.
+- **Plus models** (owner, 26 Oct): DeepSeek V4.1 Flash, GPT-6.1 Terra, Claude Haiku 5.5 and GPT-6 Luna. Each one reads "Codium" like any other Codium model. (30 Oct: Terra is out; see `codium-tiers-v3-changes.md` §8.)
 
 ## 11. Interaction with the multi-agent build (helpers on Codium)
 

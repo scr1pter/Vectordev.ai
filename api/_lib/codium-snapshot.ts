@@ -189,7 +189,6 @@ export const NO_CAPS: Entitlements = Object.freeze<Entitlements>({
   rank: 1,
   usageMultiple: 0,
   inFlight: 0,
-  groups: {},
   perMinute: 0,
   dailyShare: 0,
   contextMax: 0,

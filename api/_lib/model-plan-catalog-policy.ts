@@ -32,7 +32,6 @@ export function capturedGatewayModel(model: ModelPlanModel) {
     model.providerOnly?.length !== 1 ||
     model.providerOnly[0] !== bounds.tag ||
     model.tierContext !== undefined ||
-    model.inFlightGroup !== undefined ||
     !Number.isSafeInteger(model.contextLength) ||
     !Number.isSafeInteger(model.maxOutputTokens) ||
     model.contextLength < model.maxOutputTokens ||

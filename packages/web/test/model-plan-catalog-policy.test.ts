@@ -13,7 +13,7 @@ afterEach(() => {
   if (previous !== undefined) process.env.MODEL_PLAN_MODELS_JSON = previous
 })
 
-test("real active models inherit the owner's Pro access policy without activating the eighteen candidates", () => {
+test("real active models inherit the owner's Pro access policy without activating the fifteen candidates", () => {
   const active = gatewayPlanModels()
   expect(active).toHaveLength(5)
   expect(active.map((model) => model.id)).toEqual(configuredPlanModels().map((model) => model.id))

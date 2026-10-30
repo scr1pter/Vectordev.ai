@@ -49,12 +49,7 @@ describe("entitlements", () => {
     expect(Object.keys(ENTITLEMENTS).sort()).toEqual([...ids].sort())
     const row = (pick: (caps: Entitlements) => unknown) => tiers.map(pick)
     expect(row((caps) => caps.usageMultiple)).toEqual([1, 5.5, 12, 25])
-    expect(row((caps) => [caps.inFlight, caps.groups.astra])).toEqual([
-      [3, undefined],
-      [6, undefined],
-      [12, 4],
-      [24, 8],
-    ])
+    expect(row((caps) => caps.inFlight)).toEqual([3, 6, 12, 24])
     expect(row((caps) => caps.perMinute)).toEqual([30, 60, 120, 200])
     expect(row((caps) => caps.dailyShare)).toEqual([0.25, 0.25, 0.4, null])
     expect(row((caps) => caps.contextMax)).toEqual([262_144, 262_144, 512_000, 768_000])
@@ -139,12 +134,11 @@ describe("entitlements", () => {
     const checked = paths.filter((path) => path !== "foundingBoost")
     // The scan has to reach the nested caps, or a pass would mean nothing.
     expect(checked).toContain("ops.shipDesk.cardsPerMonth")
-    expect(checked).toContain("groups.astra")
     expect(checked).toContain("hosted.sizes")
     for (const path of checked) {
       const order = tiers.map((caps) => {
         const value = at(caps, path)
-        // A plan without the perk (null, or an absent group cap) has the least; no daily limit is the most.
+        // A plan without the perk (null, or a field inside a null perk) has the least; no daily limit is the most.
         if (value === null || value === undefined) return path === "dailyShare" ? Infinity : -Infinity
         if (typeof value === "boolean") return value ? 1 : 0
         if (Array.isArray(value)) return value.length
@@ -222,7 +216,6 @@ describe("publicEntitlements", () => {
     "rank",
     "usageMultiple",
     "inFlight",
-    "groups",
     "perMinute",
     "dailyShare",
     "contextMax",
@@ -304,12 +297,12 @@ describe("publicEntitlements", () => {
   test("the answer is a copy that carries no money", () => {
     const view = publicEntitlements("vector-200", all) as unknown as {
       hosted: { sizes: string[] }
-      groups: { astra?: number }
+      reports: { perHour: number }
     }
     view.hosted.sizes.push("huge")
-    view.groups.astra = 99
+    view.reports.perHour = 99
     expect(ENTITLEMENTS["vector-200"].hosted!.sizes).toEqual(["standard", "large"])
-    expect(ENTITLEMENTS["vector-200"].groups.astra).toBe(8)
+    expect(ENTITLEMENTS["vector-200"].reports.perHour).toBe(30)
     for (const id of ids) expect(keys(publicEntitlements(id, all)).filter((key) => banned.test(key))).toEqual([])
     expect(publicEntitlements("vector-20" as PlanId, all)).toEqual({})
   })

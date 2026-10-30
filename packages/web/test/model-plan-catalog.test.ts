@@ -430,7 +430,7 @@ describe("offline captured catalog command", () => {
   test("the default manifest audits staged candidates without relabeling old metadata as a new capture", async () => {
     const report = await auditModelPlanCatalogCommand([])
     expect(report.offline).toBe(true)
-    expect(report.targetDate).toBe("2026-10-27")
+    expect(report.targetDate).toBe("2026-10-30")
     expect(report.capturedAt).toBe("2026-10-23")
     expect(report.models.map((result) => result.model)).toEqual(
       configuredPlanModels({ tiered: true }).map((model) => model.id),

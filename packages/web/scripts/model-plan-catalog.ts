@@ -209,7 +209,7 @@ export async function auditModelPlanCatalogCommand(
     throw new Error("Usage: model-plan-catalog.ts [--snapshot <captured JSON or manifest path>]. No network is used.")
   const filename = argv.length
     ? path.resolve(argv[1]!)
-    : fileURLToPath(new URL("../test/fixtures/codium-endpoints-2026-10-27.json", import.meta.url))
+    : fileURLToPath(new URL("../test/fixtures/codium-endpoints-2026-10-30.json", import.meta.url))
   const text = await Bun.file(filename).text()
   const input = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Union([AuditManifest, CapturedCatalog])))(text)
   const manifest = "snapshot" in input ? input : undefined

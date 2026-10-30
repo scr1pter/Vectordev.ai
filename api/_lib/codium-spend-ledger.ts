@@ -89,6 +89,8 @@ local function model_spend_read(ledgerKey, reservationsKey, heldKey, debitsKey, 
   if not genesis or genesis.v ~= 1 or genesis.account ~= account or genesis.pool ~= pool or type(genesis.creation) ~= 'string' or type(genesis.subscription) ~= 'string' or not integer(genesis.start) or not integer(genesis['end']) or genesis['end'] <= genesis.start or not committed or not compacted or not expectedReserved or not expectedOpen then return nil end
   local records, reserved, abandoned, done, openCount, gc, gcMicro = {}, 0, 0, compacted, 0, {}, 0
   local rawRecords = redis.call('HGETALL', reservationsKey)
+  -- No admission writes a model 'group' since the Astra in-flight cap was retired (owner, 30 Oct). A record that still
+  -- names one came from that retired path and is refused like any other malformed record: the ledger fails closed.
   for i = 1, #rawRecords, 2 do
     local record = object(rawRecords[i + 1])
     if record then
@@ -101,7 +103,7 @@ local function model_spend_read(ledgerKey, reservationsKey, heldKey, debitsKey, 
       end
     end
     local held = record and member(record.member)
-    if not record or not held or record.ticket ~= rawRecords[i] or held.ticket ~= record.ticket or record.account ~= account or record.pool ~= pool or not integer(record.micro) or held.micro ~= record.micro or held.purpose ~= record.purpose or held.run ~= (record.run or '-') or type(record.day) ~= 'string' or not string.match(record.day, '^%d%d%d%d%-%d%d%-%d%d$') or not integer(record.deadline) or not integer(record.admittedAt) or not integer(record.periodEnd) or not integer(record.runUntil) or type(record.epoch) ~= 'string' or not integer(record.version) or (record.group ~= nil and record.group ~= 'astra') then return nil end
+    if not record or not held or record.ticket ~= rawRecords[i] or held.ticket ~= record.ticket or record.account ~= account or record.pool ~= pool or not integer(record.micro) or held.micro ~= record.micro or held.purpose ~= record.purpose or held.run ~= (record.run or '-') or type(record.day) ~= 'string' or not string.match(record.day, '^%d%d%d%d%-%d%d%-%d%d$') or not integer(record.deadline) or not integer(record.admittedAt) or not integer(record.periodEnd) or not integer(record.runUntil) or type(record.epoch) ~= 'string' or not integer(record.version) or record.group ~= nil then return nil end
     if record.state == 'open' then
       reserved = plus(reserved, record.micro)
       openCount = openCount + 1

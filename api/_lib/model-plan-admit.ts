@@ -37,7 +37,6 @@ export type AdmissionTicket = {
   version: number
   deadline: number
   periodEnd: number
-  group?: "astra"
   admittedAt: number
   runUntil: number
 }
@@ -47,7 +46,6 @@ export type ModelPlanAdmission = {
   funding: PoolFunding
   requiredMicro: number
   purpose: PoolPurpose
-  group?: "astra"
   run?: { id: string; deadline: number; ceilingShare?: number }
   globalLimit?: number
   priorityReserve?: number
@@ -74,7 +72,6 @@ export async function admitModelPlan(
     !safeAmount(input.funding.start * 1000) ||
     !safeAmount(input.funding.end * 1000 + 40 * 86_400_000) ||
     !isPoolPurpose(input.purpose) ||
-    (input.group !== undefined && input.group !== "astra") ||
     (input.globalLimit !== undefined && (!safeAmount(input.globalLimit) || input.globalLimit === 0)) ||
     (input.priorityReserve !== undefined && !share(input.priorityReserve))
   )
@@ -106,7 +103,6 @@ export async function admitModelPlan(
     version: input.snapshot.version,
     deadline: now + MODEL_HOLD_MS,
     periodEnd: input.funding.end * 1000,
-    ...(input.group ? { group: input.group } : {}),
     admittedAt: now,
     runUntil: now + 3 * 86_400_000,
   }
@@ -114,7 +110,7 @@ export async function admitModelPlan(
     [
       "EVAL",
       ADMISSION_SCRIPTS.ADMIT,
-      13,
+      12,
       ...admissionKeys(admission),
       JSON.stringify({
         ...admission,
@@ -170,7 +166,7 @@ export async function settleModelPlan(
   const charge = outcome.kind === "cancel" ? 0 : (outcome.chargeMicro ?? ticket.micro)
   if (outcome.kind === "broken" && charge > ticket.micro) throw modelSpendUnavailable()
   const result = await persistentStore(
-    ["EVAL", ADMISSION_SCRIPTS.SETTLE, 13, ...admissionKeys(ticket), JSON.stringify(ticket), outcome.kind, charge, now],
+    ["EVAL", ADMISSION_SCRIPTS.SETTLE, 12, ...admissionKeys(ticket), JSON.stringify(ticket), outcome.kind, charge, now],
     fetcher,
   )
   if (result !== "ok" && result !== "done" && result !== "missing") throw modelSpendUnavailable()
@@ -230,7 +226,6 @@ const SettleRetry = Schema.Struct({
     version: Schema.Number,
     deadline: Schema.Number,
     periodEnd: Schema.Number,
-    group: Schema.optional(Schema.Literal("astra")),
     admittedAt: Schema.Number,
     runUntil: Schema.Number,
   }),
@@ -256,7 +251,6 @@ const admissionKeys = (ticket: AdmissionTicket) => [
   modelSpendKeys(ticket.pool).ledger,
   modelSpendKeys(ticket.pool).reservations,
   codiumKey("inflight", ticket.account),
-  codiumKey("inflight", ticket.account, "astra"),
   codiumKey("inflight", "global"),
   codiumKey("day", ticket.pool, ticket.day),
   codiumKey("purpose", ticket.pool),
@@ -305,37 +299,31 @@ if refusal then return refusal end
 if snapshot.meterEpoch ~= p.epoch then return 'stale' end
 local caps = snapshot.caps
 local function fraction(value) return type(value) == 'number' and value >= 0 and value <= 1 end
-if not caps or not integer(caps.rank) or caps.rank < 1 or caps.rank > 4 or not integer(caps.inFlight) or caps.inFlight < 1 or type(caps.groups) ~= 'table' or (caps.dailyShare ~= cjson.null and not fraction(caps.dailyShare)) or type(caps.purposeShare) ~= 'table' or not fraction(caps.purposeShare.brain) or type(caps.cloudAgents) ~= 'table' or not fraction(caps.cloudAgents.runCeilingShare) or not purposes[p.purpose] or (p.group ~= nil and p.group ~= 'astra') then return 'unavailable' end
-for i = 7, 9 do if not typed(KEYS[i], 'zset') then return 'unavailable' end end
-if not typed(KEYS[10], 'hash') or not typed(KEYS[11], 'hash') or not typed(KEYS[12], 'string') then return 'unavailable' end
-if p.run and not model_run_pool(KEYS[13], p.pool) then return 'runexpired' end
+if not caps or not integer(caps.rank) or caps.rank < 1 or caps.rank > 4 or not integer(caps.inFlight) or caps.inFlight < 1 or (caps.dailyShare ~= cjson.null and not fraction(caps.dailyShare)) or type(caps.purposeShare) ~= 'table' or not fraction(caps.purposeShare.brain) or type(caps.cloudAgents) ~= 'table' or not fraction(caps.cloudAgents.runCeilingShare) or not purposes[p.purpose] then return 'unavailable' end
+for i = 7, 8 do if not typed(KEYS[i], 'zset') then return 'unavailable' end end
+if not typed(KEYS[9], 'hash') or not typed(KEYS[10], 'hash') or not typed(KEYS[11], 'string') then return 'unavailable' end
+if p.run and not model_run_pool(KEYS[12], p.pool) then return 'runexpired' end
 -- §4.7: purge expired members, then count the live ones. A member past its deadline (scored at or before this
 -- admission) holds no slot; removing it changes no answer, and keeps the global set small through refusal bursts.
 -- Counting is ZCOUNT, O(log N), never a walk of the global set. The bound is formatted: Lua's %.14g would round it.
 local admitted = string.format('%.0f', p.admittedAt)
-for i = 7, 9 do
-  if i ~= 8 or p.group then redis.call('ZREMRANGEBYSCORE', KEYS[i], '-inf', admitted) end
-end
+for i = 7, 8 do redis.call('ZREMRANGEBYSCORE', KEYS[i], '-inf', admitted) end
 local function live_count(key) return redis.call('ZCOUNT', key, '(' .. admitted, '+inf') end
--- Refusal precedence is contractual: account, group, global, month, day, period Brain, run.
+-- Refusal precedence is contractual: account, global, month, day, period Brain, run.
 if live_count(KEYS[7]) >= caps.inFlight then return 'concurrency' end
-if p.group then
-  local limit = integer(caps.groups[p.group])
-  if not limit or live_count(KEYS[8]) >= limit then return 'concurrency' end
-end
 if p.globalLimit ~= nil then
   if not integer(p.globalLimit) or p.globalLimit < 1 or not fraction(p.priorityReserve) then return 'unavailable' end
   local limit = caps.rank >= 3 and p.globalLimit or p.globalLimit - math.ceil(p.globalLimit * p.priorityReserve)
-  if live_count(KEYS[9]) >= limit then return 'busy' end
+  if live_count(KEYS[8]) >= limit then return 'busy' end
 end
 local observed = integer(p.observedMicro)
 if not observed then return 'unavailable' end
 local burden = plus(plus(plus(math.max(observed, spend.committed), spend.reserved), spend.nonmodelHeld), spend.applied)
 if not burden then return 'unavailable' end
 if funding.totalMicro - burden < p.micro then return 'monthly' end
-local daily = integer(redis.call('HGET', KEYS[10], 'total') or '0')
-local brain = integer(redis.call('HGET', KEYS[11], 'brain') or '0')
-local run = integer(redis.call('GET', KEYS[12]) or '0')
+local daily = integer(redis.call('HGET', KEYS[9], 'total') or '0')
+local brain = integer(redis.call('HGET', KEYS[10], 'brain') or '0')
+local run = integer(redis.call('GET', KEYS[11]) or '0')
 if not daily or not brain or not run then return 'unavailable' end
 for _, record in pairs(spend.records) do
   if record.state == 'open' then
@@ -368,7 +356,7 @@ if p.run then
   local ceiling = math.min(p.runShare or 1, caps.cloudAgents.runCeilingShare, caps.dailyShare ~= cjson.null and caps.dailyShare or 1)
   if runNext > math.floor(funding.totalMicro * ceiling) then return 'run' end
 end
-local record = {account=p.account,pool=p.pool,ticket=p.ticket,member=p.member,purpose=p.purpose,run=p.run,micro=p.micro,day=p.day,epoch=p.epoch,version=p.version,deadline=p.deadline,periodEnd=p.periodEnd,group=p.group,admittedAt=p.admittedAt,runUntil=p.runUntil,state='open'}
+local record = {account=p.account,pool=p.pool,ticket=p.ticket,member=p.member,purpose=p.purpose,run=p.run,micro=p.micro,day=p.day,epoch=p.epoch,version=p.version,deadline=p.deadline,periodEnd=p.periodEnd,admittedAt=p.admittedAt,runUntil=p.runUntil,state='open'}
 local parsed = member(record.member)
 if not parsed or parsed.ticket ~= record.ticket or parsed.purpose ~= record.purpose or parsed.run ~= (record.run or '-') or parsed.micro ~= record.micro then return 'unavailable' end
 local keep = math.max(p.periodEnd + 3456000000, p.runUntil, p.deadline + 30000)
@@ -378,18 +366,16 @@ model_spend_compact(spend, KEYS[5], KEYS[6])
 local reservationsNew = redis.call('EXISTS', KEYS[6]) == 0
 redis.call('HSET', KEYS[6], p.ticket, model_record_encode(record))
 redis.call('HSET', KEYS[5], 'reserved', string.format('%.0f', nextReserved), 'openCount', string.format('%.0f', nextOpen))
-if p.run then model_bind_run_pool(KEYS[13], p.pool, p.runUntil, p.admittedAt) end
+if p.run then model_bind_run_pool(KEYS[12], p.pool, p.runUntil, p.admittedAt) end
 if reservationsNew then redis.call('PEXPIREAT', KEYS[6], keep) else grow(KEYS[6], keep, p.admittedAt) end
 redis.call('ZREMRANGEBYSCORE', KEYS[3], '-inf', p.admittedAt)
 local heldNew = redis.call('EXISTS', KEYS[3]) == 0
 redis.call('ZADD', KEYS[3], p.deadline, p.member)
-for i = 7, 9 do
-  if i ~= 8 or p.group then
-    local fresh = redis.call('EXISTS', KEYS[i]) == 0
-    redis.call('ZADD', KEYS[i], p.deadline, p.account .. ':' .. p.ticket)
-    -- A later short request may never shorten an earlier live reservation.
-    if fresh then redis.call('PEXPIREAT', KEYS[i], p.deadline) else grow(KEYS[i], p.deadline, p.admittedAt) end
-  end
+for i = 7, 8 do
+  local fresh = redis.call('EXISTS', KEYS[i]) == 0
+  redis.call('ZADD', KEYS[i], p.deadline, p.account .. ':' .. p.ticket)
+  -- A later short request may never shorten an earlier live reservation.
+  if fresh then redis.call('PEXPIREAT', KEYS[i], p.deadline) else grow(KEYS[i], p.deadline, p.admittedAt) end
 end
 if heldNew then redis.call('PEXPIREAT', KEYS[3], p.deadline) else grow(KEYS[3], p.deadline, p.admittedAt) end
 return 'ok'
@@ -404,24 +390,24 @@ local spend = model_spend_read(KEYS[5], KEYS[6], KEYS[3], KEYS[4], now, p.accoun
 if not spend then return 'unavailable' end
 local record = spend.records[p.ticket]
 if not record then return 'missing' end
-for _, field in ipairs({'account','pool','ticket','member','purpose','run','micro','day','epoch','version','deadline','periodEnd','group','admittedAt','runUntil'}) do
+for _, field in ipairs({'account','pool','ticket','member','purpose','run','micro','day','epoch','version','deadline','periodEnd','admittedAt','runUntil'}) do
   if record[field] ~= p[field] then return 'unavailable' end
 end
 if record.state == 'done' then return 'done' end
 if (kind == 'cancel' and charge ~= 0) or (kind == 'broken' and charge > record.micro) then return 'unavailable' end
-for i = 7, 9 do if not typed(KEYS[i], 'zset') then return 'unavailable' end end
-if not typed(KEYS[10], 'hash') or not typed(KEYS[11], 'hash') or not typed(KEYS[12], 'string') then return 'unavailable' end
-local daily = integer(redis.call('HGET', KEYS[10], 'total') or '0')
-local dailyBrain = integer(redis.call('HGET', KEYS[10], 'brain') or '0')
-local brain = integer(redis.call('HGET', KEYS[11], 'brain') or '0')
-local run = integer(redis.call('GET', KEYS[12]) or '0')
+for i = 7, 8 do if not typed(KEYS[i], 'zset') then return 'unavailable' end end
+if not typed(KEYS[9], 'hash') or not typed(KEYS[10], 'hash') or not typed(KEYS[11], 'string') then return 'unavailable' end
+local daily = integer(redis.call('HGET', KEYS[9], 'total') or '0')
+local dailyBrain = integer(redis.call('HGET', KEYS[9], 'brain') or '0')
+local brain = integer(redis.call('HGET', KEYS[10], 'brain') or '0')
+local run = integer(redis.call('GET', KEYS[11]) or '0')
 local committed = plus(spend.committed, charge)
 local nextDaily = plus(daily, charge)
 local nextDailyBrain = plus(dailyBrain, record.purpose == 'brain' and charge or 0)
 local nextBrain = plus(brain, record.purpose == 'brain' and charge or 0)
 local nextRun = plus(run, record.run and charge or 0)
 if not committed or not nextDaily or not nextDailyBrain or not nextBrain or not nextRun then return 'unavailable' end
-local dayNew, purposeNew, runNew = redis.call('EXISTS', KEYS[10]) == 0, redis.call('EXISTS', KEYS[11]) == 0, redis.call('EXISTS', KEYS[12]) == 0
+local dayNew, purposeNew, runNew = redis.call('EXISTS', KEYS[9]) == 0, redis.call('EXISTS', KEYS[10]) == 0, redis.call('EXISTS', KEYS[11]) == 0
 record.state, record.charge, record.kind = 'done', charge, kind
 record.gcAt = math.max(record.deadline, now + 30000)
 model_spend_compact(spend, KEYS[5], KEYS[6])
@@ -430,16 +416,16 @@ redis.call('HSET', KEYS[5], 'committed', string.format('%.0f', committed), 'rese
 -- Immutable original budget keys are used even after an upgrade or UTC midnight.
 local keep = record.periodEnd + 3456000000
 if now < keep then
-  redis.call('HSET', KEYS[10], 'total', string.format('%.0f', nextDaily), 'brain', string.format('%.0f', nextDailyBrain))
-  redis.call('HSET', KEYS[11], 'brain', string.format('%.0f', nextBrain))
-  if dayNew then redis.call('PEXPIREAT', KEYS[10], keep) else grow(KEYS[10], keep, now) end
-  if purposeNew then redis.call('PEXPIREAT', KEYS[11], keep) else grow(KEYS[11], keep, now) end
+  redis.call('HSET', KEYS[9], 'total', string.format('%.0f', nextDaily), 'brain', string.format('%.0f', nextDailyBrain))
+  redis.call('HSET', KEYS[10], 'brain', string.format('%.0f', nextBrain))
+  if dayNew then redis.call('PEXPIREAT', KEYS[9], keep) else grow(KEYS[9], keep, now) end
+  if purposeNew then redis.call('PEXPIREAT', KEYS[10], keep) else grow(KEYS[10], keep, now) end
 end
 if record.run and now < record.runUntil then
-  redis.call('SET', KEYS[12], string.format('%.0f', nextRun), 'KEEPTTL')
-  if runNew then redis.call('PEXPIREAT', KEYS[12], record.runUntil) else grow(KEYS[12], record.runUntil, now) end
+  redis.call('SET', KEYS[11], string.format('%.0f', nextRun), 'KEEPTTL')
+  if runNew then redis.call('PEXPIREAT', KEYS[11], record.runUntil) else grow(KEYS[11], record.runUntil, now) end
 end
-for i = 7, 9 do redis.call('ZREM', KEYS[i], p.account .. ':' .. p.ticket) end
+for i = 7, 8 do redis.call('ZREM', KEYS[i], p.account .. ':' .. p.ticket) end
 -- Expiry cannot resurrect a monthly hold. The durable floor above still records late actual/unknown charges.
 local wasHeld = redis.call('ZSCORE', KEYS[3], record.member)
 if kind ~= 'broken' then redis.call('ZREM', KEYS[3], record.member) end

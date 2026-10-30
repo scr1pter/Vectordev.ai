@@ -1,5 +1,7 @@
 # Vector Codium tiers v3: plans built on Vector, not just models
 
+**30 Oct:** GPT-6.1 Terra and GPT-6 Astra (with Astra Long) are out and Sol stays (owner decision, `codium-tiers-v3-changes.md` §8). The Terra and Astra text below is history; §8 wins over it.
+
 Written 27 Oct 2026 for the owner. This builds on `codium-tiers-v2.md` (v2) and `codium-tiers.md` (v1). Where they disagree, v3 wins. Anything v3 doesn't mention stays as v2 has it: the pools, Stripe and fee figures, the gateway cost bound, the percent-only display, the "Codium" step label, Labs (v2 §1a) and cloud agents (v2 §1b).
 
 **How I checked**

@@ -264,6 +264,8 @@ Astro check and every workspace package run in the pre-push hook's `bun typechec
 
 ## HTTP contract cases (A17 test list)
 
+**30 Oct (C-SOL):** the fifth-Astra case and the real-Lua group-cap assertions below were removed with the Astra in-flight group, and ADMIT and SETTLE now take 12 keys (`codium-tiers-v3-changes.md` §8). The counts in this record are the A17 evidence; current cases and counts are in [codium-csol-models-notes.md](codium-csol-models-notes.md).
+
 `model-plans-api.test.ts` "A17 admission and chat" covers: unqualified real route (no snapshot, Stripe, OpenRouter or
 ADMIT); disabled model 503; misconfigured limits refused with no external or store call; M4 (five chats, five ADMIT
 EVALs, five key reads, no Stripe call, no provider secret in any store command); locked 403 with no hold; a locked
