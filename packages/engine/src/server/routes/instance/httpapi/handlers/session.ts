@@ -556,7 +556,7 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       .handle("init", init)
       .handle("share", share)
       .handle("sharePreview", (ctx) =>
-        publicSharing.preview({
+        publicSharing.review({
           sessionID: ctx.params.sessionID,
           includeScreenshots: ctx.query.includeScreenshots === "true",
         }),

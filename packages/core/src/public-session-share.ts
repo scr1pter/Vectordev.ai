@@ -21,6 +21,9 @@ export interface Interface extends SessionArchive.Interface {
   readonly publish: (
     input: SessionArchive.Selection & PublicSession.Publish,
   ) => Effect.Effect<PublicSession.Info, PublicSession.Error>
+  // The share dialog's review. Unlike `preview`, which local export also uses, it refuses an opted-in copy that is
+  // too large to publish instead of returning every screenshot.
+  readonly review: (input: SessionArchive.Selection) => Effect.Effect<PublicSession.Archive, PublicSession.Error>
   readonly flush: (sessionID: SessionSchema.ID) => Effect.Effect<PublicSession.Info, PublicSession.Error>
   readonly unshare: (sessionID: SessionSchema.ID) => Effect.Effect<void, PublicSession.Error>
   readonly removeTree: (sessionID: SessionSchema.ID) => Effect.Effect<void, PublicSession.Error>
@@ -237,6 +240,55 @@ export const layerWith = (options?: { fetch?: typeof fetch }) =>
         }
         return info(saved)
       })
+      // Removes an attempt the service never confirmed, so its link was never shown. Removal leaves a tombstone, so
+      // neither a copy whose acknowledgement was lost nor a delayed create stays public. As in Unshare, the removal
+      // intent is stored before the request: a removal whose answer was lost must not leave a `creating` row that the
+      // live-update queue keeps re-creating against the tombstone. A row already being removed (an interrupted
+      // withdrawal or Unshare) resumes its removal. The guarded mark never withdraws a share another process confirmed
+      // after this row was read, and that process's confirmation of a row already marked fails instead.
+      const withdraw = Effect.fn("PublicSessionShare.withdraw")(function* (
+        row: typeof PublicSessionShareTable.$inferSelect,
+        auth: { token: string; owner: string },
+      ) {
+        const marked =
+          row.state === "deleting"
+            ? row
+            : yield* db
+                .update(PublicSessionShareTable)
+                .set({ state: "deleting" })
+                .where(
+                  and(
+                    same(row),
+                    eq(PublicSessionShareTable.state, "creating"),
+                    eq(PublicSessionShareTable.revision, row.revision),
+                  ),
+                )
+                .returning()
+                .get()
+                .pipe(Effect.orDie)
+        if (!marked) return yield* conflict()
+        yield* Effect.tryPromise({
+          try: () =>
+            makeShareTransport({ fetch: options?.fetch, token: async () => auth.token }).remove(row.id, row.secret),
+          catch: unavailable,
+        })
+        const withdrawn = yield* db
+          .transaction(() =>
+            Effect.gen(function* () {
+              const removed = yield* db
+                .delete(PublicSessionShareTable)
+                .where(and(same(row), eq(PublicSessionShareTable.state, "deleting")))
+                .returning()
+                .get()
+                .pipe(Effect.orDie)
+              // An interrupted Unshare may still show its link.
+              if (removed) yield* changed(SessionSchema.ID.make(row.session_id), null)
+              return removed
+            }),
+          )
+          .pipe(Effect.orDie)
+        if (!withdrawn) return yield* conflict()
+      })
       const flush = (sessionID: SessionSchema.ID) =>
         lock(sessionID).withPermit(
           Effect.gen(function* () {
@@ -244,6 +296,24 @@ export const layerWith = (options?: { fetch?: typeof fetch }) =>
             if (!row)
               return yield* new PublicSession.Error({ code: "NOT_FOUND", message: "This session has not been shared." })
             return yield* write(row, yield* token)
+          }),
+        )
+      // The live-update queue's step. Like `flush` it completes an earlier text-only attempt the user consented to
+      // update, but it withdraws an unconfirmed attempt whose stored archive has screenshots: the dialog told the
+      // person who opted in that this publication failed, so a background retry must not make those screenshots public
+      // later. Publishing them takes a new manual request. A removal that failed meanwhile is resumed.
+      const liveUpdate = (sessionID: SessionSchema.ID) =>
+        lock(sessionID).withPermit(
+          Effect.gen(function* () {
+            const row = yield* stored(sessionID)
+            if (!row) return
+            const auth = yield* token
+            if (
+              row.owner === auth.owner &&
+              (row.state === "deleting" || (row.state === "creating" && hasScreenshots(row.initial_archive)))
+            )
+              return yield* withdraw(row, auth)
+            yield* write(row, auth)
           }),
         )
       const publish = (input: SessionArchive.Selection & PublicSession.Publish) =>
@@ -265,7 +335,29 @@ export const layerWith = (options?: { fetch?: typeof fetch }) =>
               })
             const auth = yield* token
             const prior = yield* stored(input.sessionID)
-            if (prior) return yield* write(prior, auth)
+            // A reviewed publication (the app and TUI dialogs send the review's hash) reports only the copy made from
+            // its own request: a share confirmed meanwhile, for example when the live-update queue completes an
+            // earlier text-only attempt or another process confirms one, may hold other content or screenshots.
+            // Unreviewed callers such as `vector run --share` after automatic sharing, or on a session it already
+            // shared, still receive the existing share.
+            if (
+              (input.previewHash !== undefined || input.includeScreenshots === true) &&
+              prior?.state === "active" &&
+              prior.owner === auth.owner &&
+              prior.expires_at > Date.now()
+            ) {
+              // The dialogs' refresh reads the session's share field, which a session update written from a stale read
+              // can have cleared. Restating the share keeps that refresh showing its link and Unshare.
+              yield* changed(input.sessionID, info(prior))
+              return yield* new PublicSession.Error({
+                code: "CONFLICT",
+                message: "This session was shared meanwhile. Refresh to see its public link.",
+              })
+            }
+            if (prior && (prior.state === "active" || prior.owner !== auth.owner)) return yield* write(prior, auth)
+            // A new manual request must not resend an archive captured under an earlier review or screenshot choice,
+            // so an earlier attempt is withdrawn and this request publishes under a new identity.
+            if (prior) yield* withdraw(prior, auth)
             const row = yield* db
               .transaction(
                 () =>
@@ -274,8 +366,10 @@ export const layerWith = (options?: { fetch?: typeof fetch }) =>
                     // network work runs while this transaction holds the writer reservation.
                     const snapshot = yield* archive.preview(input)
                     yield* Effect.try({ try: () => encodedBody(snapshot), catch: unavailable })
+                    // Future updates publish later text anyway, but never screenshots: an opted-in copy must match
+                    // its review, so a screenshot taken after the review is never published.
                     if (
-                      !input.consent.updates &&
+                      (!input.consent.updates || input.includeScreenshots === true) &&
                       createHash("sha256").update(JSON.stringify(snapshot)).digest("hex") !== input.previewHash
                     )
                       return yield* new PublicSession.Error({
@@ -382,7 +476,7 @@ export const layerWith = (options?: { fetch?: typeof fetch }) =>
               const row = yield* stored(sessionID)
               if (!row?.updates || row.state === "deleting") return
               for (const attempt of [0, 1, 2]) {
-                const result = yield* flush(sessionID).pipe(Effect.result)
+                const result = yield* liveUpdate(sessionID).pipe(Effect.result)
                 if (result._tag === "Success") break
                 if (result.failure.code !== "UNAVAILABLE" || attempt === 2) {
                   yield* Effect.logWarning("Public session update deferred", { code: result.failure.code })
@@ -447,6 +541,16 @@ export const layerWith = (options?: { fetch?: typeof fetch }) =>
       )
       return Service.of({
         ...archive,
+        review: (input) =>
+          archive
+            .preview(input)
+            .pipe(
+              Effect.tap((value) =>
+                input.includeScreenshots
+                  ? Effect.try({ try: () => encodedBody(value), catch: unavailable })
+                  : Effect.void,
+              ),
+            ),
         publish,
         flush,
         unshare,

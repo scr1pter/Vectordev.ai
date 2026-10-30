@@ -263,7 +263,7 @@ const layer = Layer.effect(
           const imported = yield* sharing.import({ ...input, targetEngine: "v2" })
           return yield* result.get(imported.sessionID).pipe(Effect.orDie)
         }),
-      sharePreview: (sessionID, options) => sharing.preview({ sessionID, engine: "v2", ...options }),
+      sharePreview: (sessionID, options) => sharing.review({ sessionID, engine: "v2", ...options }),
       shareFlush: sharing.flush,
       unshare: sharing.unshare,
       create: Effect.fn("V2Session.create")(function* (input) {

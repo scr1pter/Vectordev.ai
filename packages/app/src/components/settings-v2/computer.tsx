@@ -692,7 +692,10 @@ export function SettingsComputerV2(props: { computer: Computer.ComputerPlatform 
                     {managed("retention")}
                   </div>
                   <div class="settings-v2-row-control">
+                    {/* Modal: inside the modal Settings dialog, Kobalte marks a later-added non-modal popup
+                        aria-hidden, so assistive tech would not see its options. */}
                     <SelectV2
+                      modal
                       appearance="inline"
                       options={retention()}
                       current={effective()?.retention}

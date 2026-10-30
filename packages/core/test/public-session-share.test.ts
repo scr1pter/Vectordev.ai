@@ -58,7 +58,9 @@ function remoteFixture() {
   const requests: { method: string; id: string; body?: unknown }[] = []
   const state = {
     loseCreate: false,
+    rejectCreate: false,
     rejectDelete: false,
+    loseDelete: false,
     rejectUpdate: false,
     holdCreate: undefined as Promise<void> | undefined,
     createStarted: undefined as (() => void) | undefined,
@@ -76,12 +78,17 @@ function remoteFixture() {
         if (state.rejectDelete) return new Response("unavailable", { status: 503 })
         snapshots.delete(id)
         tombstones.add(id)
+        if (state.loseDelete) {
+          state.loseDelete = false
+          throw new Error("synthetic lost response")
+        }
         return new Response(null, { status: 204 })
       }
       if (tombstones.has(id)) return new Response("removed", { status: method === "GET" ? 404 : 409 })
       if (method === "GET")
         return snapshots.has(id) ? Response.json(snapshots.get(id)) : new Response("missing", { status: 404 })
       if (method === "POST") {
+        if (state.rejectCreate) return new Response("unavailable", { status: 503 })
         const archive = Schema.decodeUnknownSync(PublicSession.Create)(value)
         const existing = snapshots.get(id)
         const saved = existing ?? {
@@ -155,6 +162,18 @@ const setup = Effect.gen(function* () {
   return yield* archives.import({ archive: source, location: { directory: AbsolutePath.make("/tmp") } })
 })
 const consent = { version: 1, public: true, updates: true } as const
+const reviewHash = (archive: PublicSession.Archive) =>
+  createHash("sha256").update(JSON.stringify(archive)).digest("hex")
+const shareRow = (sessionID: SessionSchema.ID) =>
+  Effect.gen(function* () {
+    const { db } = yield* Database.Service
+    return yield* db
+      .select()
+      .from(PublicSessionShareTable)
+      .where(eq(PublicSessionShareTable.session_id, sessionID))
+      .get()
+      .pipe(Effect.orDie)
+  })
 const publish = (sessionID: SessionSchema.ID, updates = true) => ({
   sessionID,
   consent: { ...consent, updates },
@@ -174,6 +193,51 @@ const edit = (sessionID: SessionSchema.ID) =>
       }),
     })
   })
+
+// Waits for background work driven by real promises (the fake service) after the test clock moved.
+const until = <R>(done: Effect.Effect<boolean, never, R>) =>
+  Effect.gen(function* () {
+    for (let attempt = 0; attempt < 500 && !(yield* done); attempt++)
+      yield* Effect.promise(() => new Promise((resolve) => setTimeout(resolve, 1)))
+    expect(yield* done).toBe(true)
+  })
+// Runs an armed effect just before the next UPDATE statement built through this database executes, so another
+// writer can land between a reader's SELECT and its guarded UPDATE, as a second process can.
+function beforeNextUpdate(db: Database.Interface["db"]) {
+  const hook: { before?: Effect.Effect<void> } = {}
+  const delayed = (builder: object): object =>
+    new Proxy(builder, {
+      get(target, key) {
+        const member: unknown = Reflect.get(target, key, target)
+        if (typeof member !== "function") return member
+        return (...args: unknown[]) => {
+          const result: unknown = member.apply(target, args)
+          const before = hook.before
+          if (key === "get" && before && Effect.isEffect(result)) {
+            hook.before = undefined
+            return Effect.andThen(before, result)
+          }
+          return typeof result === "object" && result !== null ? delayed(result) : result
+        }
+      },
+    })
+  return {
+    db: new Proxy(db, {
+      get(target, key) {
+        const member: unknown = Reflect.get(target, key, target)
+        if (typeof member !== "function") return member
+        if (key !== "update") return member.bind(target)
+        return (...args: unknown[]) => {
+          const builder: unknown = member.apply(target, args)
+          return typeof builder === "object" && builder !== null ? delayed(builder) : builder
+        }
+      },
+    }),
+    arm: (before: Effect.Effect<void>) => {
+      hook.before = before
+    },
+  }
+}
 
 const screenshot =
   "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII="
@@ -355,6 +419,7 @@ it.effect("auto-shares and live updates strip computer screenshots; includeScree
     const manual = yield* shares.publish({
       ...publish(session.sessionID),
       includeScreenshots: true,
+      previewHash: reviewHash(yield* shares.preview({ ...session, includeScreenshots: true })),
       remember: true,
     })
     expect(JSON.stringify(remote.snapshots.get(manual.id)?.archive)).toContain(screenshot)
@@ -379,6 +444,423 @@ it.effect("auto-shares and live updates strip computer screenshots; includeScree
     const later = yield* screenshotSession("v2")
     const ordinary = yield* shares.publish(publish(later.sessionID))
     expect(JSON.stringify(remote.snapshots.get(ordinary.id)?.archive)).not.toContain(screenshot)
+  }),
+)
+
+it.effect(
+  "a manual retry withdraws an unconfirmed creation instead of resending its archive or screenshot choice",
+  () =>
+    Effect.gen(function* () {
+      const shares = yield* PublicSessionShare.Service
+      const remote = yield* Remote
+      const { db } = yield* Database.Service
+      const published = () => JSON.stringify([...remote.snapshots.values()])
+
+      // An opted-in publication the service never stored, retried without screenshots.
+      const rejected = yield* screenshotSession("v2")
+      const withScreens = yield* shares.preview({ ...rejected, includeScreenshots: true })
+      const without = yield* shares.preview(rejected)
+      remote.state.rejectCreate = true
+      const failed = yield* shares
+        .publish({
+          ...publish(rejected.sessionID, false),
+          includeScreenshots: true,
+          previewHash: reviewHash(withScreens),
+        })
+        .pipe(Effect.flip)
+      expect(failed.code).toBe("UNAVAILABLE")
+      const first = yield* shareRow(rejected.sessionID)
+      expect(first?.state).toBe("creating")
+      remote.state.rejectCreate = false
+      const sent = remote.requests.length
+      // The opted-in review cannot publish a request without screenshots, and the earlier archive is never resent.
+      const stale = yield* shares
+        .publish({ ...publish(rejected.sessionID, false), previewHash: reviewHash(withScreens) })
+        .pipe(Effect.flip)
+      expect(stale.code).toBe("CONFLICT")
+      expect(remote.requests.slice(sent).map((request) => [request.method, request.id])).toEqual([
+        ["DELETE", first!.id],
+      ])
+      expect(yield* shareRow(rejected.sessionID)).toBeUndefined()
+      const text = yield* shares.publish({ ...publish(rejected.sessionID, false), previewHash: reviewHash(without) })
+      expect(text.id).not.toBe(first!.id)
+      expect(remote.snapshots.get(text.id)?.archive).toEqual(without)
+      expect(JSON.stringify(remote.requests.slice(sent))).not.toContain(screenshot)
+      expect(JSON.stringify((yield* shareRow(rejected.sessionID))?.initial_archive ?? null)).not.toContain(screenshot)
+
+      // An opted-in copy the service stored although its acknowledgement was lost: a retry without screenshots removes
+      // it rather than reporting a text-only share while the screenshots stay public.
+      const lost = yield* screenshotSession("v2")
+      remote.state.loseCreate = true
+      yield* shares
+        .publish({
+          ...publish(lost.sessionID, false),
+          includeScreenshots: true,
+          previewHash: reviewHash(yield* shares.preview({ ...lost, includeScreenshots: true })),
+        })
+        .pipe(Effect.flip)
+      const stored = yield* shareRow(lost.sessionID)
+      expect(JSON.stringify(remote.snapshots.get(stored!.id)?.archive)).toContain(screenshot)
+      // The local record is the only way to remove that copy, so it stays until the service confirms the removal.
+      remote.state.rejectDelete = true
+      const refused = yield* shares
+        .publish({ ...publish(lost.sessionID, false), previewHash: reviewHash(yield* shares.preview(lost)) })
+        .pipe(Effect.flip)
+      expect(refused.code).toBe("UNAVAILABLE")
+      expect(yield* shareRow(lost.sessionID)).toMatchObject({
+        id: stored!.id,
+        secret: stored!.secret,
+        state: "deleting",
+      })
+      expect(JSON.stringify(remote.snapshots.get(stored!.id)?.archive)).toContain(screenshot)
+      remote.state.rejectDelete = false
+      const retried = yield* shares.publish({
+        ...publish(lost.sessionID, false),
+        previewHash: reviewHash(yield* shares.preview(lost)),
+      })
+      expect(retried.id).not.toBe(stored!.id)
+      expect(remote.snapshots.has(stored!.id)).toBe(false)
+      expect(remote.tombstones.has(stored!.id)).toBe(true)
+      expect(published()).not.toContain(screenshot)
+
+      // The reverse: a text-only attempt, now past its expiry, then an explicit opt-in publishes the reviewed images.
+      const plain = yield* screenshotSession("v1")
+      remote.state.rejectCreate = true
+      yield* shares
+        .publish({ ...publish(plain.sessionID, false), previewHash: reviewHash(yield* shares.preview(plain)) })
+        .pipe(Effect.flip)
+      remote.state.rejectCreate = false
+      yield* db
+        .update(PublicSessionShareTable)
+        .set({ expires_at: Date.now() - 1 })
+        .where(eq(PublicSessionShareTable.session_id, plain.sessionID))
+        .run()
+        .pipe(Effect.orDie)
+      const reviewed = yield* shares.preview({ ...plain, includeScreenshots: true })
+      expect(JSON.stringify(reviewed)).toContain(screenshot)
+      const images = yield* shares.publish({
+        ...publish(plain.sessionID, false),
+        includeScreenshots: true,
+        previewHash: reviewHash(reviewed),
+      })
+      expect(remote.snapshots.get(images.id)?.archive).toEqual(reviewed)
+    }),
+)
+
+it.effect("a publication never reports a share confirmed meanwhile as its own", () =>
+  Effect.gen(function* () {
+    const shares = yield* PublicSessionShare.Service
+    const remote = yield* Remote
+    const session = yield* screenshotSession("v2")
+    remote.state.rejectCreate = true
+    const failed = yield* shares
+      .publish({
+        ...publish(session.sessionID),
+        includeScreenshots: true,
+        previewHash: reviewHash(yield* shares.preview({ ...session, includeScreenshots: true })),
+      })
+      .pipe(Effect.flip)
+    expect(failed.code).toBe("UNAVAILABLE")
+    remote.state.rejectCreate = false
+    // An explicit flush through the share routes (another process, for example) completes this attempt.
+    const confirmed = yield* shares.flush(session.sessionID)
+    expect(JSON.stringify(remote.snapshots.get(confirmed.id)?.archive)).toContain(screenshot)
+    const sent = remote.requests.length
+    // A text-only request reviewed meanwhile must not be told that the copy with screenshots is its new share.
+    const text = yield* shares
+      .publish({ ...publish(session.sessionID, false), previewHash: reviewHash(yield* shares.preview(session)) })
+      .pipe(Effect.flip)
+    expect(text.code).toBe("CONFLICT")
+    expect(remote.requests).toHaveLength(sent)
+    expect(yield* shareRow(session.sessionID)).toMatchObject({ id: confirmed.id, state: "active" })
+
+    // The live-update queue completes a failed text-only attempt with future updates in the background.
+    const plain = yield* screenshotSession("v2")
+    remote.state.rejectCreate = true
+    yield* shares
+      .publish({ ...publish(plain.sessionID), previewHash: reviewHash(yield* shares.preview(plain)) })
+      .pipe(Effect.flip)
+    remote.state.rejectCreate = false
+    yield* edit(plain.sessionID)
+    yield* adjust("1 second")
+    yield* until(shareRow(plain.sessionID).pipe(Effect.map((row) => row?.state === "active")))
+    const background = yield* shareRow(plain.sessionID)
+    expect(JSON.stringify(remote.snapshots.get(background!.id)?.archive)).not.toContain(screenshot)
+    // A session update written from a stale read can clear the session's share field, which the dialogs' refresh reads.
+    const { db } = yield* Database.Service
+    const sessionShare = () =>
+      db
+        .select()
+        .from(SessionTable)
+        .where(eq(SessionTable.id, plain.sessionID))
+        .get()
+        .pipe(
+          Effect.orDie,
+          Effect.map((row) => row?.share_info?.id),
+        )
+    yield* db
+      .update(SessionTable)
+      .set({ share_info: null })
+      .where(eq(SessionTable.id, plain.sessionID))
+      .run()
+      .pipe(Effect.orDie)
+    expect(yield* sessionShare()).toBeUndefined()
+    const before = remote.requests.length
+    const images = yield* shares
+      .publish({
+        ...publish(plain.sessionID),
+        includeScreenshots: true,
+        previewHash: reviewHash(yield* shares.preview({ ...plain, includeScreenshots: true })),
+      })
+      .pipe(Effect.flip)
+    expect(images.code).toBe("CONFLICT")
+    expect(remote.requests).toHaveLength(before)
+    // The refusal restates the share, so the promised refresh shows its link and Unshare instead of looping.
+    expect(yield* sessionShare()).toBe(background!.id)
+  }),
+)
+
+it.effect("the live-update queue withdraws an unconfirmed opted-in attempt instead of publishing its screenshots", () =>
+  Effect.gen(function* () {
+    const shares = yield* PublicSessionShare.Service
+    const remote = yield* Remote
+    // A create the service refused, and one it stored although its acknowledgement was lost. Either way the dialog said
+    // the publication failed, so a later background step must not make the screenshots public.
+    for (const failure of ["rejectCreate", "loseCreate"] as const) {
+      const session = yield* screenshotSession("v2")
+      remote.state[failure] = true
+      const failed = yield* shares
+        .publish({
+          ...publish(session.sessionID),
+          includeScreenshots: true,
+          previewHash: reviewHash(yield* shares.preview({ ...session, includeScreenshots: true })),
+        })
+        .pipe(Effect.flip)
+      expect(failed.code).toBe("UNAVAILABLE")
+      remote.state.rejectCreate = false
+      const attempt = yield* shareRow(session.sessionID)
+      expect(JSON.stringify(attempt?.initial_archive)).toContain(screenshot)
+      const sent = remote.requests.length
+      yield* edit(session.sessionID)
+      yield* adjust("1 second")
+      yield* until(shareRow(session.sessionID).pipe(Effect.map((row) => row === undefined)))
+      expect(remote.requests.slice(sent).map((request) => [request.method, request.id])).toEqual([
+        ["DELETE", attempt!.id],
+      ])
+      expect(remote.snapshots.has(attempt!.id)).toBe(false)
+      expect(remote.tombstones.has(attempt!.id)).toBe(true)
+    }
+    expect(JSON.stringify([...remote.snapshots.values()])).not.toContain(screenshot)
+  }),
+)
+
+it.effect("an attempt another service instance withdraws cannot be confirmed by its delayed create", () =>
+  Effect.gen(function* () {
+    const session = yield* setup
+    const remote = yield* Remote
+    const { db } = yield* Database.Service
+    const first = yield* PublicSessionShare.Service
+    const second = Context.get(
+      yield* Layer.build(PublicSessionShare.layerWith({ fetch: remote.fetch })),
+      PublicSessionShare.Service,
+    )
+    const review = () => first.preview(session).pipe(Effect.map(reviewHash))
+    remote.state.rejectCreate = true
+    yield* first.publish({ ...publish(session.sessionID), previewHash: yield* review() }).pipe(Effect.flip)
+    remote.state.rejectCreate = false
+    const attempt = yield* shareRow(session.sessionID)
+    // The first instance (for example the desktop engine) resends the attempt, and its create is held in flight.
+    const started = Promise.withResolvers<void>()
+    const release = Promise.withResolvers<void>()
+    remote.state.createStarted = started.resolve
+    remote.state.holdCreate = release.promise
+    const pending = yield* first.flush(session.sessionID).pipe(Effect.flip, Effect.forkChild)
+    yield* Effect.promise(() => started.promise)
+    remote.state.createStarted = undefined
+    remote.state.holdCreate = undefined
+    // Another instance (for example a CLI) publishes meanwhile: it withdraws the attempt and publishes afresh.
+    const fresh = yield* second.publish({ ...publish(session.sessionID), previewHash: yield* review() })
+    release.resolve()
+    expect((yield* Fiber.join(pending)).code).toBe("CONFLICT")
+    expect(fresh.id).not.toBe(attempt!.id)
+    expect(remote.tombstones.has(attempt!.id)).toBe(true)
+    expect(remote.snapshots.has(attempt!.id)).toBe(false)
+    expect(yield* db.select().from(PublicSessionShareTable).all().pipe(Effect.orDie)).toMatchObject([
+      { id: fresh.id, state: "active" },
+    ])
+  }),
+)
+
+it.effect("a share another service instance confirms after a publication read it is never withdrawn", () =>
+  Effect.gen(function* () {
+    const session = yield* setup
+    const remote = yield* Remote
+    const database = yield* Database.Service
+    const first = yield* PublicSessionShare.Service
+    const review = () => first.preview(session).pipe(Effect.map(reviewHash))
+    remote.state.rejectCreate = true
+    yield* first.publish({ ...publish(session.sessionID), previewHash: yield* review() }).pipe(Effect.flip)
+    remote.state.rejectCreate = false
+    const attempt = yield* shareRow(session.sessionID)
+    const started = Promise.withResolvers<void>()
+    const release = Promise.withResolvers<void>()
+    remote.state.createStarted = started.resolve
+    remote.state.holdCreate = release.promise
+    const pending = yield* first.flush(session.sessionID).pipe(Effect.forkChild)
+    yield* Effect.promise(() => started.promise)
+    remote.state.createStarted = undefined
+    remote.state.holdCreate = undefined
+    // The second instance reads the attempt as unconfirmed; the first confirms it before the second marks it, as a
+    // second process can between those two statements.
+    const raced = beforeNextUpdate(database.db)
+    const second = Context.get(
+      yield* Layer.build(PublicSessionShare.layerWith({ fetch: remote.fetch })).pipe(
+        Effect.provideService(Database.Service, { db: raced.db }),
+      ),
+      PublicSessionShare.Service,
+    )
+    raced.arm(
+      Effect.sync(() => release.resolve()).pipe(Effect.andThen(Fiber.join(pending)), Effect.asVoid, Effect.orDie),
+    )
+    const sent = remote.requests.length
+    const refused = yield* second
+      .publish({ ...publish(session.sessionID), previewHash: yield* review() })
+      .pipe(Effect.flip)
+    expect(refused.code).toBe("CONFLICT")
+    expect(remote.requests).toHaveLength(sent)
+    expect(yield* shareRow(session.sessionID)).toMatchObject({ id: attempt!.id, state: "active" })
+    expect(remote.snapshots.has(attempt!.id)).toBe(true)
+    expect(remote.tombstones.has(attempt!.id)).toBe(false)
+  }),
+)
+
+it.effect("an unreviewed publication of a shared session keeps receiving that share", () =>
+  Effect.gen(function* () {
+    const shares = yield* PublicSessionShare.Service
+    const remote = yield* Remote
+    // `vector run --share` publishes without a review, then again for `--continue` or `--session`.
+    const first = yield* setup
+    const shared = yield* shares.publish({ ...publish(first.sessionID), remember: true })
+    expect(yield* shares.publish(publish(first.sessionID))).toMatchObject({ id: shared.id })
+    yield* edit(first.sessionID)
+    expect(yield* shares.publish(publish(first.sessionID))).toMatchObject({ id: shared.id, revision: 1 })
+    expect(remote.requests.map((request) => request.method)).toEqual(["POST", "PUT"])
+
+    // With remembered consent, creating the session already shares it before `--share` publishes.
+    const next = yield* setup
+    const automatic = yield* shares.auto(next)
+    if (!automatic) return yield* Effect.die("Expected remembered automatic share consent")
+    expect(yield* shares.publish(publish(next.sessionID))).toMatchObject({ id: automatic.id })
+    expect(remote.requests.map((request) => request.method)).toEqual(["POST", "PUT", "POST"])
+    // A dialog's reviewed request still never reports that share as its own.
+    const reviewed = yield* shares
+      .publish({ ...publish(next.sessionID), previewHash: reviewHash(yield* shares.preview(next)) })
+      .pipe(Effect.flip)
+    expect(reviewed.code).toBe("CONFLICT")
+    expect(remote.requests).toHaveLength(3)
+  }),
+)
+
+it.effect("a withdrawal whose removal answer is lost never re-creates the attempt", () =>
+  Effect.gen(function* () {
+    const shares = yield* PublicSessionShare.Service
+    const remote = yield* Remote
+    const session = yield* setup
+    const review = () => shares.preview(session).pipe(Effect.map(reviewHash))
+    remote.state.rejectCreate = true
+    yield* shares.publish({ ...publish(session.sessionID), previewHash: yield* review() }).pipe(Effect.flip)
+    remote.state.rejectCreate = false
+    const attempt = yield* shareRow(session.sessionID)
+    expect(attempt?.state).toBe("creating")
+    // The service applies the removal, but its answer never arrives.
+    remote.state.loseDelete = true
+    const lost = yield* shares
+      .publish({ ...publish(session.sessionID), previewHash: yield* review() })
+      .pipe(Effect.flip)
+    expect(lost.code).toBe("UNAVAILABLE")
+    expect(remote.tombstones.has(attempt!.id)).toBe(true)
+    expect(yield* shareRow(session.sessionID)).toMatchObject({ id: attempt!.id, state: "deleting" })
+    // Later transcript events must not resend the withdrawn attempt (each create would spend the daily quota).
+    const sent = remote.requests.length
+    yield* edit(session.sessionID)
+    yield* adjust("10 seconds")
+    expect(remote.requests).toHaveLength(sent)
+    expect((yield* shares.flush(session.sessionID).pipe(Effect.flip)).code).toBe("CONFLICT")
+    expect(remote.requests).toHaveLength(sent)
+    // The next publication completes the removal and publishes under a new identity.
+    const fresh = yield* shares.publish({ ...publish(session.sessionID), previewHash: yield* review() })
+    expect(remote.requests.slice(sent).map((request) => [request.method, request.id])).toEqual([
+      ["DELETE", attempt!.id],
+      ["POST", fresh.id],
+    ])
+    expect(fresh.id).not.toBe(attempt!.id)
+    expect(yield* shareRow(session.sessionID)).toMatchObject({ id: fresh.id, state: "active" })
+  }),
+)
+
+it.effect("an opted-in publication with future updates must still match its review", () =>
+  Effect.gen(function* () {
+    const shares = yield* PublicSessionShare.Service
+    const remote = yield* Remote
+    const session = yield* screenshotSession("v2")
+    const reviewed = yield* shares.preview({ ...session, includeScreenshots: true })
+    const plain = yield* shares.preview(session)
+    yield* edit(session.sessionID)
+    // The transcript changed after the review, so its capture may hold screenshots nobody reviewed.
+    for (const previewHash of [reviewHash(reviewed), undefined]) {
+      const error = yield* shares
+        .publish({ ...publish(session.sessionID), includeScreenshots: true, previewHash })
+        .pipe(Effect.flip)
+      expect(error.code).toBe("CONFLICT")
+    }
+    expect(remote.requests).toHaveLength(0)
+    expect(yield* shareRow(session.sessionID)).toBeUndefined()
+    // Without screenshots, consent to future updates still covers text added after the review.
+    const text = yield* shares.publish({ ...publish(session.sessionID), previewHash: reviewHash(plain) })
+    expect(JSON.stringify(remote.snapshots.get(text.id)?.archive)).toContain("New visible question")
+    expect(JSON.stringify(remote.snapshots.get(text.id)?.archive)).not.toContain(screenshot)
+  }),
+)
+
+it.effect("the share review refuses an opted-in copy too large to publish; local preview does not", () =>
+  Effect.gen(function* () {
+    const shares = yield* PublicSessionShare.Service
+    const archives = yield* SessionArchive.Service
+    const local = yield* archives.export({ ...(yield* screenshotSession("v2")), includeScreenshots: true })
+    if (!("engine" in local)) return yield* Effect.die("Expected a native archive")
+    // One retained screenshot within the per-image limit, but larger than a public copy may be.
+    const large = `data:image/png;base64,${"A".repeat(PublicSession.MAX_BYTES - 100)}`
+    const session = yield* archives.import({
+      archive: Schema.encodeSync(SessionArchive.Native)({
+        ...local,
+        messages: local.messages.map((message) =>
+          message.type !== "assistant"
+            ? message
+            : {
+                ...message,
+                content: message.content.map((part) =>
+                  part.type !== "tool" || part.name !== "computer" || part.state.status !== "completed"
+                    ? part
+                    : {
+                        ...part,
+                        state: {
+                          ...part.state,
+                          attachments: part.state.attachments?.map((file) => ({ ...file, uri: large })),
+                          content: part.state.content.map((item) =>
+                            item.type === "file" ? { ...item, uri: large } : item,
+                          ),
+                        },
+                      },
+                ),
+              },
+        ),
+      }),
+      location: { directory: AbsolutePath.make("/tmp") },
+    })
+    expect(JSON.stringify(yield* shares.preview({ ...session, includeScreenshots: true }))).toContain(large)
+    const refused = yield* shares.review({ ...session, includeScreenshots: true }).pipe(Effect.flip)
+    expect(refused.code).toBe("TOO_LARGE")
+    expect(JSON.stringify(yield* shares.review(session))).toContain("computer completed")
   }),
 )
 
@@ -432,8 +914,9 @@ it.effect("a delayed share creation does not restore a concurrently pruned local
     const release = Promise.withResolvers<void>()
     remote.state.createStarted = started.resolve
     remote.state.holdCreate = release.promise
+    const previewHash = reviewHash(yield* shares.preview({ ...session, includeScreenshots: true }))
     const pending = yield* shares
-      .publish({ ...publish(session.sessionID), includeScreenshots: true })
+      .publish({ ...publish(session.sessionID), includeScreenshots: true, previewHash })
       .pipe(Effect.forkChild)
     yield* Effect.promise(() => started.promise)
     const before = yield* db.select().from(PublicSessionShareTable).get()
@@ -474,8 +957,9 @@ it.effect("snapshot capture and storage serialize with a concurrent screenshot p
       ),
       PublicSessionShare.Service,
     )
+    const previewHash = reviewHash(yield* archive.preview({ ...session, includeScreenshots: true }))
     const pending = yield* shares
-      .publish({ ...publish(session.sessionID), includeScreenshots: true })
+      .publish({ ...publish(session.sessionID), includeScreenshots: true, previewHash })
       .pipe(Effect.forkChild)
     // The captured bytes must remain protected by the same database writer reservation as their later INSERT.
     expect(yield* Deferred.await(captured)).toBe(true)
@@ -926,7 +1410,11 @@ restarted.effect("unchanged screenshot opt-ins survive flush, shutdown and start
         yield* Layer.build(PublicSessionShare.layerWith({ fetch: remote.fetch })),
         PublicSessionShare.Service,
       )
-      const created = yield* service.publish({ ...publish(session.sessionID), includeScreenshots: true })
+      const created = yield* service.publish({
+        ...publish(session.sessionID),
+        includeScreenshots: true,
+        previewHash: reviewHash(yield* service.preview({ ...session, includeScreenshots: true })),
+      })
       const flushed = yield* service.flush(session.sessionID)
       expect(flushed.revision).toBe(created.revision)
       expect(remote.requests.map((request) => request.method)).toEqual(["POST"])
