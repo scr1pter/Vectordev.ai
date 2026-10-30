@@ -22,6 +22,7 @@ import { Location } from "@vectordevai/core/location"
 import { LocationServiceMap, locationServiceMapLayer } from "@vectordevai/core/location-services"
 import { Reference } from "@vectordevai/core/reference"
 import { MCP } from "@/mcp"
+import { ToolRegistry } from "@/tool/registry"
 import { PermissionV1 } from "@vectordevai/core/v1/permission"
 
 /**
@@ -379,8 +380,11 @@ const layer = Layer.effect(
 
       mcp: Effect.fn("SystemPrompt.mcp")(function* (agent: Agent.Info, permission?: PermissionV1.Ruleset) {
         const ruleset = Permission.merge(agent.permission, permission ?? [])
+        // A server a run on GitHub Actions withholds (INV-S13) has no tool the model may call, so its instructions go too.
         const instructions = (yield* mcp.instructions()).filter(
-          (item) => item.tools.length === 0 || Permission.disabled(item.tools, ruleset).size < item.tools.length,
+          (item) =>
+            !ToolRegistry.actionsWithheldServer(item.name) &&
+            (item.tools.length === 0 || Permission.disabled(item.tools, ruleset).size < item.tools.length),
         )
         if (instructions.length === 0) return
 

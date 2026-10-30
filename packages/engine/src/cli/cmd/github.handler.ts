@@ -51,6 +51,8 @@ import { appRequested, githubAppInstallation, verifyAppPullRequest } from "./git
 import { downloadGithubAttachment } from "./github.attachment"
 import { withGithubCallbacks, withGithubSignals } from "./github.lifecycle"
 import { SessionPosting } from "@/session/posting"
+import { LLMRequestPrep } from "@/session/llm/request"
+import { githubSystemInstructions } from "./github.policy"
 
 type GitHubAuthor = {
   login: string
@@ -550,6 +552,11 @@ export const githubRun = Effect.fn("Cli.github.run")(function* (args: {
       }
 
       try {
+        // Every model request this run sends, its subagents' and follow-ups' included, carries the repository-work
+        // policy and the untrusted-data rule in its system instructions (INV-S14). It is never unpinned: this process
+        // serves this one task, and its background subagents, the turns their notes start and the titles the command
+        // waits for go on sending requests after githubRun returns, until the instance is disposed.
+        LLMRequestPrep.pin(githubSystemInstructions(`${owner}/${repo}`))
         const pullRequest =
           issueEvent?.issue.pull_request || ["pull_request", "pull_request_review_comment"].includes(context.eventName)
             ? issueId
@@ -564,7 +571,13 @@ export const githubRun = Effect.fn("Cli.github.run")(function* (args: {
           notice: console.log,
           signal,
         })
-        resources.auth = await resources.acquisition
+        // The App exchange is this process's last use of the Actions OIDC request pair (@actions/core reads it when it
+        // asks), so nothing that runs later in-process finds it, whether the exchange worked or not. Defence in depth
+        // for v2 workflows: /proc/<pid>/environ keeps the launch copy, which only the agent sandbox keeps from children.
+        resources.auth = await resources.acquisition.finally(() => {
+          delete process.env.ACTIONS_ID_TOKEN_REQUEST_URL
+          delete process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN
+        })
         appToken = resources.auth.token
         botLogin = resources.auth.botLogin
         if (resources.auth.source === "app" || (!isMock && appRequested() && process.env.GITHUB_ACTIONS === "true")) {

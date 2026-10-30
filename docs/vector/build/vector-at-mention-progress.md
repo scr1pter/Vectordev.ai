@@ -64,7 +64,7 @@ For each package, record its commit, the focused tests and typechecks run locall
 
 ### V02. Mention parsing: word boundaries and the App handle
 
-- **Commit:** `feat(github): V02 parse mentions with word boundaries and the App handle`, on top of `3d9e2f6d`. This package's progress step also filled in the V01 entry's hashes and lane run above. Its hash, the pre-push result and the lane run go in the next package's progress step.
+- **Commit:** `2d49a86a` (`feat(github): V02 parse mentions with word boundaries and the App handle`), on top of `3d9e2f6d`, pushed to `origin/vector-at-mention`. Origin accepted the push; the pre-push hook's output was not kept, so no typecheck result is recorded for it. This package's progress step also filled in the V01 entry's hashes and lane run above.
 - **Files:**
   - `packages/core/src/review/command.ts`: `parseReviewCommand` applies section 2.2, and `DEFAULT_MENTIONS` is a literal copy of `GithubAgents.mentions()`. It is still import-free and self-contained.
   - `packages/engine/src/cli/cmd/github.route.ts`: `TASK_MENTIONS = GithubAgents.mentions()`.
@@ -165,7 +165,10 @@ For each package, record its commit, the focused tests and typechecks run locall
   - Not run locally, left to the lane: `github.run-routing.test.ts` (it spawns the CLI) and `github.review.test.ts` (it references subprocesses), which both route with `TASK_MENTIONS`; a search of their bodies found none whose result changes. Also left to the lane: the rest of the engine GitHub and registry tests, the other core review tests, the hosted API typecheck and tests, the web GitHub tests, and the Node-bundle build and smoke.
 
 - **Not verified anywhere yet:** the route script as the minified CLI generates it (`packages/engine/script/build.ts` builds with `minify: true`, and `vector github install` uses it), and as the desktop main bundle generates it (`packages/desktop/src/main/github-pr.ts`, the setup pull request). The Node-bundle smoke (`script/smoke-node-bundle.ts`) only builds and loads the sidecar bundle; it never calls `buildRouteScript` or `parseReviewCommand`. Printers do rewrite the embedded text: Bun's own `toString()` here turned some string concatenations into template literals. No local or lane test runs the table through a script from either bundle. V30 or the owner's live steps cover it.
-- **CI:** pending. The push starts the lane through its push trigger; nothing is dispatched.
+- **CI (seen):** lane run 41115952120 (`Vector at-mention`, push on `2d49a86a`, 2026-10-30 19:31–19:33 UTC): success in all three jobs.
+  - `engine and core` (job 124270108489), read in the job log: "Run engine GitHub tests": 214 pass, 0 fail, 1394 `expect()` calls across 14 files. "Run core GitHub tests": 374 pass, 0 fail, 1774 `expect()` calls across 21 files.
+  - `hosted API` (job 124270109123) and `desktop engine bundle (node)` (job 124270108776): every step succeeded; their logs were not read.
+  - The branch's other run on `2d49a86a`, `Vector production checks` 41116312351 (a Vercel `deployment_status` event), was skipped; it is not the lane.
 - **For later packages:**
   - V09: import `parseReviewCommand` from `../../packages/core/src/review/command.js` with `GithubAgents.mentions(slug)`. "The module imports nothing" and "the source is printable ASCII" guard that file. It uses `matchAll`, `Map` and regex lookaheads, and no lookbehind, `RegExp.escape` or `URL.parse`.
   - V14:
@@ -176,6 +179,134 @@ For each package, record its commit, the focused tests and typechecks run locall
   - V18: `github.handler.ts` (about lines 835–859) still finds the mention for the prompt with substring `includes` and an exact-body match, and `isFixCommand` (about line 1850) still uses `startsWith` and its own fence toggle. Both run only after routing accepted a valid mention, but they can disagree with it. For example, with `/vectorize this` on the first line and `/vector fix` on the second, the route is a task, yet `isFixCommand` reads the first line and says no. V18 should strip and read the mention with the same boundaries.
   - No package yet: the Markdown the parser still reads differently from GitHub. Fences: a backtick in the info string, four-space indents, an ordered marker other than `1.` that continues a paragraph, and a fence on a line of its own inside a list item, which the item's end closes. Indented code blocks: section 2.2 does not name them, so `    /vector review` after a blank line counts although GitHub shows it as code. And comments that GitHub's HTML leaves open (deviation 7). Exact handling needs a model of list items and quotes as containers. Deviations 2 and 7 record them.
   - V23 and V24: feed `GithubAgents.slugFromInstallUrl(installUrl)` into the builder's `mentions`. Workflows people already installed keep their old embedded parser until they are reinstalled. A newer CLI that re-routes in `vector github run` can only refuse more than the route job did, never accept more, because the route job gates first.
+
+### V03. Actions safety floor: withheld tools, env stripping, repo-work policy
+
+- **Commit:** not yet made. The step that commits records the hash, then pushes; the next package records the pre-push result and the lane run.
+- **Files:**
+  - `packages/engine/src/cli/cmd/github.policy.ts` (new, import-free): `REPO_WORK_POLICY` and `UNTRUSTED_DATA_RULE` (the 2.17 text), `githubSystemInstructions(repository)` and `untrustedJson(value)` (deviation 7).
+  - `packages/engine/src/cli/cmd/github.handler.ts` (ours): `githubRun` pins the policy before anything can reach a model and never unpins it, and deletes `ACTIONS_ID_TOKEN_REQUEST_URL` and `_TOKEN` from `process.env` once the App exchange settles (deviations 1 and 8). Nothing else in `githubRun` changes.
+  - Shared files in contract 0.2: `packages/core/src/child-environment.ts` (the INV-S5 filter, deviation 5) and `packages/engine/src/tool/registry.ts` (`actionsWithheld(id)` and the `all()` filter, deviation 4; `actionsWithheldServer(name)`, deviation 2).
+  - Shared files outside contract 0.2, each one small: `packages/engine/src/session/tools.ts` (the guard in the MCP loop and in the three MCP resource tools, deviation 2), `packages/engine/src/session/system.ts` (`SystemPrompt.mcp` leaves out a withheld server's instructions, deviation 2), `packages/engine/src/tool/research-browser.ts` (`available()` is false on Actions, deviation 3) and `packages/engine/src/session/llm/request.ts` (`LLMRequestPrep.pin`, deviation 1).
+  - Tests: `packages/core/test/child-environment.test.ts` (six tests in `describe("on GitHub Actions")`, and one real-child test after it), `packages/engine/test/tool/registry-actions.test.ts` (new) and `packages/engine/test/cli/github.policy.test.ts` (new).
+  - The deviations file (V03 entry) and this file (the V02 entry's hash and lane run, and this entry).
+
+  `packages/engine/src/cli/vector-account.ts` is untouched. Nothing is generated: no public Protocol, HttpApi or SDK surface changed. The lane needs no change: its engine step runs `test/cli/github*.test.ts` and `test/tool/registry*.test.ts`, its core step runs `test/child-environment.test.ts`, and its pull-request paths and the lane policy's list of named checks already cover all three.
+
+- **Behaviour:**
+  - With `GITHUB_ACTIONS=true`, whatever bridge variables are set:
+    - the registry never offers `browser`, `vector_cloud`, `research_browser` or any id matching `/^computer(?:$|[_-])/i`, a plugin's included;
+    - a `computer` MCP server is withheld whole: its tools are not offered, `list_mcp_resources` and `list_mcp_resource_templates` leave it out, `read_mcp_resource` answers that it is not connected, and its instructions are left out of the system prompt;
+    - `research_search` and `research_read`'s rendering send nothing to the desktop's research browser.
+  - The check is read on every call, so a registry built before the variable was set is filtered too.
+  - On Actions, every child that `untrustedChildEnvironment` builds loses:
+    - `ACTIONS_*`;
+    - `GITHUB_TOKEN`, `GH_TOKEN`, `VECTOR_CLI_TOKEN`, `VECTOR_BIND_CODE` and `VECTOR_TICKET`;
+    - every name ending `_TOKEN`, `_KEY`, `_SECRET` or `_PASSWORD`, compared upper-cased;
+    - every name `VECTOR_SECRET_ENV_NAMES` lists, from any source.
+
+    Such children include the shell tool, the pty, LSP servers, formatters, MCP servers, plugin installs and infrastructure git, whose credentials travel in `GIT_CONFIG_*`, not in a secret-named variable. Outside Actions nothing changes.
+
+  - Every model request a `vector github run` sends carries `REPO_WORK_POLICY` for its repository and `UNTRUSTED_DATA_RULE` in its system instructions, after the session's own text. That covers subagents, the judge, follow-ups, compaction and the quick lane.
+
+- **Tests:**
+  - `child-environment.test.ts`:
+    - "Actions runs hide runner, GitHub, provider and named secrets from children" (INV-S5's name: `ACTIONS_*`, the five named credentials, `AWS_SESSION_TOKEN`, `HF_TOKEN`, `DEEPSEEK_KEY`, `OPENROUTER_API_KEY`, `DB_PASSWORD`, `SIGNING_SECRET` and a listed `MY_PROVIDER_CREDS` hidden; `PATH`, `CI`, `GITHUB_REPOSITORY`, `GITHUB_WORKSPACE`, `RUNNER_TEMP` kept);
+    - "outside Actions, GITHUB_TOKEN is kept" (unset and `false`);
+    - lower-case Windows spellings;
+    - a later source cannot lift the filter or empty the list;
+    - the agent marker and the Vector Local floor still apply after the filter;
+    - "with no source, the process's own environment is filtered": the no-argument call most callers make (infrastructure git, LSP servers, core's shell helper), with `GITHUB_ACTIONS=true`, `GITHUB_TOKEN`, two `ACTIONS_*` values and a `_KEY` name planted in `process.env` and put back afterwards;
+    - after the describe, "a real child of a process on an Actions runner reads none of its credentials": the same, read back from a real Bun child. Its name stays outside the local `-t "on GitHub Actions"` filter, so it runs only in the lane.
+  - `registry-actions.test.ts`:
+    - "bridged and computer tools never register in Actions" (ids, `all()`, the build agent's and the research lead's tools; plugin stand-ins `computer`, `computer-x`, `Computer_use` withheld, and `computers`, `computerize`, `my_computer` kept);
+    - its control outside Actions;
+    - one registry instance built outside Actions, then on Actions, then outside again (critique item 4);
+    - through the real session loop with the fake LLM server and a fake MCP service whose `computer` and `docs` servers both have resources and instructions: under Actions, the build agent's provider request offers `docs_search` and `list_mcp_resources` but not `computer-x_click`, `computer_screenshot`, `browser` or `vector_cloud`, and its system text carries the docs server's instructions but not the `computer` server's. `list_mcp_resources` lists the docs guide but not the `computer` server's screen, and `read_mcp_resource` on the screen answers that the server is not connected, with no read reaching the fake server. Its control offers all of them, and lists and reads the screen;
+    - under Actions with the fake desktop bridge pointed, `research_search` answers that it needs the desktop browser, a script-built page is kept as skipped, render mode refuses, the bridge gets no call, and the lead is not offered `research_browser`;
+    - its control: outside Actions, `research_search` sends `research.search` to the bridge.
+  - `github.policy.test.ts`:
+    - the two sentences, literally;
+    - `githubSystemInstructions` and eight refused repository names;
+    - `untrustedJson` on a `</issue>` body;
+    - `LLMRequestPrep.prepare` on the three system layouts, pinned and unpinned;
+    - the run's sessions end to end: build, judge FAIL, repair, second judge and quick lane, every request carrying both texts in its system messages and neither in a user turn, and none once the test's own scope unpins it (deviation 6);
+    - the source checks of `githubRun`'s single pin, which nothing in `github.handler.ts` undoes, and of its OIDC-pair deletion;
+    - `getIDToken` used only in `github.auth.ts`.
+- **Local evidence (2026-10-30, Bun 1.3.14, each through `vector-serial`, one file at a time, `GITHUB_ACTIONS=false`, fresh XDG roots and `VECTOR_TEST_HOME`). Each file was checked first for nested Bun processes; the new engine files start none (their fixtures run git only):**
+  - `packages/engine`:
+    - `test/cli/github.policy.test.ts`: 10 pass, 0 fail (82 `expect()` calls);
+    - `test/tool/registry-actions.test.ts`: 7 pass, 0 fail (30).
+  - `packages/core`: `test/child-environment.test.ts -t "on GitHub Actions"`: 5 pass, 0 fail (6). The filter leaves out the file's one test that spawns Bun ("does not expose scrubbed values to a real child process"), so no nested Bun process ran; Bun reported 4 tests filtered out. The whole file runs in the lane.
+  - Regressions, unchanged files run against the changed code:
+    - `test/session/llm-request.test.ts`: 12 pass, 0 fail (49 `expect()` calls);
+    - `test/tool/research-browser.test.ts`: 12 pass, 0 fail (65);
+    - `test/tool/research-search-provider.test.ts`: 7 pass, 0 fail (49);
+    - `test/cli/github.workflow.test.ts`: 24 pass, 0 fail (148), so the v2 workflow is unchanged.
+  - Breakage checks: each on a scratch copy restored afterwards, the restored file compared byte for byte. Each failed exactly the tests named:
+    - `registry-actions.test.ts`:
+      - no `all()` filter: the three Actions tests that expect it (registry, session tools, research lead), and the flip test;
+      - no MCP `continue` in `session/tools.ts`: the session-tools test alone;
+      - `available()` without its Actions check: the research test alone;
+      - the Actions flag cached when the registry state is built: the flip test alone.
+    - `github.policy.test.ts`:
+      - no pin in `request.ts`: the three layout tests and the session test;
+      - the pin on root sessions only: the same four;
+      - the pin left off the quick lane: the session test alone;
+      - `untrustedJson` without escapes: its test alone;
+      - no pin in `githubRun`: its source test;
+      - no OIDC-pair deletion: its source test.
+    - `child-environment.test.ts` (filtered as above):
+      - the Actions check on the merged environment only: the later-source test;
+      - the listed names from the merged environment only: the later-source test;
+      - `SECRET_NAME_PATTERN` on the original spelling: the Windows test;
+      - `VECTOR_BIND_CODE` dropped from the named credentials: the INV-S5 test.
+  - Typechecks: `packages/core`, `packages/engine` (its tests included) and `packages/desktop` (desktop main imports `core/child-environment`) passed.
+  - Rerun after the review fixes (2026-10-30, same conditions; the fixes are in "Review fixes" below):
+    - `packages/engine`: `test/tool/registry-actions.test.ts`: 7 pass, 0 fail (40 `expect()` calls); `test/cli/github.policy.test.ts`: 10 pass, 0 fail (82).
+    - `packages/core`: `test/child-environment.test.ts -t "on GitHub Actions"`: 6 pass, 0 fail (9). Bun reported 5 tests filtered out, the two that spawn Bun among them.
+    - Regressions for the newly touched shared code: `test/session/system.test.ts` (it covers `SystemPrompt.mcp`): 15 pass, 0 fail (178); `test/tool/research-mcp.test.ts` (it covers the MCP resource tools): 2 pass, 0 fail (24). Neither starts a process.
+    - Breakage checks, as above, each restored and compared byte for byte afterwards. Each failed exactly the test named:
+      - `untrustedChildEnvironment` given the raw `sources` instead of the resolved list (the slip the review named): the no-source test alone;
+      - `read_mcp_resource` without the server guard, the listed resources without the server filter, and `SystemPrompt.mcp` without the server filter: each the Actions session test alone;
+      - an unpin put back in `githubRun`'s cleanup: its source test alone.
+    - Typechecks: `packages/engine` and `packages/core` passed, exit 0. `packages/desktop` was not rerun: the fixes change no core source file.
+    - Prettier `--check`: still clean on every changed file but `github.handler.ts`.
+  - Final gate before the commit (2026-10-30, same conditions, after the last edit to any source or test file):
+    - `packages/engine`: `test/cli/github.policy.test.ts`: 10 pass, 0 fail (82 `expect()` calls); `test/tool/registry-actions.test.ts`: 7 pass, 0 fail (40).
+    - `packages/core`: `test/child-environment.test.ts -t "on GitHub Actions"`: 6 pass, 0 fail (9), 5 filtered out.
+    - Typechecks: `packages/core` and `packages/engine` passed, exit 0. The pre-push hook typechecks every package, `packages/desktop` included; the next package records its result.
+  - Prettier `--check` is clean on every changed file but `github.handler.ts`. That file was not Prettier-clean before V03 (the `createPR` signature at about line 1333 is over the width), and that line is left for V17's lift so this diff stays small.
+  - Not run locally, left to the lane:
+    - the whole core `child-environment.test.ts` (two of its tests spawn Bun);
+    - `registry.test.ts` (its custom-tool tests may install the plugin SDK through npm in the background);
+    - `github.run-routing.test.ts` and `github.review.test.ts` (they spawn the CLI and cover `githubRun`);
+    - the Node-bundle build and smoke, now that `registry.ts`, `research-browser.ts` and `request.ts` import more of core and `session/system.ts` imports the registry;
+    - `test/session/prompt.test.ts` (it spawns `process.execPath`; it covers `session/tools.ts`), which only `test.yml` runs.
+- **CI:** none yet for V03.
+- **Review fixes (2026-10-30), four findings, all fixed:**
+  1. The no-argument `untrustedChildEnvironment()`, which reads `process.env`, had no Actions test. Added the no-source test and the real-child test above.
+  2. This entry said `test.yml`'s app e2e job runs the engine on Actions. It does not; corrected under "For later packages".
+  3. A `computer` MCP server's resources and instructions still reached the model on Actions. `ToolRegistry.actionsWithheldServer(name)` now guards the resource tools and `SystemPrompt.mcp` (deviation 2).
+  4. `githubRun` unpinned the policy at the start of its cleanup, while background subagents, the turns their notes start and the titles `effectCmd` waits for could still send requests. It now never unpins (deviation 1).
+- **For later packages:**
+  - V16: the child filter and the in-process deletion of the OIDC pair are defence in depth only. `/proc/<pid>/environ` keeps the engine's launch environment, the pair and provider keys included, for any same-user process in a v2 single-job workflow.
+  - V17: keep `LLMRequestPrep.pin(...)` before the auth exchange, and add no unpin to `githubRun`: background subagents, the turns their notes start and the titles `effectCmd` waits for still send requests after `githubRun` returns, until the instance is disposed. A test that runs the lifted helpers in-process unpins in its own scope, as `github.policy.test.ts`'s `pinned` does. That file reads the pin from `github.handler.ts`, so update its source check if the lift moves it.
+  - V18:
+    - the agent phase pins `githubSystemInstructions` before any session and never unpins it, as `githubRun` does;
+    - the lifted prompt builders write every body with `untrustedJson`.
+    - Subagents need nothing more: the pin covers every session of the process.
+    - `githubRun` does not wait for background subagents before it commits, posts and returns, as `vector run` does (`cli/cmd/run.ts`); disposing the instance stops them. The agent phase decides whether to wait.
+  - V20: the review job (`github.review.ts`) does not pin the policy yet.
+  - V14 and V23: write `VECTOR_SECRET_ENV_NAMES` for every key line. Until then, on v2 a provider key whose name lacks the suffix stays visible to children (deviation 5).
+  - V29's docs say that on Actions:
+    - children see no `ACTIONS_*` value and no name ending `_TOKEN`, `_KEY`, `_SECRET` or `_PASSWORD`: `NPM_TOKEN` and `NODE_AUTH_TOKEN` for installs, an MCP server's token variables and `gh` in the model's shell included;
+    - the research tools need the desktop app.
+
+    They do not claim more than the suffix rule for v2 workflows.
+
+  - Hands E5: the `computer` registration and its availability check must call `GithubAgents.onActionsRunner` and `GithubAgents.withheldOnActions`. The registry's `all()` filter already withholds a `computer` id, which `registry-actions.test.ts` proves with a plugin stand-in. E5 also guards core's V2 registry, which V03 does not touch (deviation 4).
+  - `test.yml`'s app e2e job is unaffected: it starts only the app's Vite dev server (`playwright.config.ts`'s `webServer`) and answers the engine's calls with `mockVectorServer` and `page.route`. The engine runs that do have `GITHUB_ACTIONS=true` are `test.yml`'s HttpApi exerciser step (`bun run test:httpapi` in `packages/engine`, in process) and the Node-bundle smoke in `test.yml` and the lane. Neither depends on a withheld tool or a stripped name: the exerciser's tool routes only check that a list comes back, and its shell and pty children run `printf` and `sleep`; the smoke calls the Read and memory tools.
 
 ## Owner checks recorded
 

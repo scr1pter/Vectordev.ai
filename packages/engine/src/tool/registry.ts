@@ -1,10 +1,12 @@
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
+import { GithubAgents } from "@vectordevai/core/github-agents"
 import { LocationServiceMap, locationServiceMapLayer } from "@vectordevai/core/location-services"
 import { httpClient } from "@vectordevai/core/effect/app-node-platform"
 import { Ripgrep } from "@vectordevai/core/ripgrep"
 import { PlanExitTool } from "./plan"
 import { Session } from "@/session/session"
 import { SessionStatus } from "@/session/status"
+import { McpCatalog } from "@/mcp/catalog"
 import { QuestionTool } from "./question"
 import { ShellTool } from "./shell"
 import { TerminalTool } from "./terminal"
@@ -105,6 +107,24 @@ export function isBuiltinTask(tool: Tool.Def) {
 
 export function isBuiltinPatch(tool: Tool.Def) {
   return builtinPatches.has(tool)
+}
+
+/**
+ * On GitHub Actions no tool that drives the user's browser, the Vector Cloud bridge or a computer is offered, whatever
+ * bridge variables are set (INV-S13). Read on every call, so a registry built before the variable was set is filtered
+ * too. MCP tools never pass through the registry: SessionTools.resolve asks the same question of each one.
+ */
+export function actionsWithheld(id: string) {
+  return GithubAgents.onActionsRunner(process.env) && GithubAgents.withheldOnActions(id)
+}
+
+/**
+ * `actionsWithheld` for a whole MCP server, asked of the prefix every one of its tool ids carries, so a `computer`
+ * server's resources and instructions are withheld with its tools: SessionTools.resolve drops it from the resource
+ * tools, and SystemPrompt.mcp drops its instructions.
+ */
+export function actionsWithheldServer(name: string) {
+  return actionsWithheld(McpCatalog.sanitize(name))
 }
 
 type State = {
@@ -355,7 +375,7 @@ const layer = Layer.effect(
 
     const all: Interface["all"] = Effect.fn("ToolRegistry.all")(function* () {
       const s = yield* InstanceState.get(state)
-      return [...s.builtin, ...s.custom] as Tool.Def[]
+      return [...s.builtin, ...s.custom].filter((tool) => !actionsWithheld(tool.id)) as Tool.Def[]
     })
 
     const ids: Interface["ids"] = Effect.fn("ToolRegistry.ids")(function* () {

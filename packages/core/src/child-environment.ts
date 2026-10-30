@@ -1,4 +1,5 @@
 import type { LocalMode } from "@vectordevai/schema/local-mode"
+import { GithubAgents } from "./github-agents"
 import { LocalPolicy } from "./local-mode/policy"
 
 const PRIVATE_RUNTIME_ENVIRONMENT = new Set([
@@ -9,6 +10,18 @@ const PRIVATE_RUNTIME_ENVIRONMENT = new Set([
   "VECTOR_MCP_AUTH_KEY",
   "VECTOR_REQUIRE_SECURE_CREDENTIAL_STORE",
 ])
+
+// The credentials INV-S5 names on GitHub Actions. SECRET_NAME_PATTERN also covers the _TOKEN ones; the bind code and the
+// ticket it misses.
+const ACTIONS_CREDENTIALS = new Set([
+  "GITHUB_TOKEN",
+  "GH_TOKEN",
+  "VECTOR_CLI_TOKEN",
+  "VECTOR_BIND_CODE",
+  "VECTOR_TICKET",
+])
+// A name VECTOR_SECRET_ENV_NAMES may list: the generator's key-name rule (INV-S15).
+const SECRET_ENV_NAME = /^[A-Z_][A-Z0-9_]{0,99}$/
 
 /**
  * Set in every untrusted child of a process that runs agents. `vector local off`, `allow` and `web` refuse under it.
@@ -30,18 +43,26 @@ const inherited: { local?: LocalMode.Web; agent: boolean } = { agent: false }
  * preload variables a project config tries to set are refused when that
  * config is loaded (WorkspaceTrust.unsafeProjectEnvironment).
  *
+ * On GitHub Actions (any source with GITHUB_ACTIONS=true) children also lose
+ * the runner's ACTIONS_* values, the GitHub and Vector credentials INV-S5
+ * names, every name ending _TOKEN, _KEY, _SECRET or _PASSWORD, and every name
+ * VECTOR_SECRET_ENV_NAMES lists. That is defence in depth: workflow v3's agent
+ * sandbox keeps credentials out of the engine's environment altogether, but v2
+ * workflows and self-hosted runners have no sandbox.
+ *
  * Once a process has called `inherit`, its children also get the Vector Local
  * floor (VECTOR_LOCAL=1 and a Web access at least as strict, so a nested
  * vector keeps Local on whatever config it reads) and the agent marker. A
  * source environment cannot lower either.
  */
 export function untrustedChildEnvironment(...sources: Array<NodeJS.ProcessEnv | undefined>): Record<string, string> {
-  const environment: NodeJS.ProcessEnv = Object.assign(
-    {},
-    ...(sources.length ? sources.filter(Boolean) : [process.env]),
-  )
+  const list = sources.length
+    ? sources.filter((source): source is NodeJS.ProcessEnv => source !== undefined)
+    : [process.env]
+  const environment: NodeJS.ProcessEnv = Object.assign({}, ...list)
+  const hidden = actionsSecrets(list)
   const filtered = Object.entries(environment).flatMap(([key, value]) =>
-    typeof value === "string" && !privateRuntimeKey(key) ? [[key, value] as const] : [],
+    typeof value === "string" && !privateRuntimeKey(key) && !hidden(key) ? [[key, value] as const] : [],
   )
   const added = floor(filtered)
   // Windows keys are case-insensitive, so a source's own spelling of a key the floor sets is dropped, not doubled.
@@ -77,6 +98,35 @@ function floor(environment: ReadonlyArray<readonly [string, string]>) {
     ...(inherited.agent ? { [AGENT_MARKER]: value(AGENT_MARKER) || "1" } : {}),
     ...(strictest === undefined ? {} : { VECTOR_LOCAL: "1" }),
     ...(strictest === undefined || strictest === "ask" ? {} : { VECTOR_LOCAL_WEB: strictest }),
+  }
+}
+
+// What a child of a process on GitHub Actions must not see (INV-S5). Any source that says Actions turns this on, so a
+// later source (a project MCP server's environment, a plugin's shell env) cannot turn it off with GITHUB_ACTIONS=false,
+// and a name any source lists stays hidden whatever list a later source gives. Names are compared upper-cased, as
+// Windows compares them.
+function actionsSecrets(sources: readonly NodeJS.ProcessEnv[]) {
+  if (!sources.some((source) => GithubAgents.onActionsRunner(source))) return () => false
+  const listed = new Set(
+    sources.flatMap((source) =>
+      Object.entries(source).flatMap(([key, value]) =>
+        key.toUpperCase() === "VECTOR_SECRET_ENV_NAMES" && typeof value === "string"
+          ? value
+              .split(",")
+              .map((name) => name.trim().toUpperCase())
+              .filter((name) => SECRET_ENV_NAME.test(name))
+          : [],
+      ),
+    ),
+  )
+  return (key: string) => {
+    const name = key.toUpperCase()
+    return (
+      name.startsWith("ACTIONS_") ||
+      ACTIONS_CREDENTIALS.has(name) ||
+      GithubAgents.SECRET_NAME_PATTERN.test(name) ||
+      listed.has(name)
+    )
   }
 }
 

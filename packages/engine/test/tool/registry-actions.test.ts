@@ -1,0 +1,396 @@
+// INV-S13: with GITHUB_ACTIONS=true no tool reaches the user's browser, the Vector Cloud bridge or a computer, even with
+// their bridge variables set: not the registry's own tools, not a plugin's `computer` (a stand-in for Vector Hands' tool,
+// so the guard is proven before Hands merges), not a `computer` MCP server's tools, resources or instructions, and not the
+// research tools that drive the desktop's research browser. The desktop is a fake one on loopback, whose calls are
+// recorded.
+
+import { afterAll, afterEach, describe, expect } from "bun:test"
+import path from "path"
+import type { Client } from "@modelcontextprotocol/sdk/client/index.js"
+import { dynamicTool, jsonSchema } from "ai"
+import { Effect, Layer } from "effect"
+import { LayerNode } from "@vectordevai/core/effect/layer-node"
+import { ModelV2 } from "@vectordevai/core/model"
+import { ProviderV2 } from "@vectordevai/core/provider"
+import { ResearchSearch } from "@vectordevai/core/research/search"
+import { Agent } from "@/agent/agent"
+import { Config } from "@/config/config"
+import { InstanceState } from "@/effect/instance-state"
+import { RuntimeFlags } from "@/effect/runtime-flags"
+import { MCP } from "@/mcp"
+import { Plugin } from "@/plugin"
+import { Session } from "@/session/session"
+import { ToolRegistry } from "@/tool/registry"
+import { RENDER } from "../../src/tool/research-read"
+import { ResearchRun } from "../../src/tool/research-run"
+import { disposeAllInstances } from "../fixture/fixture"
+import { TestConfig } from "../fixture/config"
+import { testEffect } from "../lib/effect"
+import { FakeBridge } from "../lib/fake-bridge"
+import { calls, output, plan, runtime, send, setup } from "../lib/research"
+import { FakeWeb } from "../../../core/test/lib/fake-web"
+import { NetworkGuard } from "../../../core/test/lib/network-guard"
+
+// Tool ids that must never be offered on Actions, and look-alikes that must stay.
+const WITHHELD = ["browser", "vector_cloud", "research_browser", "computer", "computer-x", "Computer_use"]
+const KEPT = ["read", "bash", "research_search", "computers", "computerize", "my_computer"]
+// What a plugin registers: the computer-use stand-ins and the look-alikes.
+const PLUGIN_TOOLS = ["computer", "computer-x", "Computer_use", "computers", "computerize", "my_computer"]
+// A `computer-x` and a `computer` MCP server's tools, and another server's.
+const MCP_TOOLS = ["computer-x_click", "computer_screenshot", "docs_search"]
+// The `computer` server's screen and the docs server's guide, as resources, and each server's instructions.
+const SCREEN = { server: "computer", uri: "screen://current", text: "What is on the user's screen" }
+const GUIDE = { server: "docs", uri: "docs://guide", text: "The docs guide" }
+const INSTRUCTIONS = { computer: "Take a screenshot before every click.", docs: "Search the docs before answering." }
+const CLOUD_BRIDGE = { VECTOR_CLOUD_BRIDGE_URL: "http://127.0.0.1:9", VECTOR_CLOUD_BRIDGE_TOKEN: "test-cloud-bridge" }
+
+const guard = NetworkGuard.use()
+const web = FakeWeb.start({ sites: FakeWeb.sites() })
+const bridge = FakeBridge.start()
+const pointed = FakeBridge.use(bridge)
+afterAll(async () => {
+  pointed.off()
+  await bridge.close()
+  await web.close()
+})
+
+/**
+ * Sets these variables until the calling scope closes, then puts back what was there. Every engine file of the lane runs
+ * in one Bun process, so a variable left behind would put the next file on GitHub Actions.
+ */
+const environment = (values: Record<string, string>) =>
+  Effect.acquireRelease(
+    Effect.sync(() => {
+      const before = Object.fromEntries(Object.keys(values).map((name) => [name, process.env[name]]))
+      assign(values)
+      return before
+    }),
+    (before) => Effect.sync(() => assign(before)),
+  )
+
+function assign(values: Record<string, string | undefined>) {
+  Object.entries(values).forEach(([name, value]) => {
+    if (value !== undefined) {
+      process.env[name] = value
+      return
+    }
+    delete process.env[name]
+  })
+}
+
+const model = { providerID: ProviderV2.ID.make("anthropic"), modelID: ModelV2.ID.make("claude-sonnet-4-5") }
+
+const pluginLayer = Layer.succeed(
+  Plugin.Service,
+  Plugin.Service.of({
+    init: () => Effect.void,
+    trigger: ((_name: unknown, _input: unknown, output: unknown) =>
+      Effect.succeed(output)) as Plugin.Interface["trigger"],
+    list: () =>
+      Effect.succeed([
+        {
+          tool: Object.fromEntries(
+            PLUGIN_TOOLS.map((id) => [id, { description: `${id} stand-in`, args: {}, execute: async () => "ok" }]),
+          ),
+        },
+      ]),
+  }),
+)
+
+const registryIt = testEffect(
+  LayerNode.compile(LayerNode.group([ToolRegistry.node, Agent.node]), [
+    [
+      Config.node,
+      TestConfig.layer({
+        directories: () => InstanceState.directory.pipe(Effect.map((dir) => [path.join(dir, ".vector")])),
+        waitForDependencies: () => Effect.die("Local tools must not wait for SDK downloads"),
+      }),
+    ],
+    [RuntimeFlags.node, RuntimeFlags.layer()],
+    [Plugin.node, pluginLayer],
+  ]),
+)
+
+// What the registry offers: its ids, and the tools the build agent and the research lead are given.
+const offered = Effect.gen(function* () {
+  const registry = yield* ToolRegistry.Service
+  const agents = yield* Agent.Service
+  const tools = (agent: Agent.Info) =>
+    registry.tools({ ...model, agent }).pipe(Effect.map((list) => list.map((tool) => tool.id)))
+  return {
+    ids: yield* registry.ids(),
+    all: (yield* registry.all()).map((tool) => tool.id),
+    build: yield* tools(yield* agents.get("build")),
+    lead: yield* tools(yield* agents.get(ResearchRun.LEAD)),
+  }
+})
+
+const withheld = (ids: readonly string[]) => ids.filter((id) => WITHHELD.includes(id))
+
+describe("the registry on GitHub Actions", () => {
+  afterEach(async () => {
+    await disposeAllInstances()
+  })
+
+  registryIt.instance("bridged and computer tools never register in Actions", () =>
+    Effect.gen(function* () {
+      yield* environment({ ...CLOUD_BRIDGE, GITHUB_ACTIONS: "true" })
+      const tools = yield* offered
+      expect(withheld(tools.ids)).toEqual([])
+      expect(tools.ids).toEqual(expect.arrayContaining(KEPT))
+      expect(tools.all).toEqual(tools.ids)
+      expect(withheld(tools.build)).toEqual([])
+      expect(tools.build).toEqual(expect.arrayContaining(["read", "bash", "computers", "computerize", "my_computer"]))
+      expect(tools.lead).toContain("research_search")
+      expect(tools.lead).not.toContain("research_browser")
+    }),
+  )
+
+  registryIt.instance("outside Actions the same tools are offered", () =>
+    Effect.gen(function* () {
+      yield* environment({ ...CLOUD_BRIDGE, GITHUB_ACTIONS: "false" })
+      const tools = yield* offered
+      expect(tools.ids).toEqual(expect.arrayContaining([...WITHHELD, ...KEPT]))
+      expect(tools.build).toEqual(expect.arrayContaining(["browser", "vector_cloud", "computer", "computer-x"]))
+      expect(tools.lead).toContain("research_browser")
+    }),
+  )
+
+  registryIt.instance("a registry built outside Actions withholds them once on Actions, and offers them after", () =>
+    Effect.gen(function* () {
+      yield* environment({ ...CLOUD_BRIDGE, GITHUB_ACTIONS: "false" })
+      expect((yield* offered).ids).toEqual(expect.arrayContaining(WITHHELD))
+      // The same instance, whose registry state is already built and cached.
+      const actions = yield* Effect.scoped(
+        Effect.gen(function* () {
+          yield* environment({ GITHUB_ACTIONS: "true" })
+          return yield* offered
+        }),
+      )
+      expect(withheld(actions.ids)).toEqual([])
+      expect(withheld(actions.all)).toEqual([])
+      expect(withheld(actions.build)).toEqual([])
+      expect(actions.lead).not.toContain("research_browser")
+      const after = yield* offered
+      expect(after.ids).toEqual(expect.arrayContaining(WITHHELD))
+      expect(after.lead).toContain("research_browser")
+    }),
+  )
+})
+
+// The servers a resource was read from, in order.
+const reads: string[] = []
+
+const mcpLayer = Layer.succeed(
+  MCP.Service,
+  MCP.Service.of({
+    status: () => Effect.succeed({}),
+    clients: () =>
+      Effect.succeed(
+        Object.fromEntries(
+          Object.keys(INSTRUCTIONS).map((name) => [
+            name,
+            { getServerCapabilities: () => ({ tools: {}, resources: {} }) } as unknown as Client,
+          ]),
+        ),
+      ),
+    instructions: () =>
+      Effect.succeed(
+        Object.entries(INSTRUCTIONS).map(([name, instructions]) => ({
+          name,
+          instructions,
+          tools: MCP_TOOLS.filter((tool) => tool.startsWith(`${name}_`)),
+        })),
+      ),
+    // Fresh tools per call: the session overwrites each tool's schema and execute.
+    tools: () =>
+      Effect.sync(() =>
+        Object.fromEntries(
+          MCP_TOOLS.map((name) => [
+            name,
+            dynamicTool({
+              description: `${name} from a fake MCP server`,
+              inputSchema: jsonSchema({ type: "object", properties: {} }),
+              execute: async () => ({ content: [{ type: "text", text: "ok" }] }),
+            }),
+          ]),
+        ),
+      ),
+    cloudTools: () => Effect.succeed({}),
+    prompts: () => Effect.succeed({}),
+    resources: (server) =>
+      Effect.succeed(
+        Object.fromEntries(
+          [SCREEN, GUIDE]
+            .filter((resource) => !server || resource.server === server)
+            .map((resource) => [resource.uri, { name: resource.uri, uri: resource.uri, client: resource.server }]),
+        ),
+      ),
+    resourceTemplates: () => Effect.succeed({}),
+    add: () => Effect.succeed({ status: { status: "disabled" as const } }),
+    remove: () => Effect.void,
+    connect: () => Effect.void,
+    disconnect: () => Effect.void,
+    getPrompt: () => Effect.succeed(undefined),
+    readResource: (server, uri) =>
+      Effect.sync(() => {
+        reads.push(server)
+        const found = [SCREEN, GUIDE].find((resource) => resource.server === server && resource.uri === uri)
+        return found ? { contents: [{ uri, text: found.text }] } : undefined
+      }),
+    startAuth: () => Effect.die("unexpected MCP auth"),
+    authenticate: () => Effect.die("unexpected MCP auth"),
+    finishAuth: () => Effect.die("unexpected MCP auth"),
+    removeAuth: () => Effect.void,
+    supportsOAuth: () => Effect.succeed(false),
+    hasStoredTokens: () => Effect.succeed(false),
+    getAuthStatus: () => Effect.succeed("not_authenticated" as const),
+  }),
+)
+
+const it = runtime(web, { mcp: mcpLayer })
+
+const isTitle = (body: Record<string, unknown>) =>
+  JSON.stringify(body).includes("Generate a title for this conversation")
+
+// The tool names a provider request offered the model.
+function toolNames(body: Record<string, unknown> | undefined) {
+  const tools = Array.isArray(body?.tools) ? body.tools : []
+  return tools.map((item) =>
+    item && typeof item === "object" && "function" in item ? (item.function as { name: string }).name : "",
+  )
+}
+
+// A provider request's system messages.
+function systemText(body: Record<string, unknown> | undefined) {
+  const messages = Array.isArray(body?.messages) ? (body.messages as { role: string; content: unknown }[]) : []
+  return messages
+    .filter((message) => message.role === "system")
+    .map((message) => JSON.stringify(message.content))
+    .join("\n")
+}
+
+// A build run in which the model lists the MCP resources, then reads the `computer` server's screen: the tools and the
+// system text its first request offered, what the two calls returned, and the servers a resource was read from.
+const buildRun = Effect.gen(function* () {
+  const test = yield* setup()
+  const sessions = yield* Session.Service
+  const session = yield* sessions.create({ title: "Build" })
+  yield* test.llm.tool("list_mcp_resources", {})
+  yield* test.llm.tool("read_mcp_resource", { server: SCREEN.server, uri: SCREEN.uri })
+  yield* test.llm.text("Done.")
+  const before = (yield* test.llm.inputs).length
+  const read = reads.length
+  yield* send({ sessionID: session.id, agent: "build", text: "Fix the flaky auth test in src/auth.", size: "standard" })
+  const first = (yield* test.llm.inputs).slice(before).find((body) => !isTitle(body))
+  const [listed] = yield* calls(session.id, "list_mcp_resources")
+  const [screen] = yield* calls(session.id, "read_mcp_resource")
+  return {
+    names: toolNames(first),
+    system: systemText(first),
+    listed: output(listed),
+    screen: output(screen),
+    reads: reads.slice(read),
+  }
+})
+
+describe("a session on GitHub Actions", () => {
+  it.instance(
+    "a computer MCP server's tools, resources and instructions and the bridged tools never reach the model in Actions",
+    () =>
+      Effect.gen(function* () {
+        yield* environment({ ...CLOUD_BRIDGE, GITHUB_ACTIONS: "true" })
+        const run = yield* buildRun
+        expect(run.names).toEqual(expect.arrayContaining(["docs_search", "read", "list_mcp_resources"]))
+        expect(
+          run.names.filter((name) => [...WITHHELD, "computer-x_click", "computer_screenshot"].includes(name)),
+        ).toEqual([])
+        // The docs server is still offered whole; the computer server's resources and instructions are not.
+        expect(run.system).toContain(INSTRUCTIONS.docs)
+        expect(run.system).not.toContain(INSTRUCTIONS.computer)
+        expect(run.listed).toContain(GUIDE.uri)
+        expect(run.listed).not.toContain(SCREEN.uri)
+        expect(run.screen).toContain('MCP server "computer" is not connected')
+        expect(run.screen).not.toContain(SCREEN.text)
+        expect(run.reads).toEqual([])
+        expect(guard.outside()).toEqual([])
+      }),
+    90_000,
+  )
+
+  it.instance(
+    "outside Actions the same session offers them",
+    () =>
+      Effect.gen(function* () {
+        yield* environment({ ...CLOUD_BRIDGE, GITHUB_ACTIONS: "false" })
+        const run = yield* buildRun
+        expect(run.names).toEqual(
+          expect.arrayContaining([...MCP_TOOLS, "browser", "vector_cloud", "read_mcp_resource"]),
+        )
+        expect(run.system).toContain(INSTRUCTIONS.computer)
+        expect(run.listed).toContain(SCREEN.uri)
+        expect(run.screen).toContain(SCREEN.text)
+        expect(run.reads).toEqual([SCREEN.server])
+      }),
+    90_000,
+  )
+
+  it.instance(
+    "research_search and research_read's rendering send nothing to the desktop browser in Actions",
+    () =>
+      Effect.gen(function* () {
+        yield* environment({ GITHUB_ACTIONS: "true" })
+        const test = yield* setup()
+        const sessions = yield* Session.Service
+        const session = yield* sessions.create({
+          title: "Research",
+          permission: [{ permission: "research_read", pattern: "*", action: "allow" }],
+        })
+        const spa = web.url("spa", "/")
+        const before = bridge.calls().length
+        const asked = (yield* test.llm.inputs).length
+        yield* test.llm.tool("research_plan", plan())
+        yield* test.llm.tool("research_search", { query: "heat pump sizing in cold climates" })
+        yield* test.llm.tool("research_read", { url: spa })
+        yield* test.llm.tool("research_read", { url: spa, mode: "render" })
+        yield* test.llm.text("Done.")
+        yield* send({ sessionID: session.id, agent: "research", text: `Research heat pump sizing at ${spa}` })
+
+        const [searched] = yield* calls(session.id, "research_search")
+        expect(output(searched)).toBe(ResearchSearch.NEEDS_DESKTOP)
+        const reads = yield* calls(session.id, "research_read")
+        // A script-built page is kept as skipped, as without a desktop, rather than rendered in its browser.
+        expect(reads[0]?.state.status === "completed" ? reads[0].state.metadata.status : undefined).toBe("needs-render")
+        expect(output(reads[1])).toBe(RENDER)
+        expect(bridge.calls().length).toBe(before)
+        const lead = toolNames((yield* test.llm.inputs).slice(asked).find((body) => !isTitle(body)))
+        expect(lead).toContain("research_search")
+        expect(lead).not.toContain("research_browser")
+        expect(guard.outside()).toEqual([])
+      }),
+    90_000,
+  )
+
+  it.instance(
+    "outside Actions research_search asks the desktop's research browser",
+    () =>
+      Effect.gen(function* () {
+        yield* environment({ GITHUB_ACTIONS: "false" })
+        const test = yield* setup()
+        const sessions = yield* Session.Service
+        const session = yield* sessions.create({ title: "Research" })
+        const before = bridge.calls().length
+        yield* test.llm.tool("research_plan", plan())
+        yield* test.llm.tool("research_search", { query: "heat pump sizing in cold climates" })
+        yield* test.llm.text("Done.")
+        yield* send({ sessionID: session.id, agent: "research", text: "Research heat pump sizing." })
+        expect(
+          bridge
+            .calls()
+            .slice(before)
+            .map((call) => call.body.command),
+        ).toContain("research.search")
+      }),
+    90_000,
+  )
+})
