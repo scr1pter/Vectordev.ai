@@ -28,11 +28,12 @@ function eventData(data: unknown): Sse.Event {
 export const EventHandler = HttpApiBuilder.group(Api, "server.event", (handlers) =>
   Effect.gen(function* () {
     const events = yield* EventV2.Service
+    // Read when the routes are built, so a host serving them has nothing more to provide per request.
+    const audience = yield* SessionAudience.Service
     return handlers.handleRaw("event.subscribe", () =>
       Effect.gen(function* () {
         const principal = yield* RequestPrincipal
         const owner = yield* RequestOwner.owner
-        const audience = yield* SessionAudience.Service
         const connected = {
           id: EventV2.ID.create(),
           type: "server.connected",

@@ -55,8 +55,14 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
     const session = yield* SessionV2.Service
     const guard = yield* SpendGuard.Service
     const audience = yield* SessionAudience.Service
+    // The per-request audience checks use the instance these routes were built with, so a host serving them (the CLI
+    // server, the embedded SDK) has nothing more to provide per request.
+    const withAudience = Effect.provideService(SessionAudience.Service, audience)
     const requireRaw = (id: string) =>
-      RequestOwner.owner.pipe(Effect.flatMap((owner) => SessionAudienceHttp.assertSession(id, owner)))
+      RequestOwner.owner.pipe(
+        Effect.flatMap((owner) => SessionAudienceHttp.assertSession(id, owner)),
+        withAudience,
+      )
     const requireOwner = Effect.gen(function* () {
       if (yield* RequestOwner.owner) return
       return yield* new ForbiddenError({ message: "This operation requires the server owner." })
@@ -76,7 +82,7 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
     // Whether the principal may open a session by its ID; a session that cannot be read is never allowed.
     const allowsSessionID = (principal: Principal, sessionID: SessionV2.ID) =>
       session.get(sessionID).pipe(
-        Effect.flatMap((item) => allowsSessionLocation(principal, item)),
+        Effect.flatMap((item) => allowsSessionLocation(principal, item).pipe(withAudience)),
         Effect.catch(() => Effect.succeed(false)),
       )
 
@@ -139,7 +145,9 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
             })
             .pipe(Effect.catch((error) => Effect.logError("Failed to list Vector sessions", error).pipe(Effect.as([]))))
           const principal = yield* RequestPrincipal
-          const allowed = yield* Effect.filter(sessions, (item) => allowsSessionLocation(principal, item))
+          const allowed = yield* Effect.filter(sessions, (item) =>
+            allowsSessionLocation(principal, item).pipe(withAudience),
+          )
           const first = allowed[0]
           const last = allowed.at(-1)
           return {
@@ -175,7 +183,7 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
           const principal = yield* RequestPrincipal
           const requested = ctx.payload.location ?? { directory: AbsolutePath.make(process.cwd()) }
           const owner = yield* RequestOwner.owner
-          yield* SessionAudienceHttp.assertDirectory(requested.directory, owner)
+          yield* SessionAudienceHttp.assertDirectory(requested.directory, owner).pipe(withAudience)
           const guestDirectory = guestWorkspaceDirectory(principal, requested.workspaceID)
           if (principal.kind === "guest" && guestDirectory === undefined)
             return yield* new ForbiddenError({ message: "Guest sessions require an allowed workspace" })
@@ -195,7 +203,7 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
             principal.kind === "guest"
               ? Location.Ref.make({ directory: AbsolutePath.make(guestDirectory!), workspaceID: requested.workspaceID })
               : requested
-          if (ctx.payload.parentID) yield* SessionAudienceHttp.admit(ctx.payload.parentID, owner)
+          if (ctx.payload.parentID) yield* SessionAudienceHttp.admit(ctx.payload.parentID, owner).pipe(withAudience)
           const created = yield* session
             .create(
               {
@@ -217,9 +225,9 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
               ),
             )
           // An ID that already names a session adopts it wherever it lives, so the guest's claims decide the answer.
-          if (!(yield* allowsSessionLocation(principal, created)))
+          if (!(yield* allowsSessionLocation(principal, created).pipe(withAudience)))
             return yield* new ForbiddenError({ message: "This session is outside the guest's workspace" })
-          yield* SessionAudienceHttp.admit(created.id, owner)
+          yield* SessionAudienceHttp.admit(created.id, owner).pipe(withAudience)
           return { data: created }
         }),
       )
@@ -324,7 +332,7 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
         Effect.fn(function* (ctx) {
           const owner = yield* RequestOwner.owner
           yield* requireHomePlacement(ctx.params.sessionID)
-          yield* SessionAudienceHttp.admit(ctx.params.sessionID, owner)
+          yield* SessionAudienceHttp.admit(ctx.params.sessionID, owner).pipe(withAudience)
           // A guest never accepted the free-model training notice, so the owner's acceptance must not carry a guest's
           // prompt to a model that may train. The prompt runs on the session's model, or the default without one.
           // The model is judged as the runner chooses it, so a session without one is judged by its automatic choice.
@@ -588,11 +596,9 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
         "session.events",
         Effect.fn(function* (ctx) {
           const owner = yield* RequestOwner.owner
-          yield* SessionAudienceHttp.assertSession(ctx.params.sessionID, owner)
+          yield* SessionAudienceHttp.assertSession(ctx.params.sessionID, owner).pipe(withAudience)
           return session.events({ sessionID: ctx.params.sessionID, after: ctx.query.after }).pipe(
-            Stream.filterEffect((event) =>
-              SessionAudienceHttp.envelope(event, owner).pipe(Effect.provideService(SessionAudience.Service, audience)),
-            ),
+            Stream.filterEffect((event) => SessionAudienceHttp.envelope(event, owner).pipe(withAudience)),
             Stream.orDie,
           )
         }),
