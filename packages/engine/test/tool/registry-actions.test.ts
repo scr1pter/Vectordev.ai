@@ -1,10 +1,11 @@
 // INV-S13: with GITHUB_ACTIONS=true no tool reaches the user's browser, the Vector Cloud bridge or a computer, even with
 // their bridge variables set: not the registry's own tools, not a plugin's `computer` (a stand-in for Vector Hands' tool,
-// so the guard is proven before Hands merges), not a `computer` MCP server's tools, resources or instructions, and not the
-// research tools that drive the desktop's research browser. The desktop is a fake one on loopback, whose calls are
-// recorded.
+// so the guard is proven before Hands merges), not the tools, resources or instructions of an MCP server named for
+// computer use or listing a `computer` tool, and not the research tools that drive the desktop's research browser. An MCP
+// server that only shares a bridged tool's name (`browser`) is offered whole. The desktop is a fake one on loopback, whose
+// calls are recorded.
 
-import { afterAll, afterEach, describe, expect } from "bun:test"
+import { afterAll, afterEach, describe, expect, test } from "bun:test"
 import path from "path"
 import type { Client } from "@modelcontextprotocol/sdk/client/index.js"
 import { dynamicTool, jsonSchema } from "ai"
@@ -36,12 +37,34 @@ const WITHHELD = ["browser", "vector_cloud", "research_browser", "computer", "co
 const KEPT = ["read", "bash", "research_search", "computers", "computerize", "my_computer"]
 // What a plugin registers: the computer-use stand-ins and the look-alikes.
 const PLUGIN_TOOLS = ["computer", "computer-x", "Computer_use", "computers", "computerize", "my_computer"]
-// A `computer-x` and a `computer` MCP server's tools, and another server's.
-const MCP_TOOLS = ["computer-x_click", "computer_screenshot", "docs_search"]
-// The `computer` server's screen and the docs server's guide, as resources, and each server's instructions.
-const SCREEN = { server: "computer", uri: "screen://current", text: "What is on the user's screen" }
-const GUIDE = { server: "docs", uri: "docs://guide", text: "The docs guide" }
-const INSTRUCTIONS = { computer: "Take a screenshot before every click.", docs: "Search the docs before answering." }
+// The MCP servers' tool keys: a `computer-x` server's (whose client is gone, so only its key names it) and a `computer`
+// server's; a `desktop` server's, whose `computer` tool is computer use by its own name; a browser-automation server named
+// `browser`, which is not computer use; and a docs server's.
+const MCP_TOOLS = [
+  "computer-x_click",
+  "computer_screenshot",
+  "desktop_computer",
+  "desktop_type",
+  "browser_navigate",
+  "docs_search",
+]
+// Each connected server's resource and instructions.
+const RESOURCES = {
+  computer: { uri: "screen://current", text: "What is on the user's screen" },
+  desktop: { uri: "desktop://screen", text: "What the desktop shows" },
+  browser: { uri: "browser://tabs", text: "The browser's open tabs" },
+  docs: { uri: "docs://guide", text: "The docs guide" },
+}
+const INSTRUCTIONS = {
+  computer: "Take a screenshot before every click.",
+  desktop: "Call computer with a screenshot action first.",
+  browser: "Open a tab before you navigate.",
+  docs: "Search the docs before answering.",
+}
+// The computer-use servers' tool keys, which never reach the model on Actions.
+const COMPUTER_TOOLS = ["computer-x_click", "computer_screenshot", "desktop_computer", "desktop_type"]
+// The servers whose resource the model reads.
+const READ = ["computer", "desktop", "browser"] as const
 const CLOUD_BRIDGE = { VECTOR_CLOUD_BRIDGE_URL: "http://127.0.0.1:9", VECTOR_CLOUD_BRIDGE_TOKEN: "test-cloud-bridge" }
 
 const guard = NetworkGuard.use()
@@ -178,6 +201,56 @@ describe("the registry on GitHub Actions", () => {
   )
 })
 
+describe("MCP servers on GitHub Actions", () => {
+  // A server is withheld whole when its own name or a tool's own name is computer use, and a tool when its server is or
+  // its key is an id the registry withholds. A bridged tool's name is Vector's own tool, not computer use.
+  test("a server is withheld by its name or a tool's name, and its tools with it", () =>
+    Effect.runSync(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connected = [
+            "computer",
+            "Computer-Use",
+            "desktop",
+            "browser",
+            "vector_cloud",
+            "docs",
+            "a",
+            "a_computer",
+          ]
+          const keys = [
+            "computer_screenshot",
+            "desktop_computer",
+            "desktop_type",
+            "browser_navigate",
+            "vector_cloud_deploy",
+            "docs_search",
+            "docs_computers",
+            "a_read",
+            "a_computer_click",
+          ]
+          yield* environment({ GITHUB_ACTIONS: "true" })
+          const servers = ToolRegistry.actionsWithheldServers(connected, keys)
+          // A key does not say where its server's name ends: `a_computer_click` may be `a`'s `computer_click`, so `a` is
+          // withheld, and the key with it. `a_computer` itself, whose name and `click` are not computer use, is not.
+          expect(servers).toEqual(["computer", "Computer-Use", "desktop", "a"])
+          expect(keys.filter((key) => ToolRegistry.actionsWithheldMcpTool(key, servers))).toEqual([
+            "computer_screenshot",
+            "desktop_computer",
+            "desktop_type",
+            "a_read",
+            "a_computer_click",
+          ])
+          // A tool whose key alone is computer use is withheld even when no connected server claims it.
+          expect(ToolRegistry.actionsWithheldMcpTool("computer-x_click", [])).toBe(true)
+          yield* environment({ GITHUB_ACTIONS: "false" })
+          expect(ToolRegistry.actionsWithheldServers(connected, keys)).toEqual([])
+          expect(keys.filter((key) => ToolRegistry.actionsWithheldMcpTool(key, servers))).toEqual([])
+        }),
+      ),
+    ))
+})
+
 // The servers a resource was read from, in order.
 const reads: string[] = []
 
@@ -221,9 +294,9 @@ const mcpLayer = Layer.succeed(
     resources: (server) =>
       Effect.succeed(
         Object.fromEntries(
-          [SCREEN, GUIDE]
-            .filter((resource) => !server || resource.server === server)
-            .map((resource) => [resource.uri, { name: resource.uri, uri: resource.uri, client: resource.server }]),
+          Object.entries(RESOURCES)
+            .filter(([name]) => !server || name === server)
+            .map(([name, resource]) => [resource.uri, { name: resource.uri, uri: resource.uri, client: name }]),
         ),
       ),
     resourceTemplates: () => Effect.succeed({}),
@@ -235,8 +308,8 @@ const mcpLayer = Layer.succeed(
     readResource: (server, uri) =>
       Effect.sync(() => {
         reads.push(server)
-        const found = [SCREEN, GUIDE].find((resource) => resource.server === server && resource.uri === uri)
-        return found ? { contents: [{ uri, text: found.text }] } : undefined
+        const found = Object.entries(RESOURCES).find(([name, resource]) => name === server && resource.uri === uri)
+        return found ? { contents: [{ uri, text: found[1].text }] } : undefined
       }),
     startAuth: () => Effect.die("unexpected MCP auth"),
     authenticate: () => Effect.die("unexpected MCP auth"),
@@ -270,26 +343,27 @@ function systemText(body: Record<string, unknown> | undefined) {
     .join("\n")
 }
 
-// A build run in which the model lists the MCP resources, then reads the `computer` server's screen: the tools and the
-// system text its first request offered, what the two calls returned, and the servers a resource was read from.
+// A build run in which the model lists the MCP resources, then reads the `computer`, `desktop` and `browser` servers'
+// resources: the tools and the system text its first request offered, what the calls returned, and the servers a
+// resource was read from.
 const buildRun = Effect.gen(function* () {
   const test = yield* setup()
   const sessions = yield* Session.Service
   const session = yield* sessions.create({ title: "Build" })
   yield* test.llm.tool("list_mcp_resources", {})
-  yield* test.llm.tool("read_mcp_resource", { server: SCREEN.server, uri: SCREEN.uri })
+  yield* Effect.forEach(READ, (server) => test.llm.tool("read_mcp_resource", { server, uri: RESOURCES[server].uri }))
   yield* test.llm.text("Done.")
   const before = (yield* test.llm.inputs).length
   const read = reads.length
   yield* send({ sessionID: session.id, agent: "build", text: "Fix the flaky auth test in src/auth.", size: "standard" })
   const first = (yield* test.llm.inputs).slice(before).find((body) => !isTitle(body))
   const [listed] = yield* calls(session.id, "list_mcp_resources")
-  const [screen] = yield* calls(session.id, "read_mcp_resource")
+  const resources = yield* calls(session.id, "read_mcp_resource")
   return {
     names: toolNames(first),
     system: systemText(first),
     listed: output(listed),
-    screen: output(screen),
+    read: Object.fromEntries(READ.map((server, index) => [server, output(resources[index])])),
     reads: reads.slice(read),
   }
 })
@@ -301,18 +375,30 @@ describe("a session on GitHub Actions", () => {
       Effect.gen(function* () {
         yield* environment({ ...CLOUD_BRIDGE, GITHUB_ACTIONS: "true" })
         const run = yield* buildRun
-        expect(run.names).toEqual(expect.arrayContaining(["docs_search", "read", "list_mcp_resources"]))
-        expect(
-          run.names.filter((name) => [...WITHHELD, "computer-x_click", "computer_screenshot"].includes(name)),
-        ).toEqual([])
-        // The docs server is still offered whole; the computer server's resources and instructions are not.
+        expect(run.names).toEqual(
+          expect.arrayContaining([
+            "docs_search",
+            "browser_navigate",
+            "read",
+            "list_mcp_resources",
+            "read_mcp_resource",
+          ]),
+        )
+        expect(run.names.filter((name) => [...WITHHELD, ...COMPUTER_TOOLS].includes(name))).toEqual([])
+        // The docs and browser servers are still offered whole, their resources and instructions with their tools. The
+        // computer server, named for computer use, and the desktop server, whose `computer` tool is, are withheld whole.
         expect(run.system).toContain(INSTRUCTIONS.docs)
+        expect(run.system).toContain(INSTRUCTIONS.browser)
         expect(run.system).not.toContain(INSTRUCTIONS.computer)
-        expect(run.listed).toContain(GUIDE.uri)
-        expect(run.listed).not.toContain(SCREEN.uri)
-        expect(run.screen).toContain('MCP server "computer" is not connected')
-        expect(run.screen).not.toContain(SCREEN.text)
-        expect(run.reads).toEqual([])
+        expect(run.system).not.toContain(INSTRUCTIONS.desktop)
+        expect(run.listed).toContain(RESOURCES.docs.uri)
+        expect(run.listed).toContain(RESOURCES.browser.uri)
+        expect(run.listed).not.toContain(RESOURCES.computer.uri)
+        expect(run.listed).not.toContain(RESOURCES.desktop.uri)
+        expect(run.read.computer).toContain('MCP server "computer" is not connected')
+        expect(run.read.desktop).toContain('MCP server "desktop" is not connected')
+        expect(run.read.browser).toContain(RESOURCES.browser.text)
+        expect(run.reads).toEqual(["browser"])
         expect(guard.outside()).toEqual([])
       }),
     90_000,
@@ -328,9 +414,12 @@ describe("a session on GitHub Actions", () => {
           expect.arrayContaining([...MCP_TOOLS, "browser", "vector_cloud", "read_mcp_resource"]),
         )
         expect(run.system).toContain(INSTRUCTIONS.computer)
-        expect(run.listed).toContain(SCREEN.uri)
-        expect(run.screen).toContain(SCREEN.text)
-        expect(run.reads).toEqual([SCREEN.server])
+        expect(run.system).toContain(INSTRUCTIONS.desktop)
+        expect(run.listed).toContain(RESOURCES.computer.uri)
+        expect(run.listed).toContain(RESOURCES.desktop.uri)
+        expect(run.read.computer).toContain(RESOURCES.computer.text)
+        expect(run.read.desktop).toContain(RESOURCES.desktop.text)
+        expect(run.reads).toEqual([...READ])
       }),
     90_000,
   )

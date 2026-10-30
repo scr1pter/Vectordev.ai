@@ -231,10 +231,13 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
   // address is the model's to write, so a hostile page could choose what is sent to an MCP server.
   if (Agent.researchTools(input.agent.name)) return tools
 
-  // A server whose tools a run on GitHub Actions withholds is withheld whole there: no resource of it is listed or read
-  // (INV-S13).
-  const hasMcpResourceServer = Object.entries(yield* mcp.clients()).some(
-    ([name, client]) => !ToolRegistry.actionsWithheldServer(name) && !!client.getServerCapabilities()?.resources,
+  // The MCP servers a run on GitHub Actions withholds whole (INV-S13): none of their tools is offered, and none of their
+  // resources is listed or read. The resource tools ask again when they run, since a server can connect later.
+  const mcpClients = yield* mcp.clients()
+  const mcpTools = yield* mcp.tools()
+  const withheldServers = ToolRegistry.actionsWithheldServers(Object.keys(mcpClients), Object.keys(mcpTools))
+  const hasMcpResourceServer = Object.entries(mcpClients).some(
+    ([name, client]) => !withheldServers.includes(name) && !!client.getServerCapabilities()?.resources,
   )
   if (hasMcpResourceServer) {
     tools[MCP_RESOURCE_TOOLS.list] = tool({
@@ -258,11 +261,9 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
             const parsed = parseListMcpResourcesArgs(args)
             const ctx = context(toRecord(args), opts)
             const clients = yield* mcp.clients()
+            const withheld = ToolRegistry.actionsWithheldServers(Object.keys(clients), Object.keys(yield* mcp.tools()))
             const resourceServers = Object.entries(clients)
-              .filter(
-                (entry) =>
-                  !ToolRegistry.actionsWithheldServer(entry[0]) && !!entry[1].getServerCapabilities()?.resources,
-              )
+              .filter((entry) => !withheld.includes(entry[0]) && !!entry[1].getServerCapabilities()?.resources)
               .map((entry) => entry[0])
               .sort((a, b) => a.localeCompare(b))
             if (parsed.server && !resourceServers.includes(parsed.server)) {
@@ -291,8 +292,7 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
             const filtered = resources
               .filter(
                 (resource) =>
-                  !ToolRegistry.actionsWithheldServer(resource.client) &&
-                  (!parsed.server || resource.client === parsed.server),
+                  !withheld.includes(resource.client) && (!parsed.server || resource.client === parsed.server),
               )
               .toSorted((a, b) =>
                 (a.client + "\u0000" + a.name + "\u0000" + a.uri).localeCompare(
@@ -348,11 +348,9 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
             const parsed = parseListMcpResourcesArgs(args)
             const ctx = context(toRecord(args), opts)
             const clients = yield* mcp.clients()
+            const withheld = ToolRegistry.actionsWithheldServers(Object.keys(clients), Object.keys(yield* mcp.tools()))
             const resourceServers = Object.entries(clients)
-              .filter(
-                (entry) =>
-                  !ToolRegistry.actionsWithheldServer(entry[0]) && !!entry[1].getServerCapabilities()?.resources,
-              )
+              .filter((entry) => !withheld.includes(entry[0]) && !!entry[1].getServerCapabilities()?.resources)
               .map((entry) => entry[0])
               .sort((a, b) => a.localeCompare(b))
             if (parsed.server && !resourceServers.includes(parsed.server)) {
@@ -381,8 +379,7 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
             const filtered = templates
               .filter(
                 (template) =>
-                  !ToolRegistry.actionsWithheldServer(template.client) &&
-                  (!parsed.server || template.client === parsed.server),
+                  !withheld.includes(template.client) && (!parsed.server || template.client === parsed.server),
               )
               .toSorted((a, b) =>
                 (a.client + "\u0000" + a.name + "\u0000" + a.uriTemplate).localeCompare(
@@ -442,7 +439,8 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
             const parsed = parseReadMcpResourceArgs(args)
             const ctx = context(toRecord(args), opts)
             const clients = yield* mcp.clients()
-            const client = ToolRegistry.actionsWithheldServer(parsed.server) ? undefined : clients[parsed.server]
+            const withheld = ToolRegistry.actionsWithheldServers(Object.keys(clients), Object.keys(yield* mcp.tools()))
+            const client = withheld.includes(parsed.server) ? undefined : clients[parsed.server]
             if (!client) {
               throw new Error(`MCP server "${parsed.server}" is not connected`)
             }
@@ -500,9 +498,9 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
   }
 
   const cloud = yield* mcp.cloudTools()
-  for (const [key, item] of Object.entries(yield* mcp.tools())) {
-    // A `computer` server's tools are computer use, which a run on GitHub Actions never offers (INV-S13).
-    if (ToolRegistry.actionsWithheld(key)) continue
+  for (const [key, item] of Object.entries(mcpTools)) {
+    // A computer-use server's tools, and any id the registry withholds, are never offered on GitHub Actions (INV-S13).
+    if (ToolRegistry.actionsWithheldMcpTool(key, withheldServers)) continue
     const execute = item.execute
     if (!execute) continue
 

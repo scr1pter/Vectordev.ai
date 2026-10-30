@@ -112,19 +112,43 @@ export function isBuiltinPatch(tool: Tool.Def) {
 /**
  * On GitHub Actions no tool that drives the user's browser, the Vector Cloud bridge or a computer is offered, whatever
  * bridge variables are set (INV-S13). Read on every call, so a registry built before the variable was set is filtered
- * too. MCP tools never pass through the registry: SessionTools.resolve asks the same question of each one.
+ * too. MCP tools never pass through the registry: SessionTools.resolve asks `actionsWithheldMcpTool` of each one.
  */
 export function actionsWithheld(id: string) {
   return GithubAgents.onActionsRunner(process.env) && GithubAgents.withheldOnActions(id)
 }
 
 /**
- * `actionsWithheld` for a whole MCP server, asked of the prefix every one of its tool ids carries, so a `computer`
- * server's resources and instructions are withheld with its tools: SessionTools.resolve drops it from the resource
- * tools, and SystemPrompt.mcp drops its instructions.
+ * Of the connected MCP `servers`, those a run on GitHub Actions withholds whole, with their tools, resources and
+ * instructions (INV-S13): each whose own name, or the name of a tool it lists, is computer use. Such a server's
+ * resources (a screenshot, say) and instructions reach the model too, and its other tools act on the same computer. A
+ * server that only shares a bridged tool's name (a `browser` server) is not computer use, so its tools, resources and
+ * instructions stay together. `keys` are tool keys (`McpCatalog.toolName`) of any of the servers. Read on every call, as
+ * `actionsWithheld` is. SessionTools.resolve leaves these servers' tools out and keeps them from the resource tools, and
+ * SystemPrompt.mcp leaves out their instructions.
  */
-export function actionsWithheldServer(name: string) {
-  return actionsWithheld(McpCatalog.sanitize(name))
+export function actionsWithheldServers(servers: readonly string[], keys: readonly string[]) {
+  if (!GithubAgents.onActionsRunner(process.env)) return []
+  return servers.filter((name) => {
+    const server = McpCatalog.sanitize(name)
+    // A key does not say where the server's name ends, so a server `a` beside an `a_computer` that lists a tool is
+    // withheld too.
+    return (
+      GithubAgents.computerUse(server) ||
+      keys.some((key) => key.startsWith(`${server}_`) && GithubAgents.computerUse(key.slice(server.length + 1)))
+    )
+  })
+}
+
+/**
+ * Whether a run on GitHub Actions withholds the MCP tool `key`: an id `actionsWithheld` withholds, or a tool of one of
+ * the `withheld` servers (`actionsWithheldServers`), found by its prefix.
+ */
+export function actionsWithheldMcpTool(key: string, withheld: readonly string[]) {
+  return (
+    GithubAgents.onActionsRunner(process.env) &&
+    (GithubAgents.withheldOnActions(key) || withheld.some((name) => key.startsWith(`${McpCatalog.sanitize(name)}_`)))
+  )
 }
 
 type State = {

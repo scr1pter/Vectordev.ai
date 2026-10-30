@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test"
+import path from "path"
 import { AGENT_MARKER, inherit, untrustedChildEnvironment } from "../src/child-environment"
 
 describe("untrustedChildEnvironment", () => {
@@ -224,6 +225,47 @@ test("a real child of a process on an Actions runner reads none of its credentia
 
   expect(child.exitCode).toBe(0)
   expect(JSON.parse(child.stdout.toString())).toEqual({ actions: "true", visible: "kept" })
+})
+
+// A name configured for a child (an MCP server's `environment`, say) is withheld on Actions too, and the process says so
+// once per name on stderr, so a server that fails for want of its token can be diagnosed. Inherited names, Vector's
+// own private names and values never appear. It runs in a Bun child, whose stderr is its own, so it also stays out of
+// the local filter.
+test("a credential configured for a child is withheld with one notice per name", () => {
+  const child = Bun.spawnSync(
+    [
+      process.execPath,
+      "-e",
+      `import { untrustedChildEnvironment } from ${JSON.stringify(path.join(import.meta.dir, "../src/child-environment.ts"))}
+      const runner = { PATH: "/usr/bin", GITHUB_ACTIONS: "true", GITHUB_TOKEN: "inherited-secret", ACTIONS_RUNTIME_TOKEN: "inherited-secret" }
+      const environments = [
+        untrustedChildEnvironment(runner),
+        untrustedChildEnvironment(runner, { GITHUB_PERSONAL_ACCESS_TOKEN: "configured-secret", LOG_LEVEL: "debug" }),
+        untrustedChildEnvironment(runner, {
+          github_personal_access_token: "configured-secret",
+          SENTRY_AUTH_TOKEN: "configured-secret",
+          VECTOR_CLOUD_TOKEN: "private-secret",
+        }),
+        untrustedChildEnvironment({ GITHUB_ACTIONS: "false" }, { NPM_TOKEN: "configured-secret" }),
+      ]
+      process.stdout.write(JSON.stringify(environments.map((environment) => Object.keys(environment).sort())))`,
+    ],
+    { env: { PATH: process.env.PATH ?? "" } },
+  )
+
+  expect(child.exitCode).toBe(0)
+  expect(JSON.parse(child.stdout.toString())).toEqual([
+    ["GITHUB_ACTIONS", "PATH"],
+    ["GITHUB_ACTIONS", "LOG_LEVEL", "PATH"],
+    ["GITHUB_ACTIONS", "PATH"],
+    ["GITHUB_ACTIONS", "NPM_TOKEN"],
+  ])
+  const notices = child.stderr.toString().trim().split("\n")
+  expect(notices.map((line) => line.split("Withheld from one: ")[1])).toEqual([
+    "GITHUB_PERSONAL_ACCESS_TOKEN.",
+    "SENTRY_AUTH_TOKEN.",
+  ])
+  expect(child.stderr.toString()).not.toContain("secret")
 })
 
 // What a GitHub runner puts in the engine's own environment, planted in this process's.

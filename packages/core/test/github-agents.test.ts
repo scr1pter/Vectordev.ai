@@ -118,6 +118,14 @@ describe("the Actions guard", () => {
     expect(withheld.filter((id) => !GithubAgents.withheldOnActions(id))).toEqual([])
     expect(offered.filter((id) => GithubAgents.withheldOnActions(id))).toEqual([])
   })
+
+  // What the engine asks of an MCP server's or tool's own name: the pattern alone, so a `browser` server is not withheld.
+  test("computer use by name is the pattern alone, without the bridged tool ids", () => {
+    const computer = ["computer", "computer-x", "Computer_use", "COMPUTER", "computer_click"]
+    const other = ["browser", "vector_cloud", "research_browser", "computers", "computer.x", "use_computer", "desktop"]
+    expect(computer.filter((name) => !GithubAgents.computerUse(name))).toEqual([])
+    expect(other.filter((name) => GithubAgents.computerUse(name))).toEqual([])
+  })
 })
 
 describe("run ids", () => {

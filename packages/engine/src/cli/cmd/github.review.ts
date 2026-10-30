@@ -653,6 +653,8 @@ async function reviewJob(ctx: ReviewJobContext, deps: ReviewJobDeps, seen: Seen)
         ...(thread ? { thread } : {}),
         isWriter: (login) => writers.get(login.toLowerCase()) ?? false,
         prAuthor: pull.author,
+        // A `@<slug> dismiss` reply the route job accepted is read with the same mentions here.
+        ...(ctx.mentions ? { mentions: ctx.mentions } : {}),
       })
     }
     const prior: ClassifiedPrior[] = merged.map((entry) => classify(entry))

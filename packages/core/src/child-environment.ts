@@ -33,6 +33,9 @@ export const AGENT_MARKER = "VECTOR_AGENT_SESSION"
 // until a process says so, so a process that runs no agents passes its environment through unchanged.
 const inherited: { local?: LocalMode.Web; agent: boolean } = { agent: false }
 
+// The configured names the Actions filter has said it withheld, so each is reported once per process.
+const reported = new Set<string>()
+
 /**
  * Builds an environment for project-controlled or otherwise untrusted child
  * processes without exposing Vector's in-process vault and bridge secrets.
@@ -48,7 +51,11 @@ const inherited: { local?: LocalMode.Web; agent: boolean } = { agent: false }
  * names, every name ending _TOKEN, _KEY, _SECRET or _PASSWORD, and every name
  * VECTOR_SECRET_ENV_NAMES lists. That is defence in depth: workflow v3's agent
  * sandbox keeps credentials out of the engine's environment altogether, but v2
- * workflows and self-hosted runners have no sandbox.
+ * workflows and self-hosted runners have no sandbox. The filter reads the
+ * merged result, so a name a caller configures for the child (any source after
+ * the first: an MCP server's `environment`, a formatter's or language server's
+ * env, a plugin's shell env) is withheld too, and the first time each such name
+ * is withheld the process says so on stderr, naming it but never its value.
  *
  * Once a process has called `inherit`, its children also get the Vector Local
  * floor (VECTOR_LOCAL=1 and a Web access at least as strict, so a nested
@@ -61,6 +68,7 @@ export function untrustedChildEnvironment(...sources: Array<NodeJS.ProcessEnv | 
     : [process.env]
   const environment: NodeJS.ProcessEnv = Object.assign({}, ...list)
   const hidden = actionsSecrets(list)
+  reportWithheld(list.slice(1), (key) => !privateRuntimeKey(key) && hidden(key))
   const filtered = Object.entries(environment).flatMap(([key, value]) =>
     typeof value === "string" && !privateRuntimeKey(key) && !hidden(key) ? [[key, value] as const] : [],
   )
@@ -128,6 +136,26 @@ function actionsSecrets(sources: readonly NodeJS.ProcessEnv[]) {
       listed.has(name)
     )
   }
+}
+
+// Says once per name and process which names a caller configured for a child (a source after the first) the Actions
+// filter withheld, so an MCP server or command that fails for want of one can be diagnosed from the run's log. Names
+// only, never values. Inherited names go silently: every run on Actions has some, and the docs say which.
+function reportWithheld(configured: readonly NodeJS.ProcessEnv[], withheld: (key: string) => boolean) {
+  const names = [
+    ...new Set(
+      configured.flatMap((source) =>
+        Object.entries(source).flatMap(([key, value]) =>
+          typeof value === "string" && withheld(key) ? [key.toUpperCase()] : [],
+        ),
+      ),
+    ),
+  ].filter((name) => !reported.has(name))
+  if (names.length === 0) return
+  names.forEach((name) => reported.add(name))
+  console.warn(
+    `Vector on GitHub Actions passes no credential to the commands and servers it starts. Withheld from one: ${names.toSorted().join(", ")}.`,
+  )
 }
 
 function privateRuntimeKey(key: string) {

@@ -64,12 +64,17 @@ export function onActionsRunner(env: Readonly<Record<string, string | undefined>
 }
 
 // Bridged tools drive the user's own browser or computer, which a run on GitHub Actions must never reach. The set holds
-// the tool ids the registry offers and the registry keys the contract names, so either spelling is withheld. The
-// pattern also covers MCP tool names.
+// the tool ids the registry offers and the registry keys the contract names, so either spelling is withheld.
 const WITHHELD = new Set(["browser", "vector_cloud", "vectorcloud", "research_browser", "researchbrowser"])
 
 export function withheldOnActions(toolId: string) {
-  return WITHHELD.has(toolId) || /^computer(?:$|[_-])/i.test(toolId)
+  return WITHHELD.has(toolId) || computerUse(toolId)
+}
+
+// Computer use by name: a tool id, or an MCP server's or MCP tool's own name. The bridged ids above are Vector's own
+// tools, so an MCP server or tool that only shares one of those names (a `browser` server) is not computer use.
+export function computerUse(name: string) {
+  return /^computer(?:$|[_-])/i.test(name)
 }
 
 // Codium's run-id grammar (RUN and validRunId in api/_lib/codium-pool.ts) as one pattern: "-" alone is refused.

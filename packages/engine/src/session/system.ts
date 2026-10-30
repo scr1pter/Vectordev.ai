@@ -380,10 +380,16 @@ const layer = Layer.effect(
 
       mcp: Effect.fn("SystemPrompt.mcp")(function* (agent: Agent.Info, permission?: PermissionV1.Ruleset) {
         const ruleset = Permission.merge(agent.permission, permission ?? [])
-        // A server a run on GitHub Actions withholds (INV-S13) has no tool the model may call, so its instructions go too.
-        const instructions = (yield* mcp.instructions()).filter(
+        const listed = yield* mcp.instructions()
+        // A server a run on GitHub Actions withholds whole (INV-S13) has no tool the model may call, so its instructions
+        // go too.
+        const withheld = ToolRegistry.actionsWithheldServers(
+          listed.map((item) => item.name),
+          listed.flatMap((item) => item.tools),
+        )
+        const instructions = listed.filter(
           (item) =>
-            !ToolRegistry.actionsWithheldServer(item.name) &&
+            !withheld.includes(item.name) &&
             (item.tools.length === 0 || Permission.disabled(item.tools, ruleset).size < item.tools.length),
         )
         if (instructions.length === 0) return

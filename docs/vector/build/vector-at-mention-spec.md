@@ -532,6 +532,7 @@ The file must have **no imports**, so `api/` can import it as `../../packages/co
 | `slugFromInstallUrl(url)` | the `<slug>` of `https://github.com/apps/<slug>/installations/new`, or `undefined` |
 | `onActionsRunner(env)` | `env.GITHUB_ACTIONS === "true"` |
 | `withheldOnActions(toolId)` | `true` for `browser`, `vectorcloud`, `researchbrowser` and any id (MCP tool names included) matching `/^computer(?:$|[_-])/i` |
+| `computerUse(name)` | `true` when `name` matches `/^computer(?:$|[_-])/i`: the pattern half of `withheldOnActions`, which the engine asks of an MCP server's own name and an MCP tool's own name (V03) |
 | `RUN_ID_PATTERN` | `/^[A-Za-z0-9_.-]{1,128}$/` (Codium's run-id grammar; `-` alone is refused) |
 | `runId(repositoryId, runId, attempt, checkRunId)` | `` `gh-${repositoryId}-${runId}-${attempt}-${checkRunId}` `` (decimal ids; at most 87 characters) |
 | `THREAD_PATTERN` | `/^(?:[1-9]\d{0,9}\|dispatch-[1-9]\d{0,19}\|schedule-[0-9a-f]{8})$/` |
