@@ -96,17 +96,21 @@ jobs:
       # Desktop tests otherwise run only in the release workflow (turbo has no vector-desktop#test task). The
       # computer-use build contract runs desktop main's computer tests on both unit lanes, so they run here even when
       # an earlier package failed. Each file gets its own Bun process, as scripts/test.ts does, because Electron and
-      # store mocks survive mock.restore(); D13 to D23 add their files to the list.
+      # store mocks survive mock.restore(); desktop main's src/main/computer-*.test.ts files join by their name.
+      # Bun's node:http never reports a client that leaves, so the bridge is also bundled and checked under Node.
       - name: Run desktop computer-use tests
         if: ${{ !cancelled() }}
         timeout-minutes: 10
         working-directory: packages/desktop
         run: |
           status=0
-          for file in ./scripts/computer-helper-identity.test.ts ./test/computer/*.test.ts; do
+          for file in ./scripts/computer-helper-identity.test.ts ./test/computer/*.test.ts ./src/main/computer-*.test.ts; do
             echo "Desktop computer-use test: $file"
             GITHUB_ACTIONS=false bun --no-env-file test --timeout 30000 --only-failures "$file" || status=1
           done
+          echo "Desktop computer-use check: the bundled bridge under Node $(node --version)"
+          bun build ./src/main/computer-bridge.ts --target=node --format=esm --outfile "$RUNNER_TEMP/computer-bridge.mjs" &&
+            node ./test/computer/bridge-node.ts "$RUNNER_TEMP/computer-bridge.mjs" || status=1
           exit $status
 
       - name: Check generated client
