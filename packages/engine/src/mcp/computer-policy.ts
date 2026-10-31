@@ -1,3 +1,4 @@
+import { ComputerCommunity } from "@vectordevai/core/computer/community"
 import type { ConfigComputerV1 } from "@vectordevai/core/v1/config/computer"
 import { Hands } from "@vectordevai/schema/hands"
 
@@ -31,12 +32,7 @@ const RUNNER_OPTIONS = [
 
 /** Config.computer contains company policy only; user and project sources are stripped by Config. */
 export function refusal(command: readonly string[], policy: ConfigComputerV1.Info | undefined) {
-  const restricted =
-    policy?.enabled === false ||
-    policy?.default_app_access === "deny" ||
-    Object.keys(policy?.apps?.macos ?? {}).length > 0 ||
-    (policy?.apps?.windows?.length ?? 0) > 0
-  if (!restricted || !communityCommand(command)) return
+  if (!ComputerCommunity.restricted(policy) || !communityCommand(command)) return
   return `${Hands.NAME} is the supported path for computer use. Your company's computer policy does not allow the community computer-control MCP.`
 }
 

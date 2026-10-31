@@ -29,6 +29,7 @@
     "./regression/hands-mention.spec.ts",
     "./regression/hands-onboarding.spec.ts",
     "./regression/hands-overlay-pages.spec.ts",
+    "./regression/hands-plugins.spec.ts",
     "./regression/hands-run.spec.ts",
     "./regression/hands-settings.spec.ts",
     "./regression/hands-smoke.spec.ts",

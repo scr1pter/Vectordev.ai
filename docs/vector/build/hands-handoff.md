@@ -4,7 +4,7 @@ You are taking over a build started in an earlier Claude session and continued b
 
 Everything lives on GitHub. The owner works across several computers, so nothing essential may stay on one machine. Clone the repository, work on the **`hands`** branch, and push each completed package. This is the same Vector repository and workspace discussed with the owner; do not search for a separate Hands product or restart the project.
 
-**Update: D5b to D10 have since been implemented on `hands`; [hands-progress.md](./hands-progress.md) holds the current status and CI evidence, and the paragraph below records the original pause.**
+**Update: D5b to D11 have since been implemented on `hands`; [hands-progress.md](./hands-progress.md) holds the current status and CI evidence, and the paragraph below records the original pause.**
 
 **Checkpoint: 23 of 73 work packages are implemented and committed, through D6a. The next package is D5b. Fifty remain.** D5b was investigated, but no D5b implementation or test changes were made before work stopped. There is no partial D5b patch to recover. The last code checkpoint is **`491552280a0421d86ab8b6489fd4332e28b4251f`** (`fix(hands): engine review`). Later commits may contain this handoff and checkpoint documentation. Fetch the latest `hands`; do not reset to the checkpoint.
 

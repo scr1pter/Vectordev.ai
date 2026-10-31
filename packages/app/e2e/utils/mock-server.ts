@@ -30,6 +30,10 @@ export interface MockServerConfig {
   sessionStatus?: unknown
   /** Omitted models an older engine without the capabilities route. */
   capabilities?: unknown
+  /** The directory's effective config (`GET /config`); omitted answers an empty object. */
+  directoryConfig?: unknown
+  /** MCP server statuses by name (`GET /mcp`); omitted answers an empty object. */
+  mcpStatus?: unknown
 }
 
 export async function mockVectorServer(page: Page, config: MockServerConfig) {
@@ -97,6 +101,8 @@ export async function mockVectorServer(page: Page, config: MockServerConfig) {
       return json(route, await config.fileList(url.searchParams.get("path") ?? ""))
     if (path === "/file/content" && config.fileContent)
       return json(route, await config.fileContent(url.searchParams.get("path") ?? ""))
+    if (path === "/config" && config.directoryConfig !== undefined) return json(route, config.directoryConfig)
+    if (path === "/mcp" && config.mcpStatus !== undefined) return json(route, config.mcpStatus)
     if (emptyObject.has(path)) return json(route, {})
     if (emptyList.has(path)) return json(route, [])
     if (path in staticRoutes) return json(route, staticRoutes[path])
