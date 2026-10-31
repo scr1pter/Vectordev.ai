@@ -170,11 +170,13 @@ export async function installSseTransport<T>(
 
       ;(window as BrowserTransport).__testSseTransport = { command }
       const fetch = (input: RequestInfo | URL, init?: RequestInit) => {
-        const request = new Request(input, init)
-        const url = new URL(request.url)
+        // Read the address without wrapping the request: `new Request(request)` takes a Request's body, so passing on
+        // one of the SDK's POSTs (a Request carrying a JSON body) would then throw. Only the event streams are wrapped.
+        const url = new URL(input instanceof Request ? input.url : String(input), location.href)
         if (url.origin !== server || (url.pathname !== "/global/event" && url.pathname !== "/event"))
           return originalFetch(input, init)
 
+        const request = new Request(input, init)
         const id = ++nextConnectionID
         const record = {
           id,

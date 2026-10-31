@@ -14,6 +14,9 @@ export type RefusalKey =
       | "computer.mention.setupFirst"
       | "computer.mention.shell"
       | "computer.mention.command"
+      | "computer.mention.quick"
+      | "computer.mention.research"
+      | "computer.availability.mayTrain"
       | "computer.availability.engine"
       | "computer.availability.disabled"
       | "computer.availability.localNone"
@@ -45,6 +48,18 @@ const SETUP = new Set<RefusalKey>(["computer.onboarding.checkFailed", "computer.
 
 /** How long a readiness read or the engine's capability answer may take before the send fails closed. */
 export const LIMIT = 5000
+
+/**
+ * A permission probe that rejects once `LIMIT` passes without an answer. On the desktop each probe asks the helper,
+ * and a hung one would otherwise hold Settings and onboarding, with every change queued behind it.
+ */
+export function bounded(probe: Promise<Computer.PermissionsView>) {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const limit = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error("The permission check did not answer")), LIMIT)
+  })
+  return Promise.race([probe, limit]).finally(() => clearTimeout(timer))
+}
 
 // The engine's client vocabulary (ComputerAvailability.capabilities); any other reason uses the engine sentence.
 const ENGINE = new Map<string, RefusalKey>([

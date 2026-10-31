@@ -322,6 +322,20 @@ describe("Hands permission dock", () => {
     expect(view.replies).toEqual(["once"])
   })
 
+  test("another tool's permission that shares the computer_ prefix keeps the ordinary dock", () => {
+    // An MCP server configured as "computer" asks `computer_<tool>` with empty metadata (mcp/catalog.ts toolName).
+    for (const permission of ["computer_screenshot", "computer_click", "computer_app_extra", "computer_observe"]) {
+      const view = mount({ ...app(permission), permission, patterns: ["*"], always: ["*"], metadata: {} })
+      expect(view.host.textContent).toContain("Permission required")
+      expect(view.host.textContent).not.toContain(Hands.NAME)
+      expect(view.button("Allow once").disabled).toBe(false)
+      // The prefix still never offers a saved approval (PermissionPolicy.canAlwaysApprove).
+      expect(view.button("Allow always")).toBeUndefined()
+      pointer(view.button("Allow once"))
+      expect(view.replies).toEqual(["once"])
+    }
+  })
+
   test("thrown and rejected decision failures both allow an explicit retry", async () => {
     for (const fail of [
       () => {
@@ -417,6 +431,16 @@ describe("Hands permission controller", () => {
     view.state.decide("once", "ordinary")
     await Promise.resolve()
     expect(view.legacy).toHaveBeenCalledWith({ sessionID: "session", permissionID: "ordinary", response: "once" })
+    expect(view.modern).not.toHaveBeenCalled()
+  })
+
+  test("another tool's computer_ permission blocks the composer and answers like any ordinary ask", async () => {
+    const view = controller({ ...app("mcp"), permission: "computer_screenshot", metadata: {} })
+    expect(view.state.computerPending()).toBe(false)
+    expect(view.state.promptAllowed()).toBe(false)
+    view.state.decide("once", "mcp")
+    await Promise.resolve()
+    expect(view.legacy).toHaveBeenCalledWith({ sessionID: "session", permissionID: "mcp", response: "once" })
     expect(view.modern).not.toHaveBeenCalled()
   })
 })

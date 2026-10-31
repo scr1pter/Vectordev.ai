@@ -24,11 +24,7 @@ export function rendererNotifies(
   if (!owned) return true
   // Exactly the two asks Hands raises: another tool's permission can share the `computer_` prefix (an MCP server
   // named "computer" asks `computer_<tool>`), and the desktop never notifies for it.
-  if (event.type === "permission.asked")
-    return (
-      event.properties.permission !== PermissionPolicy.COMPUTER_APP &&
-      event.properties.permission !== PermissionPolicy.COMPUTER_SENSITIVE
-    )
+  if (event.type === "permission.asked") return !PermissionPolicy.handsAsk(event.properties.permission)
   if (event.type === "question.asked") return !handoff(event.properties.metadata)
   return true
 }

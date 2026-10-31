@@ -83,7 +83,7 @@ export function createComputerSettings(
   }
   // The first read uses permissions(), the desktop's current view, never recheck().
   const first = async () => {
-    const [read, probe] = await Promise.allSettled([settings(), bounded(computer.permissions())])
+    const [read, probe] = await Promise.allSettled([settings(), ComputerSendGate.bounded(computer.permissions())])
     if (disposed) return false
     if (read.status === "rejected") {
       publish({ failed: true })
@@ -93,7 +93,7 @@ export function createComputerSettings(
     return true
   }
   const read = async () => {
-    const permissions = await bounded(computer.recheck()).catch(() => undefined)
+    const permissions = await ComputerSendGate.bounded(computer.recheck()).catch(() => undefined)
     if (disposed) return false
     // Read policy after the probe finishes: a company change during a slow probe wins over the older snapshot.
     const fresh = await settings().catch(() => false)
@@ -272,14 +272,4 @@ export function createComputerSettings(
       search++
     },
   }
-}
-
-// A hung helper probe would otherwise keep the page loading, with every control disabled, and hold every change queued
-// behind it, Use off included.
-function bounded(probe: Promise<Computer.PermissionsView>) {
-  let timer: ReturnType<typeof setTimeout> | undefined
-  const limit = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new Error("The permission check did not answer")), ComputerSendGate.LIMIT)
-  })
-  return Promise.race([probe, limit]).finally(() => clearTimeout(timer))
 }

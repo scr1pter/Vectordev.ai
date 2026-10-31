@@ -60,6 +60,15 @@ export const COMPUTER_APP = "computer_app"
 export const COMPUTER_OBSERVE = "computer_observe"
 export const COMPUTER_INTERACT = "computer_interact"
 export const COMPUTER_SENSITIVE = "computer_sensitive"
+
+/**
+ * Whether a request is one of the two asks Vector Hands raises, which clients show as Hands asks. Another tool's
+ * permission can share the `computer_` prefix (an MCP server named `computer` asks `computer_<tool>`), so the prefix
+ * names no Hands ask; it still makes every such permission ask (`requiresApproval`) and never auto-approve.
+ */
+export function handsAsk(permission?: string) {
+  return permission === COMPUTER_APP || permission === COMPUTER_SENSITIVE
+}
 /** The prefix of an app key (`app:macos:<bundleId>`, `app:windows:…`), the only pattern a computer Always may save. */
 export const COMPUTER_APP_PREFIX = "app:"
 /** Why typing an address, recipient or number the user never gave asks once the screen has been read. */

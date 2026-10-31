@@ -1,6 +1,7 @@
 import { createEffect, createMemo, on, onCleanup } from "solid-js"
 import { createStore } from "solid-js/store"
 import type { PermissionRequest, QuestionRequest, Todo } from "@vectordevai/sdk/v2"
+import { PermissionPolicy } from "@vectordevai/schema/permission-policy"
 import { useParams } from "@solidjs/router"
 import { showToast } from "@/utils/toast"
 import { useServerSync } from "@/context/server-sync"
@@ -49,7 +50,7 @@ export function createSessionComposerController(options?: { closeMs?: number | (
     return !!permissionRequest() || !!questionRequest()
   })
   const computerPending = createMemo(
-    () => !!permissionRequest()?.permission.startsWith("computer_") && !questionRequest(),
+    () => PermissionPolicy.handsAsk(permissionRequest()?.permission) && !questionRequest(),
   )
   const promptAllowed = createMemo(() => !blocked() || computerPending())
 
@@ -92,7 +93,7 @@ export function createSessionComposerController(options?: { closeMs?: number | (
     if (!perm || perm.id !== requestID) return
     if (store.responding === perm.id) return
 
-    if (perm.permission.startsWith("computer_")) {
+    if (PermissionPolicy.handsAsk(perm.permission)) {
       if (store.accepted === perm.id) return Promise.resolve(true)
       setStore("responding", perm.id)
       return sdk()

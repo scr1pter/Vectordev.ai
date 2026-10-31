@@ -589,16 +589,18 @@ function merge(spans: readonly [number, number][]) {
     }, [])
 }
 
-type RefusalCopy = ComputerSendGate.RefusalKey | "computer.action.setUp"
+type RefusalCopy = ComputerSendGate.RefusalKey | "computer.action.setUp" | "computer.action.switchModel"
 
 /**
  * Tells the user why a computer-marked message stayed in the composer: the setup toast with [Set up] when onboarding
- * can fix it, the engine's sentence when the destination cannot carry it, and otherwise the situation's fixed sentence.
+ * can fix it, the engine's sentence when the destination cannot carry it, and otherwise the situation's fixed sentence,
+ * with [Switch model] for a model that may train on prompts (section 1.4).
  */
 export function showComputerRefusal(
   refusal: ComputerSendGate.Refusal,
   t: (key: RefusalCopy, params: Record<string, string>) => string,
   openSetup?: () => void,
+  switchModel?: () => void,
 ) {
   const params = { name: Hands.NAME, mention: Hands.MENTION }
   if (refusal.kind === "setup")
@@ -609,7 +611,13 @@ export function showComputerRefusal(
     })
   if (refusal.kind === "engine")
     return showToast({ title: "This engine cannot run this request", description: t(refusal.key, params) })
-  return showToast({ title: t(refusal.key, params), variant: "error" })
+  return showToast({
+    title: t(refusal.key, params),
+    variant: "error",
+    ...(refusal.key === "computer.availability.mayTrain" && switchModel
+      ? { actions: [{ label: t("computer.action.switchModel", params), onClick: switchModel }] }
+      : {}),
+  })
 }
 
 type PromptSubmitInput = {
@@ -648,6 +656,8 @@ type PromptSubmitInput = {
   localMode?: Accessor<boolean>
   /** Opens onboarding from the setup toast; the draft stays in the composer. */
   openComputerSetup?: () => void
+  /** Opens the model picker from the may-train refusal; the draft stays in the composer. */
+  switchModel?: () => void
 }
 
 export function createPromptSubmit(input: PromptSubmitInput) {
@@ -785,13 +795,23 @@ export function createPromptSubmit(input: PromptSubmitInput) {
       return
     }
 
-    // Shell commands and custom commands carry no mention markers, so a pill there would be dropped silently.
+    // Shell commands and custom commands carry no mention markers, so a pill there would be dropped silently. Deep
+    // research and Quick mode answer with agents that have no computer tool (resolveExecutionAgent), so a pill there
+    // would do nothing; Plan mode keeps its own agent in Quick mode.
     const marked = ComputerSendGate.marked(currentPrompt)
-    if (marked && (mode === "shell" || isCustomCommand(text))) {
-      showComputerRefusal(
-        new ComputerSendGate.Refusal(mode === "shell" ? "computer.mention.shell" : "computer.mention.command", "local"),
-        language.t,
-      )
+    const unsupported = !marked
+      ? undefined
+      : mode === "shell"
+        ? "computer.mention.shell"
+        : isCustomCommand(text)
+          ? "computer.mention.command"
+          : requestedExecutionMode === "research"
+            ? "computer.mention.research"
+            : requestedExecutionMode === "quick" && !isPlanMode
+              ? "computer.mention.quick"
+              : undefined
+    if (unsupported) {
+      showComputerRefusal(new ComputerSendGate.Refusal(unsupported, "local"), language.t)
       return
     }
 
@@ -942,6 +962,17 @@ export function createPromptSubmit(input: PromptSubmitInput) {
     const researchSize = agent === RESEARCH ? sizeOf(input.researchDepth?.() ?? "auto") : undefined
     const researchScope = agent === RESEARCH ? input.researchScope?.() : undefined
 
+    // Section 1.4: Hands never sends the screen to a model that may train on prompts, and the engine withholds its tool
+    // there, so the pill would do nothing. Routing picks such a model only when it is the one selected.
+    if (marked && freeModelMayTrain(routed.model)) {
+      showComputerRefusal(
+        new ComputerSendGate.Refusal("computer.availability.mayTrain", "local"),
+        language.t,
+        undefined,
+        input.switchModel,
+      )
+      return
+    }
     if (!(await workspaceAvailable())) return
     // Before anything is created or sent: the draft stays in the editor if the user does not accept.
     if (

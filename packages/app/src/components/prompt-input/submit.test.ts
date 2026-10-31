@@ -2019,6 +2019,84 @@ describe("computer mention send gate", () => {
     nothingHappened()
   })
 
+  test("Quick mode and Deep research, whose agents have no computer tool, refuse a pill before any read", async () => {
+    params = { id: "session-1" }
+    const local = counted(readyComputer())
+    platformComputer = local.computer
+    promptValue = marked()
+    await submitFor({ executionMode: () => "quick" }).handleSubmit(event)
+    promptValue = marked()
+    await submitFor({ executionMode: () => "research", researchDepth: () => "deep" }).handleSubmit(event)
+    // Deep research's greeting lane is the quick agent, which has no computer tool either.
+    promptValue = marked("hi ")
+    await submitFor({ executionMode: () => "research" }).handleSubmit(event)
+    await settle()
+    expect(toasts).toEqual([
+      { title: "computer.mention.quick", variant: "error" },
+      { title: "computer.mention.research", variant: "error" },
+      { title: "computer.mention.research", variant: "error" },
+    ])
+    expect(local.reads).toEqual({ permissions: 0, recheck: 0 })
+    expect(capabilityCalls).toEqual([])
+    nothingHappened()
+  })
+
+  test("Plan mode keeps its own agent in Quick mode, so a pill there is sent", async () => {
+    params = { id: "session-1" }
+    planEnabled = true
+    platformComputer = readyComputer()
+    promptValue = marked()
+    await submitFor({ executionMode: () => "quick" }).handleSubmit(event)
+    await settle()
+    expect(toasts).toEqual([])
+    expect(sentPrompts).toHaveLength(1)
+    expect(sentPrompts[0].input.agent).toBe("plan")
+  })
+
+  test("a model that may train on prompts refuses a pill with Switch model; a no-training one sends it", async () => {
+    params = { id: "session-1" }
+    currentModel = {
+      id: "poolside/laguna-s-2.1:free",
+      provider: { id: "vector" },
+      freeModel: { source: "shared", dataPolicy: "may-train" },
+    } as typeof currentModel
+    availableModels = [currentModel!]
+    platformComputer = readyComputer()
+    promptValue = marked()
+    let switched = 0
+    const asked: unknown[] = []
+    const submit = submitFor({
+      switchModel: () => switched++,
+      confirmFreeModelTraining: async (model) => (asked.push(model), true),
+    })
+    await submit.handleSubmit(event)
+    await settle()
+    expect(toasts).toHaveLength(1)
+    expect(toasts[0]).toMatchObject({
+      title: "computer.availability.mayTrain",
+      variant: "error",
+      actions: [{ label: "computer.action.switchModel" }],
+    })
+    const action = toasts[0].actions![0].onClick
+    if (typeof action === "function") action()
+    expect(switched).toBe(1)
+    // Refused before the training question: accepting it could not let Hands act.
+    expect(asked).toEqual([])
+    nothingHappened()
+
+    toasts.length = 0
+    currentModel = {
+      id: "cohere/north-mini-code:free",
+      provider: { id: "vector" },
+      freeModel: { source: "shared", dataPolicy: "no-training" },
+    } as typeof currentModel
+    availableModels = [currentModel!]
+    await submit.handleSubmit(event)
+    await settle()
+    expect(toasts).toEqual([])
+    expect(sentPrompts).toHaveLength(1)
+  })
+
   test("a ready send carries its marker; it reads permissions once to submit and once to dispatch", async () => {
     params = { id: "session-1" }
     promptValue = marked()

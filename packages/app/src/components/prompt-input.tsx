@@ -1646,6 +1646,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
       connectProvider: () => setModelStartNudge((count) => count + 1),
       localMode: () => localMode.status()?.policy.enabled === true,
       openComputerSetup: setupComputer,
+      switchModel: () => command.trigger("model.choose"),
       confirmFreeModelTraining: (model) => {
         const client = sdk().client
         return freeModelTrainingGate({

@@ -64,6 +64,18 @@ test("computer app asks use the same branded title and verified app name instead
   expect(computerPermissionDetails({ permission: "read", metadata: {} })).toBeUndefined()
 })
 
+test("another tool's computer_ permission keeps the ordinary prompt, which can allow it once", () => {
+  // An MCP server configured as "computer" asks `computer_<tool>` with empty metadata. Only Hands' two asks get the
+  // Hands title and the verified-identity gate; the prefix still asks every time and never saves Always.
+  for (const permission of ["computer_screenshot", "computer_click", "computer_app_extra", "computer_observe"]) {
+    expect(computerPermissionDetails({ permission, metadata: {}, always: ["*"] })).toBeUndefined()
+    expect(canAutoApprovePermission(permission, ["*"], ["*"])).toBe(false)
+    expect(canAlwaysAllowPermission(permission, ["*"])).toBe(false)
+  }
+  expect(computerPermissionDetails({ permission: "computer_app", metadata: {} })?.canApprove).toBe(false)
+  expect(computerPermissionDetails({ permission: "computer_sensitive", metadata: {} })?.canApprove).toBe(false)
+})
+
 test("computer sensitive titles use quoted accessibility labels, never agent intent or reasons", () => {
   const details = computerPermissionDetails({
     permission: "computer_sensitive",

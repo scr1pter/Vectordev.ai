@@ -1,6 +1,7 @@
 import { createMemo, For, onCleanup, onMount, Show, type JSX } from "solid-js"
 import { createStore } from "solid-js/store"
 import { Hands } from "@vectordevai/schema/hands"
+import { PermissionPolicy } from "@vectordevai/schema/permission-policy"
 import type { PermissionRequest } from "@vectordevai/sdk/v2"
 import { Button } from "@vectordevai/ui/button"
 import { DockPrompt } from "@vectordevai/session-ui/dock-prompt"
@@ -19,7 +20,7 @@ type PermissionDockProps = {
 
 export function SessionPermissionDock(props: PermissionDockProps) {
   return (
-    <Show when={props.request.permission.startsWith("computer_")} fallback={<GenericPermissionDock {...props} />}>
+    <Show when={PermissionPolicy.handsAsk(props.request.permission)} fallback={<GenericPermissionDock {...props} />}>
       <Show when={props.request.id} keyed>
         {(requestID) => <ComputerPermissionDock {...props} requestID={requestID} />}
       </Show>

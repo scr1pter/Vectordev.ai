@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
-import type { Computer } from "@vectordevai/schema/computer"
+import { Schema } from "effect"
+import { Computer } from "@vectordevai/schema/computer"
 import { Hands } from "@vectordevai/schema/hands"
 import { dict } from "@vectordevai/ui/i18n/en"
 import { dict as appDict } from "../../i18n/en"
@@ -219,6 +220,46 @@ describe("desktop main copy", () => {
     )
     expect(ComputerMainCopy.step({ action: "click", label: "A".repeat(60) })).toBe(`Clicking “${"A".repeat(40)}”`)
     expect(ComputerMainCopy.step({ action: "click", label: "“Save”" })).toBe('Clicking “"Save"”')
+  })
+
+  test("live labels drop everything the state schema refuses, as the run card does, and never split a character", () => {
+    const step = (label: string) => ComputerMainCopy.step({ action: "click", app: "Numbers", label })
+    expect(step("Pay؜ now ")).toBe("Clicking “Pay now” in Numbers")
+    expect(step("Save\nAll")).toBe("Clicking “Save All” in Numbers")
+    expect(step("Save​All﻿")).toBe("Clicking “SaveAll” in Numbers")
+    // An astral character across the 40-unit cut goes whole, never as a lone high surrogate.
+    expect(step(`${"A".repeat(39)}😀 tail`)).toBe(`Clicking “${"A".repeat(39)}” in Numbers`)
+    expect(step(`${"A".repeat(38)}😀 tail`)).toBe(`Clicking “${"A".repeat(38)}😀” in Numbers`)
+    // The desktop puts the step line in `ComputerState.step`, which refuses controls, separators and bidi marks.
+    const unsafe = [
+      ...Array.from({ length: 0x20 }, (_, code) => code),
+      ...Array.from({ length: 0x21 }, (_, index) => 0x7f + index),
+      0x061c,
+      0x200e,
+      0x200f,
+      0x2028,
+      0x2029,
+      ...Array.from({ length: 5 }, (_, index) => 0x202a + index),
+      ...Array.from({ length: 4 }, (_, index) => 0x2066 + index),
+    ]
+    const state = (line: string) => ({
+      phase: "working",
+      backend: "local-macos",
+      mode: "foreground",
+      apps: [],
+      step: line,
+      queue: [],
+      escStops: true,
+      stopChord: Hands.STOP_CHORD.darwin,
+      lease: 1,
+      reduceMotion: false,
+    })
+    expect(Schema.is(Computer.ComputerState)(state(step("Send")))).toBe(true)
+    for (const code of unsafe) {
+      const line = step(`Pay${String.fromCharCode(code)}now`)
+      expect(Schema.is(Computer.ComputerState)(state(line))).toBe(true)
+      expect(Schema.is(Computer.ComputerState)(state(`Clicking “Pay${String.fromCharCode(code)}now”`))).toBe(false)
+    }
   })
 
   test("model intent, typed text and key payloads never enter live labels", () => {

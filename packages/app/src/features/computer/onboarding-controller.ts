@@ -1,6 +1,7 @@
 import type { Computer } from "@vectordevai/schema/computer"
 import type { dict } from "@/i18n/en"
 import { ComputerOnboarding } from "./onboarding-model"
+import { ComputerSendGate } from "./send-gate"
 
 type Status = Awaited<ReturnType<Computer.ComputerPlatform["status"]>>
 type CopyKey = keyof typeof dict
@@ -56,7 +57,9 @@ export function createComputerOnboarding(
   }
   const read = async (initial = false) => {
     try {
-      const permissions = await (initial ? computer.permissions() : computer.recheck())
+      // A hung helper probe fails as "check failed" after the limit, as in Settings, so the polls and focus checks that
+      // join it and a Finish queued behind it all settle.
+      const permissions = await ComputerSendGate.bounded(initial ? computer.permissions() : computer.recheck())
       if (disposed) return false
       // Read policy after the probe finishes. A company change during a slow probe must win over its old snapshot.
       if (!(await settings())) return false

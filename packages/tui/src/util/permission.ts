@@ -7,13 +7,16 @@ import { Schema } from "effect"
 export const canAutoApprovePermission = PermissionPolicy.canAutoApprove
 export const canAlwaysAllowPermission = PermissionPolicy.canAlwaysApprove
 
-/** Display only verified metadata fields. Pattern keys and model-authored reasons are never titles. */
+/**
+ * Display only verified metadata fields. Pattern keys and model-authored reasons are never titles. Only Hands' two asks
+ * get these details; another tool's `computer_<tool>` permission keeps the ordinary prompt.
+ */
 export function computerPermissionDetails(request: {
   permission: string
   metadata: Record<string, unknown>
   always?: readonly string[]
 }) {
-  if (!request.permission.startsWith("computer_")) return
+  if (!PermissionPolicy.handsAsk(request.permission)) return
   const target = request.metadata.target
   const fields = target && typeof target === "object" && !Array.isArray(target) ? target : undefined
   const name = computerLabel(fields && Reflect.get(fields, "appName"), 256)

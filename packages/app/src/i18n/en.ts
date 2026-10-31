@@ -1230,6 +1230,8 @@ export const dict = {
   "computer.mention.setupFirst": "Set up {{name}} first",
   "computer.mention.shell": "Shell commands can't use {{name}}. Remove the mention to run this command.",
   "computer.mention.command": "Slash commands can't use {{name}}. Remove the mention to run this command.",
+  "computer.mention.quick": "Quick mode can't use {{name}}. Choose another mode, or remove the mention.",
+  "computer.mention.research": "Deep research can't use {{name}}. Choose another mode, or remove the mention.",
 
   "computer.ask.app.title": "Allow {{name}} to use {{app}}?",
   "computer.ask.app.body":

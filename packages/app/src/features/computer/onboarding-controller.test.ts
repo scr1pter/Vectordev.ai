@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, mock, test, vi } from "bun:tes
 import type { Computer } from "@vectordevai/schema/computer"
 import { createFakeComputer } from "./fake-platform"
 import { createComputerOnboarding } from "./onboarding-controller"
+import { ComputerSendGate } from "./send-gate"
 
 const healthy: Computer.PermissionsView = {
   rows: [
@@ -148,6 +149,47 @@ describe("computer onboarding lifecycle", () => {
     setup.dispose()
     pending.resolve(healthy)
     expect(await finish).toBe(false)
+    expect(fake.calls).toEqual([{ method: "setPrefs", prefs: { consentedAt: 1234 } }])
+  })
+
+  test("a probe that never answers fails as check failed at the limit, so the first read and Finish settle", async () => {
+    const flush = async () => {
+      for (let turn = 0; turn < 20; turn++) await Promise.resolve()
+    }
+    const fake = createFakeComputer({ permissions: healthy })
+    const stuck = controller({ ...fake, permissions: () => new Promise<Computer.PermissionsView>(() => {}) })
+    // Each step reads a flag rather than awaiting, so a probe left unbounded fails here instead of hanging the file.
+    let started: boolean | undefined
+    void stuck.setup.start().then((value) => (started = value))
+    await flush()
+    vi.advanceTimersByTime(ComputerSendGate.LIMIT - 1)
+    await flush()
+    expect(started).toBeUndefined()
+    vi.advanceTimersByTime(1)
+    await flush()
+    expect(started).toBe(false)
+    expect(stuck.setup.state).toMatchObject({
+      loading: false,
+      checking: false,
+      error: "computer.onboarding.checkFailed",
+    })
+
+    const { setup } = controller({ ...fake, recheck: () => new Promise<Computer.PermissionsView>(() => {}) })
+    await setup.start()
+    await setup.consent()
+    expect(setup.advance()).toBe(true)
+    let settled: boolean | undefined
+    void setup.finish().then((value) => (settled = value))
+    await flush()
+    vi.advanceTimersByTime(ComputerSendGate.LIMIT - 1)
+    await flush()
+    expect(settled).toBeUndefined()
+    expect(setup.state.saving).toBe(true)
+    vi.advanceTimersByTime(1)
+    await flush()
+    expect(settled).toBe(false)
+    expect(setup.state).toMatchObject({ saving: false, error: "computer.onboarding.checkFailed" })
+    expect((await fake.prefs()).prefs.enabled).toBe(false)
     expect(fake.calls).toEqual([{ method: "setPrefs", prefs: { consentedAt: 1234 } }])
   })
 

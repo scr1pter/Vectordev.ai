@@ -173,13 +173,24 @@ export function handoff(input: { reason: Computer.HandoffReason; app?: string })
   return `Your turn${input.app ? ` in ${input.app}` : ""}: ${handoffReasons[input.reason]}. Press Continue when you're done.`
 }
 
+// Controls and line or paragraph separators become spaces; bidi, zero-width and invisible formatting characters are
+// dropped, as the run card's labels do. Together they cover every character `Computer.ComputerState.step` (Safe)
+// refuses, so the step line is valid state whatever the screen's label holds.
+const BREAKS = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g
+const INVISIBLE = /[\u061c\u200b-\u200f\u202a-\u202e\u2060-\u2069\ufeff]/g
+
 /** label is a verified accessibility label. Typed text, key payloads and model intent never enter the banner. */
 export function step(input: { action: Computer.ToolAction; app?: string; label?: string }) {
+  // Cut by UTF-16 units, as the schema bounds labels, without leaving half of a surrogate pair.
   const label = input.label
-    ?.replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2060-\u2069\ufeff]/g, "")
+    ?.replace(BREAKS, " ")
+    .replace(INVISIBLE, "")
     .replace(/[“”]/g, '"')
+    .replace(/\s+/g, " ")
     .trim()
-    .slice(0, 40)
+    .slice(0, Computer.LIMITS.labelChars)
+    .replace(/[\ud800-\udbff]$/, "")
+    .trimEnd()
   const target = label ? ` “${label}”` : ""
   const app = input.app ? ` in ${input.app}` : ""
   const copy = {

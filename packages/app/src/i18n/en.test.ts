@@ -30,6 +30,8 @@ const featureNames = [
   "computer.mention.setupFirst",
   "computer.mention.shell",
   "computer.mention.command",
+  "computer.mention.quick",
+  "computer.mention.research",
   "computer.ask.app.title",
   "computer.ask.category.browser",
   "computer.ask.category.developer",
@@ -152,6 +154,8 @@ describe("computer English copy", () => {
       ["computer.availability.engine", "current desktop engine, or remove the mention"],
       ["computer.mention.shell", "Shell commands can't use {{name}}"],
       ["computer.mention.command", "Slash commands can't use {{name}}"],
+      ["computer.mention.quick", "Quick mode can't use {{name}}"],
+      ["computer.mention.research", "Deep research can't use {{name}}"],
     ] as const
     for (const [key, text] of required) expect(dict[key]).toContain(text)
   })
