@@ -28,6 +28,14 @@ export interface Interface {
     directory?: string
   }) => Effect.Effect<void, Denied>
   readonly knows: (sessionID: string) => Effect.Effect<boolean>
+  /**
+   * Whether `member` is in `sessionID`'s own lineage: itself, its ancestors and descendants (siblings through them, IDs
+   * left after deletion included), across no fork edge in either direction. A source never shows its fork's later
+   * messages, and a fork shows its source only up to the fork point, which the lineage does not record, so neither is in
+   * the other's lineage. An unknown member is not. This is lineage only: it decides whether a refusal may name another
+   * conversation's subagent, and never grants anything.
+   */
+  readonly inFamily: (sessionID: string, member: string) => Effect.Effect<boolean>
   readonly isPrivate: (sessionID: string) => Effect.Effect<boolean>
   readonly hasGuestInput: (sessionID: string) => Effect.Effect<boolean>
   /** Whether any private root is recorded; without one no directory or text can be private (cheap and cached). */
@@ -52,13 +60,14 @@ const denied = (reason: Denied["reason"]) =>
 
 // Every step is an indexed lookup in one direction. Tool output checks run this per call and per output chunk, so it
 // must not rebuild every edge in the database for each family member (SQLite 3.34+ allows several recursive selects).
-// The owner-only fence covers every edge in both directions. Guest input (`guest`) reaches a conversation only through
-// what it shows: a child's report reaches its parent, a parent's brief its children, and a fork its source's history,
-// but a source never shows its fork's later messages, so that walk follows a fork edge only from the fork.
-const family = (sessionID: string, guest = false) => sql`WITH RECURSIVE family(id) AS (
+// The owner-only fence (`fence`) covers every edge in both directions. Guest input (`guest`) reaches a conversation only
+// through what it shows: a child's report reaches its parent, a parent's brief its children, and a fork its source's
+// history, but a source never shows its fork's later messages, so that walk follows a fork edge only from the fork.
+// Naming (`lineage`, inFamily) follows no fork edge: a fork's source goes on after the fork point, which no edge records.
+const family = (sessionID: string, walk: "fence" | "guest" | "lineage" = "fence") => sql`WITH RECURSIVE family(id) AS (
   SELECT ${sessionID}
-  UNION SELECT session_lineage.parent_id FROM family JOIN session_lineage ON session_lineage.session_id = family.id
-  UNION SELECT session_lineage.session_id FROM family JOIN session_lineage ON session_lineage.parent_id = family.id${guest ? sql` AND NOT session_lineage.fork` : sql``}
+  UNION SELECT session_lineage.parent_id FROM family JOIN session_lineage ON session_lineage.session_id = family.id${walk === "lineage" ? sql` AND NOT session_lineage.fork` : sql``}
+  UNION SELECT session_lineage.session_id FROM family JOIN session_lineage ON session_lineage.parent_id = family.id${walk === "fence" ? sql`` : sql` AND NOT session_lineage.fork`}
   UNION SELECT session.parent_id FROM family JOIN session ON session.id = family.id WHERE session.parent_id IS NOT NULL
   UNION SELECT session.id FROM family JOIN session ON session.parent_id = family.id
 )`
@@ -202,13 +211,15 @@ export function make(database: Database.Interface, platform: NodeJS.Platform = p
   const flags = (sessionID: string, guest = false) =>
     db
       .get<{ owner_only: number; guest_input: number }>(
-        sql`${family(sessionID, guest)}
+        sql`${family(sessionID, guest ? "guest" : "fence")}
     SELECT coalesce(max(a.owner_only), 0) AS owner_only, coalesce(max(a.guest_input), 0) AS guest_input
     FROM family LEFT JOIN session_audience a ON a.session_id = family.id`,
       )
       .pipe(Effect.orDie)
   const members = (sessionID: string, guest: boolean) =>
-    db.all<{ id: string }>(sql`${family(sessionID, guest)} SELECT id FROM family`).pipe(Effect.orDie)
+    db
+      .all<{ id: string }>(sql`${family(sessionID, guest ? "guest" : "fence")} SELECT id FROM family`)
+      .pipe(Effect.orDie)
   const ensure = (sessionID: string) =>
     db
       .run(sql`INSERT OR IGNORE INTO session_audience(session_id) VALUES (${sessionID})`)
@@ -381,6 +392,16 @@ export function make(database: Database.Interface, platform: NodeJS.Platform = p
         .pipe(
           Effect.orDie,
           Effect.map((value) => value?.known === 1),
+        ),
+    inFamily: (sessionID, member) =>
+      db
+        .get<{ found: number }>(
+          sql`${family(sessionID, "lineage")}
+    SELECT EXISTS (SELECT 1 FROM family WHERE id = ${member}) AS found`,
+        )
+        .pipe(
+          Effect.orDie,
+          Effect.map((value) => value?.found === 1),
         ),
     hasPrivateDirectories: Effect.map(roots, (current) => current.roots.length > 0),
     // A root holds the target when it is the target or one of its folders, so a lookup per folder replaces a

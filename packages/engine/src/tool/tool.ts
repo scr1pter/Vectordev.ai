@@ -56,6 +56,12 @@ export type Context<M extends Metadata = Metadata> = {
   getOwnedPaths?: () => Effect.Effect<readonly string[] | undefined>
   /** Runtime ownership check, repeated inside file locks. */
   assertWritable?(input: WritableInput): Effect.Effect<void>
+  /**
+   * Whether that session is in this conversation's family, supplied by the session runtime and never by model
+   * arguments. Refusals name another conversation's subagent or session only when it is; absent, or when the answer
+   * cannot be read, they name none.
+   */
+  inFamily?: (sessionID: string) => Effect.Effect<boolean>
   /** Verified guest disclosure checks supplied by the runtime, before filesystem access and before output. */
   assertReadable?(input: { files: readonly string[]; recursive?: boolean }): Effect.Effect<void>
   assertGitReadable?(input: { cwd: string; args?: string[]; env?: Record<string, string> }): Effect.Effect<void>

@@ -7,7 +7,7 @@ import { TaskClaims } from "@/task/claims"
 import { TaskSize } from "@vectordevai/core/task-size"
 import type { Tool } from "./tool"
 
-type Context = Pick<Tool.Context, "sessionID" | "parentID" | "getOwnedPaths" | "ownedPaths">
+type Context = Pick<Tool.Context, "sessionID" | "parentID" | "getOwnedPaths" | "ownedPaths" | "inFamily">
 
 /** Explicit file tools enforce assignments. Shell execution is not a filesystem sandbox. */
 export const assertOwnedPath = Effect.fn("Task.assertOwnedPath")(function* (context: Context, target: string) {
@@ -58,6 +58,9 @@ export const assertWritable = Effect.fn("OwnedPath.assertWritable")(function* (
   input: Tool.WritableInput,
 ) {
   const instance = yield* InstanceState.context
+  // A subagent's title, session ID and owned paths belong to its conversation: a refusal names them only when that
+  // conversation is in the caller's family, and without the relation never.
+  const named = (sessionID: string) => (context.inFamily ? context.inFamily(sessionID) : Effect.succeed(false))
   const files = [
     ...new Set([
       ...input.files,
@@ -77,7 +80,11 @@ export const assertWritable = Effect.fn("OwnedPath.assertWritable")(function* (
     )
     if (protectedTree)
       return yield* Effect.die(
-        new Error(`${file} is protected for subagent ${protectedTree.taskID}. It was not changed.`),
+        new Error(
+          (yield* named(protectedTree.taskID))
+            ? `${file} is protected for subagent ${protectedTree.taskID}. It was not changed.`
+            : `${file} is protected for another conversation's subagent. It was not changed.`,
+        ),
       )
     const destination = TaskClaims.parentTarget(
       context.sessionID,
@@ -95,6 +102,16 @@ export const assertWritable = Effect.fn("OwnedPath.assertWritable")(function* (
       TaskClaims.conflicts({ tree, sessionID: context.sessionID, file }),
     )[0]
     if (!conflict) continue
+    // The launcher is in the holder's family by construction, and is known while the child is still starting.
+    if (!(yield* named(conflict.entry.parentSessionID))) {
+      const reason =
+        conflict.owned !== undefined
+          ? `${file} belongs to another conversation's running subagent. It was not changed.`
+          : `${file} was changed by another conversation's running subagent and stays its file until it finishes. It was not changed.`
+      // task_manage reaches only this conversation's subagents, so a root can only wait for that one.
+      const next = context.parentID ? "Report the change you need to the parent." : "Wait for it to finish."
+      return yield* Effect.die(new Error(`${reason} ${next}`))
+    }
     const title = TaskSize.neutralizeTags(conflict.entry.title)
     const who = `the running subagent "${title}" (${conflict.entry.taskID ?? "starting"})`
     const reason =
@@ -174,10 +191,14 @@ export const assertWritable = Effect.fn("OwnedPath.assertWritable")(function* (
       ).values(),
     ]
     if (!writers.length) continue
-    const names = writers.map((entry) => `"${TaskSize.neutralizeTags(entry.title)}"`).join(", ")
+    const shown = yield* Effect.forEach(writers, (entry) => named(entry.parentSessionID))
+    const names = writers.filter((_, index) => shown[index]).map((entry) => `"${TaskSize.neutralizeTags(entry.title)}"`)
+    const others = writers.length - names.length
     return yield* Effect.die(
       new Error(
-        `This git command changes the whole working tree while ${writers.length} subagents are editing it (${names}). It was not run. Wait for them or stop them first.`,
+        others === 0
+          ? `This git command changes the whole working tree while ${writers.length} subagents are editing it (${names.join(", ")}). It was not run. Wait for them or stop them first.`
+          : `This git command changes the whole working tree while ${writers.length} subagents are editing it (${[...names, `${others} outside this conversation`].join(", ")}). It was not run. Wait for them to finish.`,
       ),
     )
   }

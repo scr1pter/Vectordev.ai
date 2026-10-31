@@ -61,6 +61,7 @@ export const WriteTool = Tool.define(
               kind: "update",
               messages: ctx.messages,
               tool: "write",
+              inFamily: ctx.inFamily,
             })
           yield* check(before)
           const source = before ? Bom.decode(before.bytes) : { bom: false, text: "" }

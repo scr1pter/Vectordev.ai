@@ -138,6 +138,9 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
     })
   })
 
+  // Refusals name another conversation's subagent only to its own family. A family that cannot be read names none.
+  const inFamily = TaskClaims.familyOf(audience, input.session.id)
+
   const subagentTitle = SubagentLifecycle.read(input.session)?.title
   const context = (args: Record<string, unknown>, options: ToolExecutionOptions): Tool.Context => ({
     sessionID: input.session.id,
@@ -163,6 +166,7 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
     ownedPaths: TaskClaims.pathsFor(input.session.id),
     getOwnedPaths: () =>
       Effect.sync(() => TaskClaims.trustedPaths(input.session.id, input.session.parentID !== undefined)),
+    inFamily,
     assertReadable: (request) => rememberRead(options.toolCallId, request.files, request.recursive),
     assertGitReadable: (request) => access.git(request.cwd, request).pipe(Effect.orDie),
     assertOutput: (value) => access.output(value).pipe(Effect.asVoid, Effect.orDie),
@@ -175,6 +179,7 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
               parentID: input.session.parentID,
               getOwnedPaths: () =>
                 Effect.sync(() => TaskClaims.trustedPaths(input.session.id, input.session.parentID !== undefined)),
+              inFamily,
             },
             request,
           ),
@@ -232,6 +237,7 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
               parentID: input.session.parentID,
               getOwnedPaths: () =>
                 Effect.sync(() => TaskClaims.trustedPaths(input.session.id, input.session.parentID !== undefined)),
+              inFamily,
             },
             { files: req.patterns.map((pattern) => path.resolve(instance.worktree, pattern)) },
           )

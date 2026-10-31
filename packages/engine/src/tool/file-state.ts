@@ -203,11 +203,6 @@ export class StaleError extends Schema.TaggedErrorClass<StaleError>()("FileState
 /** "update" changes or deletes a file that may exist; "create" makes a file that must not exist yet. */
 export type Kind = "update" | "create"
 
-const who = (writer: Writer) =>
-  writer.title
-    ? `the subagent "${TaskSize.neutralizeTags(writer.title)}" (${writer.sessionID})`
-    : `another session (${writer.sessionID})`
-
 /** Refuses a change to a file this session has not read, or that changed or was deleted since it last did. */
 export const verify = Effect.fn("FileState.verify")(function* (i: {
   sessionID: string
@@ -216,7 +211,17 @@ export const verify = Effect.fn("FileState.verify")(function* (i: {
   kind: Kind
   messages: readonly SessionV1.WithParts[]
   tool: "edit" | "write" | "apply_patch"
+  /** The calling context's `Tool.Context.inFamily`, passed on even when absent, so no tool leaves it out by accident. */
+  inFamily: ((sessionID: string) => Effect.Effect<boolean>) | undefined
 }) {
+  // A writer's subagent title and session ID belong to its conversation, so they are named only to that conversation's
+  // family; without the relation the writer stays unnamed.
+  const who = Effect.fnUntraced(function* (writer: Writer) {
+    if (!i.inFamily || !(yield* i.inFamily(writer.sessionID))) return "another conversation"
+    return writer.title
+      ? `the subagent "${TaskSize.neutralizeTags(writer.title)}" (${writer.sessionID})`
+      : `another session (${writer.sessionID})`
+  })
   const mine = known(i.sessionID, i.file, i.messages)
   const writer = lastWriter(i.file)
   const other = writer && writer.sessionID !== i.sessionID && (!mine || writer.at > mine.at) ? writer : undefined
@@ -225,7 +230,7 @@ export const verify = Effect.fn("FileState.verify")(function* (i: {
       return yield* new StaleError({
         reason: "deleted",
         file: i.file,
-        message: `${i.file} was deleted by ${who(other)} after you read it. Nothing was written.`,
+        message: `${i.file} was deleted by ${yield* who(other)} after you read it. Nothing was written.`,
       })
     return
   }
@@ -247,7 +252,7 @@ export const verify = Effect.fn("FileState.verify")(function* (i: {
   if (same(mine.stamp, i.now)) return
   const by =
     other && !other.deleted
-      ? `written by ${who(other)}`
+      ? `written by ${yield* who(other)}`
       : "outside your edits (an editor, a formatter or a shell command)"
   return yield* new StaleError({
     reason: "changed",

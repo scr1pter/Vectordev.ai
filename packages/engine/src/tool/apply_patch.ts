@@ -87,6 +87,7 @@ export const ApplyPatchTool = Tool.define(
           kind,
           messages: ctx.messages,
           tool: "apply_patch",
+          inFamily: ctx.inFamily,
         })
       const count = (from: string, to: string) => {
         let additions = 0

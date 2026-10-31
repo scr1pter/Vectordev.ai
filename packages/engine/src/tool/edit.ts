@@ -114,6 +114,7 @@ export const EditTool = Tool.define(
               kind: creating ? "create" : "update",
               messages: ctx.messages,
               tool: "edit",
+              inFamily: ctx.inFamily,
             })
           yield* check(before)
 

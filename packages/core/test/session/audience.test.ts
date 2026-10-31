@@ -137,7 +137,63 @@ it.effect("legacy live lineage is captured before an intermediate session is del
     }
     yield* audience.register({ sessionID: "ses_future", parentID: "ses_middle" })
     expect(yield* audience.isPrivate("ses_future")).toBe(true)
+    // The family relation walks the captured lineage too, through the deleted middle session.
+    expect(yield* audience.inFamily("ses_sibling", "ses_leaf")).toBe(true)
+    expect(yield* audience.inFamily("ses_leaf", "ses_future")).toBe(true)
   }),
+)
+
+it.effect(
+  "inFamily is a conversation's own lineage both ways, never across a fork in either direction nor to a guest next to it",
+  () =>
+    Effect.gen(function* () {
+      const audience = yield* SessionAudience.Service
+      yield* audience.register({ sessionID: "ses_root" })
+      yield* audience.register({ sessionID: "ses_child", parentID: "ses_root" })
+      yield* audience.register({ sessionID: "ses_leaf", parentID: "ses_child" })
+      yield* audience.register({ sessionID: "ses_sibling", parentID: "ses_root" })
+      yield* audience.register({ sessionID: "ses_fork", forkOf: "ses_child" })
+      yield* audience.register({ sessionID: "ses_fork_helper", parentID: "ses_fork" })
+      // Work the source starts after the fork, which the fork never shows.
+      yield* audience.register({ sessionID: "ses_late", parentID: "ses_child" })
+      yield* audience.fenceIsolation({ sessionID: "ses_child", actor: "owner" })
+      yield* audience.register({ sessionID: "ses_guest", actor: "guest" })
+      const pairs = (list: ReadonlyArray<readonly [string, string]>) =>
+        Effect.forEach(list, ([caller, member]) =>
+          audience.inFamily(caller, member).pipe(Effect.map((found) => `${caller} ${member} ${found}`)),
+        )
+      // Itself, its ancestors and descendants, and siblings through them; a fork's own helpers are its lineage.
+      const lineage = [
+        ["ses_leaf", "ses_leaf"],
+        ["ses_leaf", "ses_root"],
+        ["ses_root", "ses_leaf"],
+        ["ses_leaf", "ses_sibling"],
+        ["ses_leaf", "ses_late"],
+        ["ses_fork", "ses_fork_helper"],
+        ["ses_fork_helper", "ses_fork"],
+      ] as const
+      expect(yield* pairs(lineage)).toEqual(lineage.map(([caller, member]) => `${caller} ${member} true`))
+      // A fork and its source are outside each other's lineage in both directions: a fork shows its source only up to
+      // the fork point, so it is not told about the source's later work, and a source never shows its fork's messages.
+      // Nor is a guest's conversation in the same folder, or an unknown ID.
+      const outside = [
+        ["ses_fork", "ses_child"],
+        ["ses_fork", "ses_late"],
+        ["ses_fork_helper", "ses_leaf"],
+        ["ses_fork", "ses_sibling"],
+        ["ses_child", "ses_fork"],
+        ["ses_root", "ses_fork_helper"],
+        ["ses_leaf", "ses_fork"],
+        ["ses_guest", "ses_leaf"],
+        ["ses_leaf", "ses_guest"],
+        ["ses_guest", "ses_root"],
+        ["ses_leaf", "ses_missing"],
+      ] as const
+      expect(yield* pairs(outside)).toEqual(outside.map(([caller, member]) => `${caller} ${member} false`))
+      // The fence, unlike this relation, covers the fork in both directions.
+      expect(yield* audience.isPrivate("ses_fork_helper")).toBe(true)
+      expect(yield* audience.isPrivate("ses_guest")).toBe(false)
+    }),
 )
 
 it.effect("joining a guest-bearing family to a private family is refused atomically", () =>

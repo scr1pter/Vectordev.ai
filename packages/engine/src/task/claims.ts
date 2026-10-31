@@ -1,5 +1,6 @@
 import path from "node:path"
 import { Effect } from "effect"
+import type { SessionAudience } from "@vectordevai/core/session/audience"
 import { FileLock } from "@/tool/file-lock"
 import { registerDisposer } from "@/effect/instance-registry"
 
@@ -115,7 +116,10 @@ export function pathsOverlap(left: string, right: string) {
   return inside(a, b) || inside(b, a)
 }
 
-/** Launch exceptions match task dependencies, resumes and the launching child's own ancestors. */
+/**
+ * Launch exceptions match task dependencies, resumes and the launching child's own ancestors. Each overlap pairs the
+ * launcher's own path with the claim's path or changed file, relative to the claim's directory.
+ */
 export function overlaps(input: {
   tree: string
   directory: string
@@ -126,39 +130,74 @@ export function overlaps(input: {
 }) {
   const tree = FileLock.key(input.tree)
   const ancestors = lineage(input.parentSessionID)
+  return [...claims]
+    .filter(
+      (entry) =>
+        entry.active &&
+        entry.writes &&
+        !entry.isolated &&
+        entry.tree === tree &&
+        !(
+          entry.taskID &&
+          (ancestors.has(entry.taskID) || entry.taskID === input.taskID || input.except?.has(entry.taskID))
+        ),
+    )
+    .flatMap((entry) =>
+      input.paths.flatMap((owned) => {
+        const destination = FileLock.key(path.resolve(input.directory, owned))
+        return [
+          ...entry.paths
+            .filter((existing) => {
+              const boundary = FileLock.key(path.resolve(entry.directory, existing))
+              return inside(boundary, destination) || inside(destination, boundary)
+            })
+            .map((existing) => ({ entry, owned, existing })),
+          ...[...entry.files]
+            .filter((file) => inside(destination, file) || inside(file, destination))
+            .map((file) => ({ entry, owned, existing: path.relative(entry.directory, file) })),
+        ]
+      }),
+    )
+}
+
+/**
+ * The refusal's lines for `overlaps`. A claim's title, paths and changed files belong to its conversation, so they are
+ * named only when its launcher is in the caller's family; otherwise the line gives only the caller's own path. Without
+ * the relation nothing is named.
+ */
+export const describe = Effect.fnUntraced(function* (
+  found: ReturnType<typeof overlaps>,
+  inFamily: ((sessionID: string) => Effect.Effect<boolean>) | undefined,
+) {
+  const launchers = [...new Set(found.map((item) => item.entry.parentSessionID))]
+  const named = new Set(
+    inFamily
+      ? (yield* Effect.forEach(launchers, (id) => inFamily(id).pipe(Effect.map((shown) => (shown ? [id] : []))))).flat()
+      : [],
+  )
   return [
     ...new Set(
-      [...claims]
-        .filter(
-          (entry) =>
-            entry.active &&
-            entry.writes &&
-            !entry.isolated &&
-            entry.tree === tree &&
-            !(
-              entry.taskID &&
-              (ancestors.has(entry.taskID) || entry.taskID === input.taskID || input.except?.has(entry.taskID))
-            ),
-        )
-        .flatMap((entry) =>
-          input.paths.flatMap((owned) => {
-            const destination = FileLock.key(path.resolve(input.directory, owned))
-            return [
-              ...entry.paths
-                .filter((existing) => {
-                  const boundary = FileLock.key(path.resolve(entry.directory, existing))
-                  return inside(boundary, destination) || inside(destination, boundary)
-                })
-                .map((existing) => `${entry.title}: ${owned} overlaps ${existing}`),
-              ...[...entry.files]
-                .filter((file) => inside(destination, file) || inside(file, destination))
-                .map((file) => `${entry.title}: ${owned} overlaps ${path.relative(entry.directory, file)}`),
-            ]
-          }),
-        ),
+      found.map((item) =>
+        named.has(item.entry.parentSessionID)
+          ? `${item.entry.title}: ${item.owned} overlaps ${item.existing}`
+          : `${item.owned} overlaps another conversation's running subagent`,
+      ),
     ),
   ]
-}
+})
+
+/**
+ * The family relation refusals name by, bound to the caller. SessionTools' `Tool.Context.inFamily` hook and the
+ * `TaskManager.resume` refusal both use it. A family that cannot be read is logged and names no other conversation.
+ */
+export const familyOf = (audience: Pick<SessionAudience.Interface, "inFamily">, sessionID: string) => (other: string) =>
+  audience
+    .inFamily(sessionID, other)
+    .pipe(
+      Effect.catchDefect((cause) =>
+        Effect.logWarning("the conversation family could not be read", { cause }).pipe(Effect.as(false)),
+      ),
+    )
 
 /** Checks all other roots too, while allowing the writer to work within its ancestors' assignments. */
 export function conflicts(input: { tree: string; sessionID: string; file: string }) {

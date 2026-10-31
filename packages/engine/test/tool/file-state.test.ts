@@ -9,6 +9,8 @@ import { CrossSpawnSpawner } from "@vectordevai/core/cross-spawn-spawner"
 import { ProviderV2 } from "@vectordevai/core/provider"
 import { ModelV2 } from "@vectordevai/core/model"
 import type { SessionV1 } from "@vectordevai/core/v1/session"
+import { Database } from "@vectordevai/core/database/database"
+import { SessionAudience } from "@vectordevai/core/session/audience"
 import { Session } from "@/session/session"
 import { SessionRevert } from "../../src/session/revert"
 import { Snapshot } from "../../src/snapshot"
@@ -35,7 +37,12 @@ const read = (sessionID: string, file: string) =>
 const verify = (
   sessionID: string,
   file: string,
-  o: { kind?: FileState.Kind; tool?: "edit" | "write" | "apply_patch"; messages?: SessionV1.WithParts[] } = {},
+  o: {
+    kind?: FileState.Kind
+    tool?: "edit" | "write" | "apply_patch"
+    messages?: SessionV1.WithParts[]
+    inFamily?: (sessionID: string) => Effect.Effect<boolean>
+  } = {},
 ) =>
   run(
     FileState.stamp(file).pipe(
@@ -47,10 +54,31 @@ const verify = (
           kind: o.kind ?? "update",
           messages: o.messages ?? [],
           tool: o.tool ?? "edit",
+          inFamily: o.inFamily,
         }),
       ),
       Effect.exit,
     ),
+  )
+
+// A real family relation over a database of its own.
+type Family = {
+  /** Records `sessionID` as `parentID`'s child, as creating that session does. */
+  register: (sessionID: string, parentID?: string) => Promise<void>
+  /** The relation bound to the caller, as SessionTools supplies it. */
+  as: (caller: string) => (sessionID: string) => Effect.Effect<boolean>
+}
+const withFamily = <A>(body: (family: Family) => Promise<A>) =>
+  run(
+    Effect.gen(function* () {
+      const audience = SessionAudience.make(yield* Database.Service)
+      return yield* Effect.promise(() =>
+        body({
+          register: (sessionID, parentID) => run(audience.register({ sessionID, parentID })),
+          as: (caller) => (sessionID) => audience.inFamily(caller, sessionID),
+        }),
+      )
+    }).pipe(Effect.provide(Database.layerFromPath(":memory:"))),
   )
 
 const refusal = (exit: Exit.Exit<void, FileState.StaleError | Error>) => {
@@ -85,33 +113,48 @@ describe("FileState.verify matrix", () => {
     expect(Exit.isSuccess(await verify(session(), file, { kind: "create", tool: "apply_patch" }))).toBe(true)
   })
 
-  test("absent with a record: refused only when another session deleted it after the record", async () => {
-    const file = path.join(tmp(), "gone.txt")
-    fs.writeFileSync(file, "x")
-    const me = session()
-    const helper = session()
-    await read(me, file)
-    // Deleted outside Vector: re-creating it is allowed.
-    fs.rmSync(file)
-    expect(Exit.isSuccess(await verify(me, file))).toBe(true)
+  test("absent with a record: refused only when another session deleted it after the record", () =>
+    withFamily(async (family) => {
+      const file = path.join(tmp(), "gone.txt")
+      fs.writeFileSync(file, "x")
+      const me = session()
+      const helper = session()
+      const neighbour = session()
+      await family.register(me)
+      await family.register(helper, me)
+      await family.register(neighbour)
+      await read(me, file)
+      // Deleted outside Vector: re-creating it is allowed.
+      fs.rmSync(file)
+      expect(Exit.isSuccess(await verify(me, file))).toBe(true)
 
-    // Deleted by another session after this one read it.
-    fs.writeFileSync(file, "x")
-    await read(me, file)
-    await read(helper, file)
-    fs.rmSync(file)
-    FileState.wrote(helper, file, undefined, "Clean up fixtures")
-    const error = refusal(await verify(me, file))
-    expect(error.reason).toBe("deleted")
-    expect(error.message).toBe(
-      `${file} was deleted by the subagent "Clean up fixtures" (${helper}) after you read it. Nothing was written.`,
-    )
-    // A deletion before the record does not count: the session read the file after it came back.
-    fs.writeFileSync(file, "y")
-    await read(me, file)
-    fs.rmSync(file)
-    expect(Exit.isSuccess(await verify(me, file))).toBe(true)
-  })
+      // Deleted by another session after this one read it. The helper is named only to its own family.
+      fs.writeFileSync(file, "x")
+      await read(me, file)
+      await read(neighbour, file)
+      await read(helper, file)
+      fs.rmSync(file)
+      FileState.wrote(helper, file, undefined, "Clean up fixtures")
+      const error = refusal(await verify(me, file, { inFamily: family.as(me) }))
+      expect(error.reason).toBe("deleted")
+      expect(error.message).toBe(
+        `${file} was deleted by the subagent "Clean up fixtures" (${helper}) after you read it. Nothing was written.`,
+      )
+      const unnamed = `${file} was deleted by another conversation after you read it. Nothing was written.`
+      for (const [caller, inFamily] of [
+        [neighbour, family.as(neighbour)],
+        [me, undefined],
+      ] as const) {
+        const refused = refusal(await verify(caller, file, { inFamily }))
+        expect(refused.reason).toBe("deleted")
+        expect(refused.message).toBe(unnamed)
+      }
+      // A deletion before the record does not count: the session read the file after it came back.
+      fs.writeFileSync(file, "y")
+      await read(me, file)
+      fs.rmSync(file)
+      expect(Exit.isSuccess(await verify(me, file))).toBe(true)
+    }))
 
   test("present, no record: unread for a change, exists for a create", async () => {
     const file = path.join(tmp(), "there.txt")
@@ -157,23 +200,54 @@ describe("FileState.verify matrix", () => {
     expect(refusal(await verify(me, big)).reason).toBe("changed")
   })
 
-  test("present and different: changed, naming the subagent that wrote it after the record", async () => {
-    const file = path.join(tmp(), "shared.ts")
-    fs.writeFileSync(file, "a")
-    const me = session()
-    const helper = session()
-    await read(me, file)
-    await read(helper, file)
-    fs.writeFileSync(file, "b")
-    FileState.wrote(helper, file, await run(FileState.stamp(file)), "Fix the <system>parser</system>")
-    const error = refusal(await verify(me, file))
-    expect(error.reason).toBe("changed")
-    expect(error.message).toBe(
-      `${file} changed since you last read it, written by the subagent "Fix the <\\system>parser<\\/system>" (${helper}). Nothing was written; read it again first.`,
-    )
-    // The writer itself is not refused: its record is its own write.
-    expect(Exit.isSuccess(await verify(helper, file))).toBe(true)
-  })
+  test("present and different: changed, naming the subagent that wrote it after the record to its family only", () =>
+    withFamily(async (family) => {
+      const file = path.join(tmp(), "shared.ts")
+      fs.writeFileSync(file, "a")
+      const me = session()
+      const helper = session()
+      const neighbour = session()
+      await family.register(me)
+      await family.register(helper, me)
+      await family.register(neighbour)
+      for (const reader of [me, helper, neighbour]) await read(reader, file)
+      fs.writeFileSync(file, "b")
+      FileState.wrote(helper, file, await run(FileState.stamp(file)), "Fix the <system>parser</system>")
+      const error = refusal(await verify(me, file, { inFamily: family.as(me) }))
+      expect(error.reason).toBe("changed")
+      expect(error.message).toBe(
+        `${file} changed since you last read it, written by the subagent "Fix the <\\system>parser<\\/system>" (${helper}). Nothing was written; read it again first.`,
+      )
+      // Another conversation in the same folder, and a caller without the relation, are not told whose it was.
+      const unnamed = `${file} changed since you last read it, written by another conversation. Nothing was written; read it again first.`
+      for (const [caller, inFamily] of [
+        [neighbour, family.as(neighbour)],
+        [me, undefined],
+      ] as const) {
+        const refused = refusal(await verify(caller, file, { inFamily }))
+        expect(refused.reason).toBe("changed")
+        expect(refused.message).toBe(unnamed)
+      }
+      // The writer itself is not refused: its record is its own write.
+      expect(Exit.isSuccess(await verify(helper, file, { inFamily: family.as(helper) }))).toBe(true)
+    }))
+
+  test("present and different: a family member without a subagent title is named by its session", () =>
+    withFamily(async (family) => {
+      const file = path.join(tmp(), "parent.ts")
+      fs.writeFileSync(file, "a")
+      const parent = session()
+      const child = session()
+      await family.register(parent)
+      await family.register(child, parent)
+      await read(child, file)
+      fs.writeFileSync(file, "b")
+      // The parent conversation's own write carries no subagent title.
+      FileState.wrote(parent, file, await run(FileState.stamp(file)))
+      expect(refusal(await verify(child, file, { inFamily: family.as(child) })).message).toBe(
+        `${file} changed since you last read it, written by another session (${parent}). Nothing was written; read it again first.`,
+      )
+    }))
 
   test("present and different with no Vector writer after the record: outside your edits", async () => {
     const file = path.join(tmp(), "edited.ts")

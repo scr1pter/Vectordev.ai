@@ -17,6 +17,9 @@ const reserve = (tree: string, taskID = "ses_child", paths = ["src"], parentSess
   TaskClaims.bind(entry, taskID)
   return entry
 }
+// A launch refusal's lines for a caller whose family holds exactly these launchers.
+const lines = (input: Parameters<typeof TaskClaims.overlaps>[0], family: readonly string[] = []) =>
+  Effect.runSync(TaskClaims.describe(TaskClaims.overlaps(input), (id) => Effect.succeed(family.includes(id))))
 
 afterEach(() => {
   for (const entry of TaskClaims.claims) TaskClaims.release(entry)
@@ -38,7 +41,7 @@ describe("TaskClaims", () => {
       title: "Worker",
     })
     const input = { tree, directory: tree, parentSessionID: "ses_root", paths: ["src/file.ts"] }
-    expect(TaskClaims.overlaps(input)).toEqual(["Worker: src/file.ts overlaps src"])
+    expect(lines(input, ["ses_root"])).toEqual(["Worker: src/file.ts overlaps src"])
     TaskClaims.bind(claim, "ses_child")
     expect(TaskClaims.pathsFor("ses_child")).toEqual(["src"])
     expect(claim.held).toBe(true)
@@ -57,7 +60,44 @@ describe("TaskClaims", () => {
     expect(TaskClaims.overlaps({ ...input, taskID: "ses_child" })).toEqual([])
     expect(TaskClaims.overlaps({ ...input, parentSessionID: "ses_child" })).toEqual([])
     reserve(tree, "ses_other", ["lib"], "ses_different_root")
-    expect(TaskClaims.overlaps({ ...input, paths: ["lib/file.ts"] })).toEqual(["ses_other: lib/file.ts overlaps lib"])
+    expect(lines({ ...input, paths: ["lib/file.ts"] }, ["ses_different_root"])).toEqual([
+      "ses_other: lib/file.ts overlaps lib",
+    ])
+    expect(lines({ ...input, paths: ["lib/file.ts"] })).toEqual([
+      "lib/file.ts overlaps another conversation's running subagent",
+    ])
+  })
+
+  test("a launch refusal names a claim, its paths and changed files only to its launcher's family", () => {
+    const tree = temp()
+    reserve(tree, "ses_keys", ["vault"], "ses_owner")
+    reserve(tree, "ses_notes", [], "ses_owner")
+    TaskClaims.touch("ses_notes", path.join(tree, "secrets", "notes.md"))
+    reserve(tree, "ses_mine", ["src"], "ses_guest")
+    const input = { tree, directory: tree, parentSessionID: "ses_guest", paths: ["."] }
+    expect(TaskClaims.overlaps(input)).toHaveLength(3)
+    // The owner's family is told which of its claims, paths and files overlap, as before.
+    expect(lines(input, ["ses_owner", "ses_guest"])).toEqual([
+      "ses_keys: . overlaps vault",
+      `ses_notes: . overlaps ${path.join("secrets", "notes.md")}`,
+      "ses_mine: . overlaps src",
+    ])
+    // Anyone else learns only which of its own paths overlaps another conversation's work, once, and the relation is
+    // read once per launcher.
+    const asked: string[] = []
+    const guest = Effect.runSync(
+      TaskClaims.describe(TaskClaims.overlaps(input), (id) =>
+        Effect.sync(() => asked.push(id)).pipe(Effect.as(id === "ses_guest")),
+      ),
+    )
+    expect(guest).toEqual([". overlaps another conversation's running subagent", "ses_mine: . overlaps src"])
+    expect(asked.sort()).toEqual(["ses_guest", "ses_owner"])
+    for (const hidden of ["ses_keys", "ses_notes", "ses_owner", "vault", "secrets"])
+      expect(guest.join("\n")).not.toContain(hidden)
+    // Without the relation no claim is named, not even the caller's own.
+    expect(Effect.runSync(TaskClaims.describe(TaskClaims.overlaps(input), undefined))).toEqual([
+      ". overlaps another conversation's running subagent",
+    ])
   })
 
   test("conflicts spans root sessions but permits the owner's own sub-helper", () => {
@@ -76,9 +116,9 @@ describe("TaskClaims", () => {
     const file = path.join(tree, "file.ts")
     const claim = reserve(tree, "ses_child", [])
     TaskClaims.touch("ses_child", file)
-    expect(
-      TaskClaims.overlaps({ tree, directory: tree, parentSessionID: "ses_other_root", paths: ["file.ts"] }),
-    ).toEqual(["ses_child: file.ts overlaps file.ts"])
+    const unscoped = { tree, directory: tree, parentSessionID: "ses_other_root", paths: ["file.ts"] }
+    expect(lines(unscoped, ["ses_root"])).toEqual(["ses_child: file.ts overlaps file.ts"])
+    expect(lines(unscoped)).toEqual(["file.ts overlaps another conversation's running subagent"])
     expect(TaskClaims.conflicts({ tree, sessionID: "ses_sibling", file })[0]).toMatchObject({
       entry: claim,
       owned: undefined,

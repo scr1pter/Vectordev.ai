@@ -787,7 +787,7 @@ export const TaskTool = Tool.define(
           new Error(
             [
               "Subagent ownership overlaps active sibling work.",
-              ...conflicts.map((item) => `- ${item}`),
+              ...(yield* TaskClaims.describe(conflicts, ctx.inFamily)).map((item) => `- ${item}`),
               "Wait for that task, add it to depends_on, or assign non-overlapping paths.",
             ].join("\n"),
           ),

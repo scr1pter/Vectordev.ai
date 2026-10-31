@@ -1,10 +1,12 @@
-import { afterEach, describe, expect } from "bun:test"
+import { afterAll, afterEach, describe, expect } from "bun:test"
 import fs from "node:fs/promises"
 import path from "node:path"
 import { execFileSync } from "node:child_process"
-import { Cause, Deferred, Effect, Exit } from "effect"
+import { Cause, Deferred, Effect, Exit, ManagedRuntime } from "effect"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
 import { CrossSpawnSpawner } from "@vectordevai/core/cross-spawn-spawner"
+import { Database } from "@vectordevai/core/database/database"
+import { SessionAudience } from "@vectordevai/core/session/audience"
 import { FSUtil } from "@vectordevai/core/fs-util"
 import { Shell } from "@vectordevai/core/shell"
 import { Agent } from "@/agent/agent"
@@ -46,6 +48,13 @@ const base: Tool.Context = {
   metadata: () => Effect.void,
   ask: () => Effect.void,
 }
+// The family relation SessionTools gives the main agent, over this file's own database. Nothing is registered there, so
+// the main agent's family is its own conversation: the claims it launched (parentSessionID ses_root) are named to it,
+// another conversation's (ses_other_root) are not.
+const families = ManagedRuntime.make(Database.layerFromPath(":memory:"))
+afterAll(() => families.dispose())
+const audience = await families.runPromise(Effect.map(Database.Service, (database) => SessionAudience.make(database)))
+const main: Tool.Context = { ...base, inFamily: (id) => audience.inFamily(base.sessionID, id) }
 const stop = "ownership scan stopped before execution"
 const context = (id: string): Tool.Context => ({
   ...base,
@@ -312,8 +321,37 @@ describe("git ownership policy", () => {
         yield* claim("ses_a", "A")
         yield* claim("ses_b", "B")
         const mutation = yield* git(["git", "reset", "--hard"])
-        expect(yield* error(assertWritable(base, { files: [], git: [mutation] }))).toContain(
+        expect(yield* error(assertWritable(main, { files: [], git: [mutation] }))).toContain(
           'This git command changes the whole working tree while 2 subagents are editing it ("A", "B"). It was not run. Wait for them or stop them first.',
+        )
+      }),
+    { git: true },
+  )
+
+  it.instance(
+    "another conversation's shared-tree writers are counted but not named",
+    () =>
+      Effect.gen(function* () {
+        const instance = yield* InstanceState.context
+        yield* claim("ses_a", "A")
+        const other = TaskClaims.reserve({
+          tree: instance.worktree,
+          directory: instance.directory,
+          parentSessionID: "ses_other_root",
+          taskID: "ses_b",
+          title: "Rotate the keys",
+          paths: [],
+        })
+        TaskClaims.bind(other, "ses_b")
+        const mutation = yield* git(["git", "reset", "--hard"])
+        const refused = yield* error(assertWritable(main, { files: [], git: [mutation] }))
+        expect(refused).toContain(
+          'This git command changes the whole working tree while 2 subagents are editing it ("A", 1 outside this conversation). It was not run. Wait for them to finish.',
+        )
+        for (const hidden of ["Rotate", "ses_b", "ses_other_root"]) expect(refused).not.toContain(hidden)
+        // Without the family relation no writer is named, and the command is still refused.
+        expect(yield* error(assertWritable(base, { files: [], git: [mutation] }))).toContain(
+          "while 2 subagents are editing it (2 outside this conversation). It was not run. Wait for them to finish.",
         )
       }),
     { git: true },
@@ -414,9 +452,13 @@ describe("git ownership policy", () => {
         const mutation = yield* git(["git", "-C", other, "checkout", "--", "owned.ts"], {
           trees: [instance.worktree, other],
         })
-        expect(yield* error(assertWritable(base, { files: [], git: [mutation] }))).toContain(
-          'belongs to the running subagent "Owner"',
+        // The claim is another conversation's, so the refusal names neither its subagent nor its owned path.
+        const refused = yield* error(assertWritable(main, { files: [], git: [mutation] }))
+        expect(refused).toContain(
+          `${path.join(other, "owned.ts")} belongs to another conversation's running subagent. It was not changed. Wait for it to finish.`,
         )
+        for (const hidden of ['"Owner"', "ses_owner", "ses_other_root", "which owns"])
+          expect(refused).not.toContain(hidden)
       }),
     { git: true },
   )
@@ -569,7 +611,7 @@ if (process.platform !== "win32") {
           )
           expect(result.metadata.exit).toBe(0)
           const file = path.join(instance.directory, "target.txt")
-          expect(yield* error(assertWritable(base, { files: [file] }))).toContain(
+          expect(yield* error(assertWritable(main, { files: [file] }))).toContain(
             'was changed by the running subagent "Shell owner"',
           )
           TaskClaims.release(owner)
@@ -640,7 +682,7 @@ if (process.platform !== "win32") {
             { ...ctx, assertWritable: (request) => assertWritable(ctx, request) },
           )
           expect(
-            yield* error(assertWritable(base, { files: [path.join(instance.directory, "removed/new.txt")] })),
+            yield* error(assertWritable(main, { files: [path.join(instance.directory, "removed/new.txt")] })),
           ).toContain('was changed by the running subagent "Shell owner"')
         }),
       ),
@@ -692,7 +734,7 @@ if (process.platform !== "win32") {
                 assertWritable: (request) =>
                   Effect.sync(() => {
                     calls.ownership++
-                  }).pipe(Effect.andThen(assertWritable(base, request))),
+                  }).pipe(Effect.andThen(assertWritable(main, request))),
                 ask: (request) =>
                   request.permission === "bash"
                     ? claim("ses_new_owner", "New owner", ["target.txt"]).pipe(Effect.asVoid)
@@ -727,11 +769,11 @@ it.instance(
       const index = yield* git(["git", "add", "."], {
         env: { GIT_INDEX_FILE: path.join(instance.directory, "src/custom-index") },
       })
-      expect(yield* error(assertWritable(base, { files: [], git: [index] }))).toContain(
+      expect(yield* error(assertWritable(main, { files: [], git: [index] }))).toContain(
         'belongs to the running subagent "Owner"',
       )
       const metadata = yield* git(["git", "--git-dir", path.join(instance.directory, "src/.git"), "commit", "-m", "x"])
-      expect(yield* error(assertWritable(base, { files: [], git: [metadata] }))).toContain(
+      expect(yield* error(assertWritable(main, { files: [], git: [metadata] }))).toContain(
         'belongs to the running subagent "Owner"',
       )
     }),

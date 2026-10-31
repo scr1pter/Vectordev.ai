@@ -27,6 +27,7 @@ import { ProviderV2 } from "@vectordevai/core/provider"
 import { SpendGuard } from "@vectordevai/core/spend-guard"
 import { ModelV2 } from "@vectordevai/core/model"
 import { FreeModelGuests } from "@vectordevai/core/free-model-guests"
+import { SessionAudience } from "@vectordevai/core/session/audience"
 import { Config } from "@/config/config"
 import { BackgroundJobStore } from "@vectordevai/core/background-job-store"
 import { InstanceState } from "@/effect/instance-state"
@@ -212,6 +213,7 @@ const layer = Layer.effect(
     const provider = yield* Provider.Service
     const agents = yield* Agent.Service
     const isolation = yield* TaskIsolation.Service
+    const audience = yield* SessionAudience.Service
     const isolated = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
       effect.pipe(
         Effect.mapError((cause) => {
@@ -1409,17 +1411,21 @@ const layer = Layer.effect(
             const resuming = new Set<string>(checked.map((item) => item.session.id))
             const instance = yield* InstanceState.context
             const conflicts = new Set(
-              checked.flatMap(({ record, session, assigned }) =>
-                assigned
-                  ? []
-                  : TaskClaims.overlaps({
-                      tree: instance.worktree,
-                      directory,
-                      parentSessionID: root.id,
-                      taskID: session.id,
-                      paths: record.ownedPaths ?? [],
-                      except: resuming,
-                    }),
+              yield* TaskClaims.describe(
+                checked.flatMap(({ record, session, assigned }) =>
+                  assigned
+                    ? []
+                    : TaskClaims.overlaps({
+                        tree: instance.worktree,
+                        directory,
+                        parentSessionID: root.id,
+                        taskID: session.id,
+                        paths: record.ownedPaths ?? [],
+                        except: resuming,
+                      }),
+                ),
+                // Another conversation's claim is named only to its family; a family that cannot be read names none.
+                TaskClaims.familyOf(audience, root.id),
               ),
             )
             // Resuming siblings must not acquire overlapping assignments in the same batch either.
@@ -1786,6 +1792,7 @@ export const node = LayerNode.make({
     Provider.node,
     Agent.node,
     TaskIsolation.node,
+    SessionAudience.node,
   ],
 })
 export * as TaskManager from "./manager"

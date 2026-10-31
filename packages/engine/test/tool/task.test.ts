@@ -3,7 +3,9 @@ import fs from "node:fs/promises"
 import { afterEach, describe, expect } from "bun:test"
 import { SessionV1 } from "@vectordevai/core/v1/session"
 import { Database } from "@vectordevai/core/database/database"
+import { SessionAudience } from "@vectordevai/core/session/audience"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
+import { Node } from "@vectordevai/core/effect/app-node"
 import { SessionProjector } from "@vectordevai/core/session/projector"
 import { Cause, Context, Deferred, Effect, Exit, Fiber, Layer } from "effect"
 import { Agent } from "../../src/agent/agent"
@@ -74,7 +76,22 @@ const gatedGit = Layer.effect(
   }),
 ).pipe(Layer.provide(LayerNode.compile(Git.node)))
 
-const layer = (flags: Partial<RuntimeFlags.Info> = {}) =>
+// The real audience over the test's database, except that its family relation dies, as a locked database read does.
+const unreadableFamily = Node.makeGlobalNode({
+  service: SessionAudience.Service,
+  layer: Layer.effect(
+    SessionAudience.Service,
+    Effect.map(Database.Service, (database) =>
+      SessionAudience.Service.of({
+        ...SessionAudience.make(database),
+        inFamily: () => Effect.die(new Error("database is locked")),
+      }),
+    ),
+  ),
+  deps: [Database.node],
+})
+
+const layer = (flags: Partial<RuntimeFlags.Info> = {}, audience = SessionAudience.node) =>
   LayerNode.compile(
     LayerNode.group([
       Agent.node,
@@ -110,12 +127,14 @@ const layer = (flags: Partial<RuntimeFlags.Info> = {}) =>
       [RuntimeFlags.node, RuntimeFlags.layer({ noteQuietMs: 300, noteHoldMs: 1_000, ...flags })],
       [InstanceStore.bootstrapNode, Layer.succeed(InstanceBootstrap.Service, { run: Effect.void })],
       [Git.node, gatedGit],
+      [SessionAudience.node, audience],
     ],
   )
 
 const it = testEffect(layer())
 const background = testEffect(layer({ backgroundSubagents: true }))
 const foregroundOnly = testEffect(layer({ backgroundSubagents: false }))
+const unreadable = testEffect(layer({ backgroundSubagents: true }, unreadableFamily))
 
 for (const id of ["acme/coder:free", "acme/coder:FREE"])
   it.instance(
@@ -341,9 +360,9 @@ function defer<T>() {
   return { promise, resolve }
 }
 
-const seed = Effect.fn("TaskToolTest.seed")(function* (title = "Pinned", model = ref) {
+const seed = Effect.fn("TaskToolTest.seed")(function* (title = "Pinned", model = ref, actor?: SessionAudience.Actor) {
   const session = yield* Session.Service
-  const chat = yield* session.create({ title })
+  const chat = yield* session.create({ title }, actor)
   const user = yield* session.updateMessage({
     id: MessageID.ascending(),
     role: "user",
@@ -1687,6 +1706,253 @@ describe("tool.task", () => {
 
       expect(Exit.isFailure(exit)).toBe(true)
       if (Exit.isFailure(exit)) expect(Cause.pretty(exit.cause)).toContain("ownership overlaps")
+    }),
+  )
+
+  // The launch and resume overlap refusals name a claim's subagent, its paths and the files it changed only to the
+  // claim's own conversation family. An owner-only family (the owner's conversation and two subagents) holds `vault` and
+  // changed `secrets/notes.md`; a guest's conversation in the same folder launches and resumes over the whole folder.
+  background.instance(
+    "launch and resume overlap refusals name an owner-only family's subagent, paths and files only to that family",
+    () =>
+      Effect.gen(function* () {
+        const instance = yield* InstanceState.context
+        const sessions = yield* Session.Service
+        const jobs = yield* BackgroundJob.Service
+        const manager = yield* TaskManager.Service
+        const audience = SessionAudience.make(yield* Database.Service)
+        const def = yield* singleTaskDefinition(yield* TaskTool)
+        const owner = yield* seed("Owner chat")
+        const guest = yield* seed("Guest chat", ref, "guest")
+        const context = (seeded: Effect.Success<ReturnType<typeof seed>>) => ({
+          ...taskContext({ sessionID: seeded.chat.id, messageID: seeded.assistant.id, promptOps: stubOps() }),
+          inFamily: (other: string) => audience.inFamily(seeded.chat.id, other),
+        })
+        const launch = (seeded: Effect.Success<ReturnType<typeof seed>>, owned: string) =>
+          def
+            .execute(
+              {
+                description: "Sweep the folder",
+                prompt: "Tidy the folder.",
+                subagent_type: "general",
+                owned_paths: [owned],
+                background: true,
+              },
+              context(seeded),
+            )
+            .pipe(
+              Effect.exit,
+              Effect.map((exit) => (Exit.isFailure(exit) ? Cause.pretty(exit.cause) : "")),
+            )
+        // Each conversation first runs a child of its own to completion, to resume later.
+        const finished = Effect.fnUntraced(function* (seeded: Effect.Success<ReturnType<typeof seed>>, owned: string) {
+          expect(yield* launch(seeded, owned)).toBe("")
+          const child = (yield* sessions.children(seeded.chat.id))[0].id
+          expect((yield* jobs.wait({ id: child })).info?.status).toBe("completed")
+          // The job's own watcher releases its claim once it settles, which may come just after this wait returns.
+          yield* pollWithTimeout(
+            Effect.sync(() => (TaskClaims.forTask(child).length === 0 ? true : undefined)),
+            "the finished child's claim was never released",
+          )
+          // The stubbed run wrote no transcript; a real one starts with its brief.
+          const started = MessageID.ascending()
+          yield* sessions.updateMessage({
+            id: started,
+            role: "user",
+            sessionID: child,
+            agent: "general",
+            model: ref,
+            time: { created: Date.now() },
+          })
+          yield* sessions.updatePart({
+            id: PartID.ascending(),
+            messageID: started,
+            sessionID: child,
+            type: "text",
+            text: "Tidy the folder.",
+          })
+          return child
+        })
+        const guestChild = yield* finished(guest, ".")
+        const ownerChild = yield* finished(owner, "vault")
+
+        const title = "Rotate the signing keys"
+        const keys = yield* sessions.create({ parentID: owner.chat.id })
+        const writer = yield* sessions.create({ parentID: owner.chat.id })
+        yield* audience.fenceIsolation({ sessionID: keys.id, actor: "owner" })
+        const held = [
+          TaskClaims.reserve({
+            tree: instance.worktree,
+            directory: instance.directory,
+            parentSessionID: owner.chat.id,
+            taskID: keys.id,
+            title,
+            paths: ["vault"],
+          }),
+          TaskClaims.reserve({
+            tree: instance.worktree,
+            directory: instance.directory,
+            parentSessionID: owner.chat.id,
+            taskID: writer.id,
+            title,
+            paths: [],
+          }),
+        ]
+        yield* Effect.addFinalizer(() => Effect.sync(() => held.forEach(TaskClaims.release)))
+        TaskClaims.bind(held[0], keys.id)
+        TaskClaims.bind(held[1], writer.id)
+        TaskClaims.touch(writer.id, path.join(instance.directory, "secrets", "notes.md"))
+        const resume = (seeded: Effect.Success<ReturnType<typeof seed>>, child: string) =>
+          manager
+            .resume(
+              { sessionID: seeded.chat.id, taskIDs: [child], text: "Carry on.", origin: "user", guest: false },
+              stubOps(),
+            )
+            .pipe(Effect.flip)
+
+        // The guest is refused both ways, told only which of its own paths overlaps another conversation's work.
+        const guestLaunch = yield* launch(guest, ".")
+        expect(guestLaunch).toContain(
+          [
+            "Subagent ownership overlaps active sibling work.",
+            "- . overlaps another conversation's running subagent",
+            "Wait for that task, add it to depends_on, or assign non-overlapping paths.",
+          ].join("\n"),
+        )
+        const guestResume = yield* resume(guest, guestChild)
+        expect(guestResume).toMatchObject({
+          code: "conflict",
+          message: [
+            "Owned paths overlap active work:",
+            "- . overlaps another conversation's running subagent",
+            "Wait for that task or stop it first.",
+          ].join("\n"),
+        })
+        for (const text of [guestLaunch, guestResume.message])
+          for (const hidden of ["Rotate", "vault", "secrets", "notes.md", keys.id, writer.id, owner.chat.id])
+            expect(text).not.toContain(hidden)
+
+        // The owner's own conversation is the claims' family: it is told which subagent, paths and files, as before.
+        expect(yield* launch(owner, ".")).toContain(
+          [
+            "Subagent ownership overlaps active sibling work.",
+            `- ${title}: . overlaps vault`,
+            `- ${title}: . overlaps ${path.join("secrets", "notes.md")}`,
+            "Wait for that task, add it to depends_on, or assign non-overlapping paths.",
+          ].join("\n"),
+        )
+        expect(yield* resume(owner, ownerChild)).toMatchObject({
+          code: "conflict",
+          message: [
+            "Owned paths overlap active work:",
+            `- ${title}: vault overlaps vault`,
+            "Wait for that task or stop it first.",
+          ].join("\n"),
+        })
+        // No refusal started anything: the owner has its finished child and the two holders, the guest its finished child.
+        expect((yield* sessions.children(owner.chat.id)).map((item) => item.id).sort()).toEqual(
+          [ownerChild, keys.id, writer.id].sort(),
+        )
+        expect((yield* sessions.children(guest.chat.id)).map((item) => item.id)).toEqual([guestChild])
+      }),
+  )
+
+  // TaskManager reads the relation from SessionAudience itself, not through the SessionTools hook, so this proves its
+  // own fail-closed path: a family that cannot be read names no claim, even one the caller's own conversation holds
+  // (which the case above shows named when the relation reads).
+  unreadable.instance("a resume overlap refusal names no subagent, path or file when the family cannot be read", () =>
+    Effect.gen(function* () {
+      const instance = yield* InstanceState.context
+      const sessions = yield* Session.Service
+      const jobs = yield* BackgroundJob.Service
+      const manager = yield* TaskManager.Service
+      const def = yield* singleTaskDefinition(yield* TaskTool)
+      const owner = yield* seed("Owner chat")
+      const launched = yield* def
+        .execute(
+          {
+            description: "Sweep the folder",
+            prompt: "Tidy the folder.",
+            subagent_type: "general",
+            owned_paths: ["."],
+            background: true,
+          },
+          taskContext({ sessionID: owner.chat.id, messageID: owner.assistant.id, promptOps: stubOps() }),
+        )
+        .pipe(Effect.exit)
+      expect(Exit.isSuccess(launched)).toBe(true)
+      const child = (yield* sessions.children(owner.chat.id))[0].id
+      expect((yield* jobs.wait({ id: child })).info?.status).toBe("completed")
+      // The job's own watcher releases its claim once it settles, which may come just after this wait returns.
+      yield* pollWithTimeout(
+        Effect.sync(() => (TaskClaims.forTask(child).length === 0 ? true : undefined)),
+        "the finished child's claim was never released",
+      )
+      // The stubbed run wrote no transcript; a real one starts with its brief.
+      const started = MessageID.ascending()
+      yield* sessions.updateMessage({
+        id: started,
+        role: "user",
+        sessionID: child,
+        agent: "general",
+        model: ref,
+        time: { created: Date.now() },
+      })
+      yield* sessions.updatePart({
+        id: PartID.ascending(),
+        messageID: started,
+        sessionID: child,
+        type: "text",
+        text: "Tidy the folder.",
+      })
+
+      // The owner's own conversation launched both holders: one owns `vault`, the other changed `secrets/notes.md`.
+      const keys = yield* sessions.create({ parentID: owner.chat.id })
+      const writer = yield* sessions.create({ parentID: owner.chat.id })
+      const held = [
+        TaskClaims.reserve({
+          tree: instance.worktree,
+          directory: instance.directory,
+          parentSessionID: owner.chat.id,
+          taskID: keys.id,
+          title: "Rotate the signing keys",
+          paths: ["vault"],
+        }),
+        TaskClaims.reserve({
+          tree: instance.worktree,
+          directory: instance.directory,
+          parentSessionID: owner.chat.id,
+          taskID: writer.id,
+          title: "Rotate the signing keys",
+          paths: [],
+        }),
+      ]
+      yield* Effect.addFinalizer(() => Effect.sync(() => held.forEach(TaskClaims.release)))
+      TaskClaims.bind(held[0], keys.id)
+      TaskClaims.bind(held[1], writer.id)
+      TaskClaims.touch(writer.id, path.join(instance.directory, "secrets", "notes.md"))
+
+      // The defect does not escape the resume: it is refused with the generic line, and nothing is named.
+      const refused = yield* manager
+        .resume(
+          { sessionID: owner.chat.id, taskIDs: [child], text: "Carry on.", origin: "user", guest: false },
+          stubOps(),
+        )
+        .pipe(Effect.flip)
+      expect(refused).toMatchObject({
+        code: "conflict",
+        message: [
+          "Owned paths overlap active work:",
+          "- . overlaps another conversation's running subagent",
+          "Wait for that task or stop it first.",
+        ].join("\n"),
+      })
+      for (const hidden of ["Rotate", "vault", "secrets", "notes.md", keys.id, writer.id, "database is locked"])
+        expect(refused.message).not.toContain(hidden)
+      // The refusal started nothing.
+      expect((yield* sessions.children(owner.chat.id)).map((item) => item.id).sort()).toEqual(
+        [child, keys.id, writer.id].sort(),
+      )
     }),
   )
 

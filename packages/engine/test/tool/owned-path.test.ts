@@ -4,6 +4,8 @@ import fs from "node:fs/promises"
 import { Effect, Exit } from "effect"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
 import { CrossSpawnSpawner } from "@vectordevai/core/cross-spawn-spawner"
+import { Database } from "@vectordevai/core/database/database"
+import { SessionAudience } from "@vectordevai/core/session/audience"
 import { InstanceState } from "@/effect/instance-state"
 import { TaskClaims } from "@/task/claims"
 import { FileLock } from "@/tool/file-lock"
@@ -25,6 +27,15 @@ const context: Tool.Context = {
   ask: () => Effect.void,
   ownedPaths: ["src/owned"],
 }
+// A caller with the family relation SessionTools binds to it, over the case's own database.
+const caller = (audience: SessionAudience.Interface, sessionID: string, parentID?: string): Tool.Context => ({
+  ...context,
+  sessionID: SessionID.make(sessionID),
+  ...(parentID ? { parentID: SessionID.make(parentID) } : {}),
+  ownedPaths: undefined,
+  inFamily: (id) => audience.inFamily(sessionID, id),
+})
+const refusal = <E>(exit: Exit.Exit<void, E>) => String(Exit.isFailure(exit) && exit.cause)
 
 describe("owned file mutation boundary", () => {
   it.instance("allows assigned descendants and rejects prefix lookalikes and traversal", () =>
@@ -72,6 +83,14 @@ describe("write ownership chokepoint", () => {
   it.instance("refuses a parent's write with the exact owned-path text and permits the child's helper", () =>
     Effect.gen(function* () {
       const instance = yield* InstanceState.context
+      const audience = SessionAudience.make(yield* Database.Service)
+      for (const [sessionID, parentID] of [
+        ["ses_root", undefined],
+        ["ses_owner", "ses_root"],
+        ["ses_helper", "ses_owner"],
+        ["ses_neighbour", undefined],
+      ] as const)
+        yield* audience.register({ sessionID, parentID })
       const file = path.join(instance.directory, "src/owned/new.ts")
       const owner = TaskClaims.reserve({
         tree: instance.worktree,
@@ -91,23 +110,35 @@ describe("write ownership chokepoint", () => {
       })
       TaskClaims.bind(owner, "ses_owner")
       TaskClaims.bind(child, "ses_helper")
-      const parent = { ...context, sessionID: SessionID.make("ses_root"), ownedPaths: undefined }
+      const parent = caller(audience, "ses_root")
       const refused = yield* assertWritable(parent, { files: [file] }).pipe(Effect.exit)
-      expect(String(Exit.isFailure(refused) && refused.cause)).toContain(
+      expect(refusal(refused)).toContain(
         `${file} belongs to the running subagent "Owner" (ses_owner), which owns src/owned. It was not changed. Wait for its report, send it the change with task_manage message, or stop it first.`,
       )
-      yield* assertWritable(
-        { ...parent, sessionID: SessionID.make("ses_helper"), parentID: SessionID.make("ses_owner") },
-        { files: [file] },
+      // Another conversation in the same folder is refused too, without the subagent's title, session or owned path.
+      const neighbour = refusal(
+        yield* assertWritable(caller(audience, "ses_neighbour"), { files: [file] }).pipe(Effect.exit),
       )
+      expect(neighbour).toContain(
+        `${file} belongs to another conversation's running subagent. It was not changed. Wait for it to finish.`,
+      )
+      for (const hidden of ['"Owner"', "ses_owner", "ses_root", "which owns"]) expect(neighbour).not.toContain(hidden)
+      yield* assertWritable(caller(audience, "ses_helper", "ses_owner"), { files: [file] })
       TaskClaims.release(child)
       TaskClaims.release(owner)
-    }),
+    }).pipe(Effect.provide(Database.layerFromPath(":memory:"))),
   )
 
   it.instance("refuses a sibling's changed file until its owner settles", () =>
     Effect.gen(function* () {
       const instance = yield* InstanceState.context
+      const audience = SessionAudience.make(yield* Database.Service)
+      for (const [sessionID, parentID] of [
+        ["ses_root", undefined],
+        ["ses_owner", "ses_root"],
+        ["ses_sibling", "ses_root"],
+      ] as const)
+        yield* audience.register({ sessionID, parentID })
       const file = path.join(instance.directory, "changed.ts")
       const claim = TaskClaims.reserve({
         tree: instance.worktree,
@@ -119,19 +150,46 @@ describe("write ownership chokepoint", () => {
       })
       TaskClaims.bind(claim, "ses_owner")
       FileState.wrote("ses_owner", file, undefined)
-      const sibling = {
-        ...context,
-        sessionID: SessionID.make("ses_sibling"),
-        parentID: SessionID.make("ses_root"),
-        ownedPaths: undefined,
-      }
+      const sibling = caller(audience, "ses_sibling", "ses_root")
       const refused = yield* assertWritable(sibling, { files: [file] }).pipe(Effect.exit)
-      expect(String(Exit.isFailure(refused) && refused.cause)).toContain(
+      expect(refusal(refused)).toContain(
         `${file} was changed by the running subagent "Owner" (ses_owner) and stays its file until it finishes. It was not changed. Report the change you need to the parent.`,
       )
+      // Without the family relation the refusal holds and names no one; a helper still reports to its parent.
+      const unnamed = refusal(
+        yield* assertWritable({ ...sibling, inFamily: undefined }, { files: [file] }).pipe(Effect.exit),
+      )
+      expect(unnamed).toContain(
+        `${file} was changed by another conversation's running subagent and stays its file until it finishes. It was not changed. Report the change you need to the parent.`,
+      )
+      expect(unnamed).not.toContain("ses_owner")
       TaskClaims.release(claim)
       yield* assertWritable(sibling, { files: [file] })
-    }),
+    }).pipe(Effect.provide(Database.layerFromPath(":memory:"))),
+  )
+
+  it.instance("a protected task tree is named only to the task's own family", () =>
+    Effect.gen(function* () {
+      const instance = yield* InstanceState.context
+      const audience = SessionAudience.make(yield* Database.Service)
+      yield* audience.register({ sessionID: "ses_root" })
+      yield* audience.register({ sessionID: "ses_kept", parentID: "ses_root" })
+      yield* audience.register({ sessionID: "ses_neighbour" })
+      const directory = path.join(instance.directory, "kept")
+      yield* Effect.acquireRelease(
+        Effect.sync(() => TaskClaims.protect({ taskID: "ses_kept", directories: [directory] })),
+        () => Effect.sync(() => TaskClaims.unprotect("ses_kept")),
+      )
+      const file = path.join(directory, "new.ts")
+      expect(
+        refusal(yield* assertWritable(caller(audience, "ses_root"), { files: [file] }).pipe(Effect.exit)),
+      ).toContain(`${file} is protected for subagent ses_kept. It was not changed.`)
+      const neighbour = refusal(
+        yield* assertWritable(caller(audience, "ses_neighbour"), { files: [file] }).pipe(Effect.exit),
+      )
+      expect(neighbour).toContain(`${file} is protected for another conversation's subagent. It was not changed.`)
+      expect(neighbour).not.toContain("ses_kept")
+    }).pipe(Effect.provide(Database.layerFromPath(":memory:"))),
   )
 
   it.instance("two unscoped writers recheck ownership inside the same file lock", () =>

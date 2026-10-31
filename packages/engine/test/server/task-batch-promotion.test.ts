@@ -79,6 +79,7 @@ const manager = (
     | Provider.Service
     | Agent.Service
     | TaskIsolation.Service
+    | SessionAudience.Service
   >
 ).pipe(
   Layer.provide([

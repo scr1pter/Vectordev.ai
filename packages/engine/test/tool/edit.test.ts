@@ -17,6 +17,8 @@ import * as Tool from "../../src/tool/tool"
 import { testEffect } from "../lib/effect"
 import { Watcher } from "@vectordevai/core/filesystem/watcher"
 import { FileState } from "../../src/tool/file-state"
+import { Database } from "@vectordevai/core/database/database"
+import { SessionAudience } from "@vectordevai/core/session/audience"
 
 const ctx = {
   sessionID: SessionID.make("ses_test-edit-session"),
@@ -657,9 +659,11 @@ describe("tool.edit", () => {
       }),
     )
 
-    it.instance("another session writing between read and edit is refused, naming it", () =>
+    it.instance("another session writing between read and edit is refused, naming it only to its own family", () =>
       Effect.gen(function* () {
         const test = yield* TestInstance
+        // The family relation as SessionTools binds it to the caller, over a database of its own.
+        const audience = SessionAudience.make(yield* Database.Service)
         const filepath = path.join(test.directory, "shared.ts")
         yield* put(filepath, "export const value = 1\n")
         const helper = {
@@ -668,18 +672,39 @@ describe("tool.edit", () => {
           parentID: ctx.sessionID,
           extra: { subagentTitle: "Bump the value" },
         }
+        const neighbour = {
+          ...ctx,
+          sessionID: SessionID.make("ses_test-edit-neighbour"),
+          inFamily: (id: string) => audience.inFamily("ses_test-edit-neighbour", id),
+        }
+        yield* audience.register({ sessionID: ctx.sessionID })
+        yield* audience.register({ sessionID: helper.sessionID, parentID: ctx.sessionID })
+        yield* audience.register({ sessionID: neighbour.sessionID })
         yield* seen(filepath, helper.sessionID)
+        yield* seen(filepath, neighbour.sessionID)
         yield* run({ filePath: filepath, oldString: "value = 1", newString: "value = 2" }, helper)
 
-        const exit = yield* run({ filePath: filepath, oldString: "value = 1", newString: "value = 3" }).pipe(
-          Effect.exit,
-        )
+        // Another conversation in the same folder is refused without the helper's title or session.
+        const unnamed = yield* run(
+          { filePath: filepath, oldString: "value = 1", newString: "value = 4" },
+          neighbour,
+        ).pipe(Effect.exit)
+        expect(Exit.isFailure(unnamed) && Cause.squash(unnamed.cause)).toMatchObject({
+          reason: "changed",
+          message: `${filepath} changed since you last read it, written by another conversation. Nothing was written; read it again first.`,
+        })
+        expect(yield* load(filepath)).toBe("export const value = 2\n")
+
+        const exit = yield* run(
+          { filePath: filepath, oldString: "value = 1", newString: "value = 3" },
+          { ...ctx, inFamily: (id) => audience.inFamily(ctx.sessionID, id) },
+        ).pipe(Effect.exit)
         expect(Exit.isFailure(exit) && Cause.squash(exit.cause)).toMatchObject({
           reason: "changed",
           message: `${filepath} changed since you last read it, written by the subagent "Bump the value" (ses_test-edit-helper). Nothing was written; read it again first.`,
         })
         expect(yield* load(filepath)).toBe("export const value = 2\n")
-      }),
+      }).pipe(Effect.provide(Database.layerFromPath(":memory:"))),
     )
 
     it.instance("a change by anyone else during the ask is refused and nothing is written", () =>
