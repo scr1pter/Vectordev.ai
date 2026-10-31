@@ -911,7 +911,7 @@ Remaining:
 - Correction (second review): until the second review this line said the resume's fail-closed catch was the SessionTools hook's catch and that mutation (e) covered it. It was a separate, untested copy. It is now `TaskClaims.familyOf`, shared with the hook, and task.test.ts proves the resume path on its own, so nothing about it remains open.
 - The settings-import owner question stays open, with Option A (fail closed) kept until the owner answers (CI5 entry).
 
-## 2026-10-31 MAIN (integrate origin/main 78526052) — status: origin/main `78526052` merged into multiagent-next by one merge commit (`git merge --no-ff`, no rebase); 14 conflicts resolved, keeping both sides' behaviour, the 3 generated ones regenerated with the repo tooling; every package typecheck named below and every focused file below green here (Linux); the terminal's lock-and-record admission since done in the MAIN step 11 entry below; Round A since done with no findings (MAIN Round A entry below); Round B, the push and the full run on the integration pending (Remaining); one owner question raised (terminals for subagents, below)
+## 2026-10-31 MAIN (integrate origin/main 78526052) — status: origin/main `78526052` merged into multiagent-next by one merge commit (`git merge --no-ff`, no rebase); 14 conflicts resolved, keeping both sides' behaviour, the 3 generated ones regenerated with the repo tooling; every package typecheck named below and every focused file below green here (Linux); the terminal's lock-and-record admission since done in the MAIN step 11 entry below; Round A since done with no findings (MAIN Round A entry below); Round B since done (MAIN Round B entry below); the push and the full run on the integration pending (Remaining); one owner question raised (terminals for subagents, below)
 
 Inputs. Branch head `76a6c0f5` (= origin/self-evolving), origin/main `78526052` (desktop 1.99.112 published; includes `dfc98974`), merge base `6eaf445a`; main was 28 commits ahead of the base and the branch 42. Before merging, run 41171765221 on `76a6c0f5` was read complete and green (WP28 Remaining). `git merge --no-ff origin/main` conflicted in exactly the 14 files a `git merge-tree` dry run had listed; the local-fit fixture (CI5's byte-identical port) merged cleanly.
 
@@ -984,12 +984,7 @@ CI-only:
 Remaining:
 - Terminal admission: done, a commit of its own after the merge commit (MAIN step 11 entry below).
 - Round A (the resolutions against both parents): done, no findings (MAIN Round A entry below).
-- Round B (main × multi-agent):
-  - the terminal lifetime finding above, and closing a family's terminals in a retiring checkout;
-  - the ask order;
-  - `FreeModelGuests.marked` in the terminal's own-terminal filter against WP28's durable guest input;
-  - Run Guard loop rules for helpers' terminal polling;
-  - helpers' per-call models under free-model guest routes and Vector Local Web None.
+- Round B (main × multi-agent): done (MAIN Round B entry below): the terminal lifetime finding and the ask order fixed, the other three items reviewed with no change.
 - After the merge commit: the push (a fast-forward of self-evolving, through the pre-push hook), a `workflow_dispatch` of test.yml on self-evolving, and a reading of every job.
 - The owner questions: terminals for subagents (above); settings import (CI5 entry), where Option A (fail closed) is kept until the owner answers.
 
@@ -1037,3 +1032,55 @@ Round A reads every hand-resolved conflict against both parents (merge base `6ea
 - `app/src/components/settings-v2/memory.tsx`: every changed line of both sides is in the merge unchanged except the one both changed, the repository erase line. It now names both sides' additions ("its failure memory, skills, workflow insights, Deep research runs and the app's model recommendations included"), as the MAIN entry records. The `all` line is main's ("…and about you, and every Deep research run"), which the branch had not changed.
 
 No source changed, so nothing was run for this round.
+
+## 2026-10-31 MAIN Round B (main × multi-agent) — status: two findings fixed in source, each with a regression that fails on the old source or under its mutation (sha256-checked) and passes with the fix; three items reviewed with no change; the engine typecheck and every changed file's tests green here (Linux); not committed yet (after the merge commit, step 11 and Round A)
+
+Round B reads main's features where they meet multi-agent code. The MAIN entry's Round B list had five items.
+
+1. Terminal lifetime (fixed). A terminal belongs to its location's services, which core's global `LayerMap` keeps for an hour after their last use, so an isolated helper's terminal outlived its checkout's save and retirement and could write into a checkout being saved or retired (handoff 7.3). Shown on the old source by the regression below: after the save, both of the helper's programs were still running and still writing.
+   - `TaskIsolation.quiesce`, the cancel-and-join step before every snapshot, disposal and retirement (`settle` before its snapshot, `retire` before it disposes the instance), now also closes the checkout's terminals. After the runs and jobs it cancels, so no family run opens a new one, it lists the terminals of the checkout's location and removes each (`Pty.remove`, which publishes the deletion the app's terminal panel shows), then waits for each program to end. A program that ignores the close's hangup or terminate is killed with its process group (`SIGKILL`) after a second on Linux and macOS; on Windows the close already ends the console's processes. After two more seconds a still-running program is logged and the save goes on. Waiting probes with signal 0, which sends nothing.
+   - A location nothing has used is not started for this (`RcMap.has` first), so a checkout with no terminal gets no watchers or plugins. Location services that failed to start have no terminal service; that is logged and nothing is closed.
+   - The map is the one the registry's terminal tool opens terminals in: `TaskIsolation.node` now depends on core's shared `locationServiceMapLayer`, which the shared memo map builds once, as the registry's own node does. A separately built map (mutation B3 below) finds no terminals.
+   - No Bun API: `process.kill` and Effect only, so the engine runtime stays Node-compatible. No public Protocol or HttpApi change.
+2. Ask order (fixed). In terminal `open` and `type`, the `unsandboxed_shell` ask (with `VECTOR_SHELL_SANDBOX` on) came before `ShellPermission`'s guest guards and the pre-ask ownership check, so a refused line still asked to run unsandboxed. `ShellPermission.ask` now takes an optional `first` ask, made after the guest guards and the ownership check and before the shell's own asks; the terminal passes its `unsandboxed_shell` ask there. An admitted line asks it first, as before, so terminal.test.ts's pinned order is unchanged. The shell tool passes none: its own `unsandboxed_shell` ask stays where it was, at spawn, when the sandbox cannot be applied.
+3. `FreeModelGuests.marked` in the terminal's own-terminal filter (reviewed, no change). It reads `SessionAudience.hasGuestInput` first, the durable guest input WP28 persists before admission, then the in-memory and saved marks over the lineage, so a restart or an owner runner processing queued guest input keeps the filter on.
+4. Run Guard loop rules for a helper's terminal polling (decided: kept as is). The doom-loop ask exempts terminal polling (`POLLING_ACTIONS`); SpendGuard's loop rule does not, and a helper's step is checked on its launch run (WP4: "Loop detection belongs to the launch run"), so three polls with the same input and the same output, with nothing new and no file edit between them, pause the whole run. Kept because:
+   - only identical input and identical output count, and a polled program whose output moves on changes both (the cursor, and the text a `read` or `wait` returns), so polling a program that makes progress never trips it;
+   - three identical answers from an idle program (each `wait` blocks up to 60 s) are paid steps with no progress, which the Run Guard exists to stop, and its stop is a pause the owner resumes, not a loss of work;
+   - exempting terminal polling would let a helper spend the run's budget waiting on a hung program, and main applies the same rule to the root session's own polling.
+5. Helpers' per-call models under free-model guest routes and Vector Local (reviewed, no change). In `SubagentModel.choose`:
+   - On a free route (the parent's step on a free model), a brief that names another model is refused ("You run on a free model, and your subagents stay on it."). An agent's pinned model and the small-model routing are skipped, so every child stays on the parent's free model; research agents take the same route.
+   - With a guest in the tree (`guests.marked(root.id)`, durable as in item 3), a named model must be strictly cheaper, and a model that may train on prompts is refused. An agent's own pinned model is the owner's configuration and is not narrowed (5.E.1, unchanged by the merge).
+   - Under Vector Local, a named model must be on the parent's provider. The provider refuses any model whose requests would leave the listed model servers (off in Vector Local) before a stream starts, an agent's pinned model included. Web access None governs tools' network access, not inference, and the terminal and shell refusals under it apply to helpers' calls as to the root's.
+
+Contract corrections (intent kept):
+- WP27 / handoff 7.3 "stopping/joining descendants before snapshot/dispose/remove/dropWork" now also covers the checkout's terminals: closed and waited for before the snapshot, as runs and jobs are cancelled and joined. Not seen, as for the shell tool (not an OS sandbox): a process a terminal's program starts outside its process group, or detached from the terminal (`nohup`, `setsid`, a job-control shell's background jobs that ignore the hangup). A terminal another location opened with its starting folder inside the checkout is not closed; only the owner's conversation can open one there (the guest guards refuse a guest family), and it stays the owner's.
+- F.3 and the MAIN entry's terminal ask order: the terminal's `unsandboxed_shell` ask now comes after every refusal (guest guards, ownership check) and before the shell's asks.
+- Terminals for subagents (spec 5.H) stays an owner question (MAIN entry). The fix ends an isolated helper's terminals when its checkout is saved; a helper that works in the parent's folder uses the parent's location, whose terminals the parent's conversation keeps.
+
+Tests:
+- New `engine/test/task/isolation-terminal.test.ts`, 1 case: "saving an isolated helper's checkout closes its terminals and waits for their programs; the parent's stay". Real Git, instances, sessions, isolation and terminals, the terminal tool through `SessionTools.resolve` from the registry, with the helper's calls in its checkout's instance (as TaskPlace routes them); no model. The helper opens two `/bin/sh` counters in its checkout, one deaf to hangup and terminate (`trap '' HUP TERM`); the parent opens one at home. With each counted at least three times and all three running, `settle`: the state is `changed`; both of the helper's programs have ended when it returns and the parent's still runs; neither file changes over the next 400 ms; the saved commit holds each file's last bytes; the checkout's location lists no terminal and the parent's still lists its own. Gated off Windows, as terminal.test.ts's `ptyTest` is. A finalizer kills any counter still running, so a failing run leaves no process behind.
+- `engine/test/session/terminal-admission.test.ts`, a sixth case: "with the shell sandbox on, a line the guest guard or the ownership check refuses is never asked to run unsandboxed". With `VECTOR_SHELL_SANDBOX=1`: a guest's `open` in a link to a fenced folder is refused with no ask; a guest's typed `cat < alias/notes.txt` is refused with only the `terminal_input` ask, and the shell never sees it; a helper's `open` and typed line that write a sibling's `vault` file are refused with no ask and with only `terminal_input`; an admitted terminal's first ask is `unsandboxed_shell`, once; an admitted typed line asks `terminal_input`, then `unsandboxed_shell`, then the shell's asks. The link and the redirect keep the private path out of the arguments, so ShellPermission's read guard, not the argument check, is what refuses.
+- `engine/test/task/isolation.test.ts`: its layer now provides the shared location services, which its direct `TaskIsolation.make` runs need. No case changed.
+
+Mutations (each applied to the fixed source, run, reverted, and checked by sha256 against the fixed copy):
+- B1, `quiesce` without the terminal close: the regression fails (a helper's program still running after the save).
+- B2, no `SIGKILL` after the grace period: fails at the deaf counter.
+- B3, TaskIsolation's node given its own `buildLocationServiceMap()`: fails (it finds no terminals), so the shared instance is what makes the close reach them.
+- A1, the step 11 `terminal.ts` (unsandboxed ask before `permission.ask`): the sixth case fails at the guest's `open`. A2, the old order for typed lines only: fails at the guest's typed line. A3, `first` asked before the ownership check in `ask()`: fails at the helper's `open`, after the guest checks pass.
+- The runs of B1, B3 and B2 (twice) had left deaf counters running after the test (four, found by their command line and killed by process group); the finalizer above was then added, and B2 rerun to confirm a failing run leaves none.
+
+Runs (2026-10-31; Linux, uid 0; one file at a time through the lock wrapper, from packages/engine, `--timeout 30000`; fresh XDG roots per run under `/tmp/vector-engine/main-roundb/`, TMPDIR `/var/tmp/vector-engine/main-roundb`):
+- isolation-terminal 1/1; terminal-admission 6/6; terminal.test.ts's four cases that start no Bun program, by name, 4/4 (22 filtered out), the pinned sandbox ask order among them;
+- shell.test.ts 51/51 with the same 12 Bun cases filtered out by name as in the MAIN entry; shell-ownership 36/36; shell-writes 4/4;
+- isolation 89/89; isolation-admission 7/7; isolation-recovery 3/3; isolation-merge-ask 2/2; server task-isolation 4/4;
+- tool/task.test.ts 152/152 (TaskIsolation through the registry, with its new dependency).
+- Engine typecheck green.
+- Handover check on the finished tree, 2026-10-31, under the same conditions with XDG roots under `/tmp/vector-engine/main-handover/` and TMPDIR `/var/tmp/vector-engine/main-handover`. The tree is the merge in the index with step 11, Round A and this round applied.
+  - The engine, core, server, schema, app and desktop typechecks are green, run one at a time.
+  - isolation-terminal 1/1 and terminal-admission 6/6 pass again, and no counter is left running afterwards.
+  - `TaskIsolation.node` and the registry get the same map in the app's builds too. `LayerNode.compile` resolves a replacement by node name, so when `AppNodeBuilder` replaces the location map, both nodes get that one replacement. Otherwise both build the same `locationServiceMapLayer` through the shared memo map.
+
+CI-only: terminal.test.ts's 22 cases that start Bun; task-manage.test.ts (it starts a Bun subprocess); the Windows engine shards (the two terminal files do not run there; the isolation files do, with `quiesce`'s close finding no terminals).
+
+Remaining: as the MAIN entry's Remaining (the merge commit, then step 11, Round A and this round as their own commits, the push and the full run).

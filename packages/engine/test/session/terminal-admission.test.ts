@@ -426,4 +426,73 @@ if (process.platform !== "win32")
         }),
       { ...options, git: true },
     )
+
+    it.instance(
+      "with the shell sandbox on, a line the guest guard or the ownership check refuses is never asked to run unsandboxed",
+      () =>
+        Effect.gen(function* () {
+          yield* Effect.acquireRelease(
+            Effect.sync(() => {
+              const previous = process.env.VECTOR_SHELL_SANDBOX
+              process.env.VECTOR_SHELL_SANDBOX = "1"
+              return previous
+            }),
+            (previous) =>
+              Effect.sync(() => {
+                if (previous === undefined) delete process.env.VECTOR_SHELL_SANDBOX
+                else process.env.VECTOR_SHELL_SANDBOX = previous
+              }),
+          )
+          const instance = yield* InstanceState.context
+          const sessions = yield* Session.Service
+          const audience = yield* SessionAudience.Service
+          // A private folder the guest's arguments never spell (a link to it), so only ShellPermission's read guard
+          // refuses it, after the arguments' own check.
+          const secret = yield* tmpdirScoped()
+          yield* Effect.promise(() => fs.writeFile(path.join(secret, "notes.txt"), "private\n"))
+          yield* audience.fenceIsolation({ sessionID: "ses_private_sandbox", actor: "owner", directory: secret })
+          yield* Effect.promise(() => fs.symlink(secret, path.join(instance.directory, "alias"), "dir"))
+          const owner = yield* sessions.create({ title: "Owner chat" })
+          const writer = yield* helper(owner, "Write the report")
+          yield* helper(owner, "Guard the vault", ["vault"])
+          const guest = yield* sessions.create({ title: "Guest chat" })
+          yield* audience.markGuest(guest.id)
+
+          // The guest guard: a terminal in the private folder, or a line that lists it.
+          const visitor: Asked[] = []
+          const outside = yield* terminal(guest, visitor)
+          expect(refusal(yield* outside({ ...SH, cwd: "alias" }))).toContain(REFUSAL)
+          expect(visitor).toEqual([])
+          const shell = result(yield* outside(SH)).metadata.id!
+          visitor.length = 0
+          expect(
+            refusal(yield* outside({ action: "type", id: shell, text: "cat < alias/notes.txt", enter: true })),
+          ).toContain(REFUSAL)
+          expect(visitor.map((item) => item.permission)).toEqual(["terminal_input"])
+          expect(yield* settled(outside, shell)).not.toContain("private")
+
+          // The ownership check: a command line or a typed line that writes the sibling's file.
+          const asked: Asked[] = []
+          const call = yield* terminal(writer, asked)
+          expect(refusal(yield* call({ action: "open", command: "printf x > vault/new.ts" }))).toContain(
+            "which owns vault",
+          )
+          expect(asked).toEqual([])
+          const id = result(yield* call(SH)).metadata.id!
+          // An admitted terminal asks to run unsandboxed first, before the shell's own asks.
+          expect(asked[0]).toEqual({ permission: "unsandboxed_shell", patterns: [process.platform] })
+          expect(asked.filter((item) => item.permission === "unsandboxed_shell")).toHaveLength(1)
+          asked.length = 0
+          expect(refusal(yield* call({ action: "type", id, text: "printf x > vault/new.ts", enter: true }))).toContain(
+            "which owns vault",
+          )
+          expect(asked.map((item) => item.permission)).toEqual(["terminal_input"])
+          asked.length = 0
+          result(yield* call({ action: "type", id, text: "echo admitted", enter: true }))
+          expect(asked.map((item) => item.permission).slice(0, 2)).toEqual(["terminal_input", "unsandboxed_shell"])
+          expect(asked.filter((item) => item.permission === "unsandboxed_shell")).toHaveLength(1)
+          expect(asked.length).toBeGreaterThan(2)
+        }),
+      options,
+    )
   })

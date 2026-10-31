@@ -255,8 +255,13 @@ export const TerminalTool = Tool.define<
           params,
           `Vector did not open the terminal: ${Shell.name(shell)} cannot pass one of the arguments literally. Run the command line instead.`,
         )
-      if (Sandbox.sandboxEnabled()) yield* ctx.ask(unsandboxed(line || shell))
-      const scan = yield* permission.ask(ctx, { command: line, cwd, shell })
+      // A terminal runs outside the shell sandbox: with it on, that is asked after the refusals, before the shell asks.
+      const scan = yield* permission.ask(ctx, {
+        command: line,
+        cwd,
+        shell,
+        ...(Sandbox.sandboxEnabled() ? { first: unsandboxed(line || shell) } : {}),
+      })
       const extra = yield* plugin.trigger(
         "shell.env",
         { cwd, sessionID: ctx.sessionID, callID: ctx.callID },
@@ -354,12 +359,12 @@ export const TerminalTool = Tool.define<
       )
       const scans = yield* Effect.forEach(typed.lines, (line) =>
         Effect.gen(function* () {
-          if (Sandbox.sandboxEnabled()) yield* ctx.ask(unsandboxed(line.text))
           const recalled = line.recalled === true || HISTORY.test(line.text)
           return yield* permission.ask(ctx, {
             command: line.text,
             cwd: info.cwd,
             shell,
+            ...(Sandbox.sandboxEnabled() ? { first: unsandboxed(line.text) } : {}),
             unread: !line.exact || recalled || FOREIGN.has(Shell.name(info.command)),
             // A word of an unknown line that tab completion may have finished as a cloud CLI's name (`verc` and tab).
             recalled:

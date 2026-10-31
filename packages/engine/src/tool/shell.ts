@@ -30,6 +30,7 @@ import { ShellPrompt, type Parameters } from "./shell/prompt"
 import { BashArity } from "@/permission/arity"
 import { Egress } from "@vectordevai/core/local-mode/egress"
 import { PermissionPolicy } from "@vectordevai/schema/permission-policy"
+import type { PermissionV1 } from "@vectordevai/core/v1/permission"
 import { LocalCommand } from "@vectordevai/core/local-mode/command"
 
 export { Parameters } from "./shell/prompt"
@@ -1051,9 +1052,15 @@ const assertOwnership = (ctx: Tool.Context, scans: readonly Scan[]) =>
 const ask = Effect.fn("ShellTool.ask")(function* (
   ctx: Tool.Context,
   scan: Scan,
-  input: { readonly command: string; readonly unread?: boolean; readonly recalled?: boolean },
+  input: {
+    readonly command: string
+    readonly unread?: boolean
+    readonly recalled?: boolean
+    readonly first?: Omit<PermissionV1.Request, "id" | "sessionID" | "tool">
+  },
 ) {
   yield* assertOwnership(ctx, [scan])
+  if (input.first) yield* ctx.ask(input.first)
   if (scan.dirs.size > 0) {
     const directories = Array.from(scan.dirs)
     const globs = directories.map((dir) => {
@@ -1783,6 +1790,9 @@ export const ShellPermission = Effect.gen(function* () {
         // The shell may have filled the line from its history, its kill ring or a completion, so it may run any command,
         // a cloud CLI among them: it also asks under PermissionPolicy.CLOUD_UNREAD, every time.
         readonly recalled?: boolean
+        // The caller's own ask, made after every refusal (the guest guards above and the ownership check) and before
+        // the shell's asks, so a refused line asks nothing: the terminal's ask to run outside the shell sandbox.
+        readonly first?: Omit<PermissionV1.Request, "id" | "sessionID" | "tool">
       },
     ) {
       const instance = yield* InstanceState.context

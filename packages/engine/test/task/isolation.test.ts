@@ -9,6 +9,7 @@ import { AppNodeBuilder } from "@vectordevai/core/effect/app-node-builder"
 import { CrossSpawnSpawner } from "@vectordevai/core/cross-spawn-spawner"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
 import { Global } from "@vectordevai/core/global"
+import { LocationServiceMap, locationServiceMapLayer } from "@vectordevai/core/location-services"
 import { WorkspaceTrust } from "@vectordevai/core/workspace-trust/workspace-trust"
 import { Auth } from "@/auth"
 import { Agent } from "@/agent/agent"
@@ -34,9 +35,13 @@ import { testEffect } from "../lib/effect"
 // Bootstrap is independently covered by the real LSP/MCP/snapshot isolation files. These tests use real Git,
 // instances, sessions, agents and jobs, and never invoke a model or a package installation.
 const bootstrap = Layer.succeed(InstanceBootstrap.Service, { run: Effect.void })
+// TaskIsolation.make, which some tests run with a service replaced, closes a retiring checkout's terminals in these
+// location services: the shared layer, so the same instance its node gets.
+const locations = LayerNode.make({ service: LocationServiceMap.Service, layer: locationServiceMapLayer, deps: [] })
 const layer = AppNodeBuilder.build(
   LayerNode.group([
     TaskIsolation.node,
+    locations,
     Worktree.node,
     InstanceStore.node,
     Session.node,

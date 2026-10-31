@@ -19,7 +19,7 @@ import {
   unlink,
   writeFile,
 } from "node:fs/promises"
-import { Cause, Context, Effect, Layer, Option, Schema, Scope, Stream } from "effect"
+import { Cause, Context, Effect, Layer, Option, RcMap, Schema, Scope, Stream } from "effect"
 import { createTwoFilesPatch, diffLines } from "diff"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
 import { KeyedMutex } from "@vectordevai/core/effect/keyed-mutex"
@@ -34,6 +34,10 @@ import { SessionSchema } from "@vectordevai/core/session/schema"
 import { eq } from "drizzle-orm"
 import { FileSystem } from "@vectordevai/core/filesystem"
 import { Watcher } from "@vectordevai/core/filesystem/watcher"
+import { Location } from "@vectordevai/core/location"
+import { LocationServiceMap, locationServiceMapLayer } from "@vectordevai/core/location-services"
+import { Pty } from "@vectordevai/core/pty"
+import { AbsolutePath } from "@vectordevai/core/schema"
 import { InstanceRef } from "@/effect/instance-ref"
 import { Git } from "@/git"
 import { Config } from "@/config/config"
@@ -473,10 +477,14 @@ const instances = Effect.fn("TaskIsolation.instances")(function* (): Effect.fn.R
   return yield* Effect.promise(() => AppRuntime.runPromise(InstanceStore.Service))
 })
 
-/** Cancel and join every runner/job sharing this work context BEFORE snapshot, disposal or placement retirement. */
+/**
+ * Cancel and join every runner/job sharing this work context, then close its terminals, BEFORE snapshot, disposal or
+ * placement retirement.
+ */
 export const quiesce = Effect.fn("TaskIsolation.quiesce")(function* (
   taskID: string,
   work: InstanceContext,
+  locations: LocationServiceMap.Service["Service"],
 ): Effect.fn.Return<void> {
   const [{ BackgroundJob }, { SessionRunState }, { SessionID }] = yield* Effect.promise(() =>
     Promise.all([import("@/background/job"), import("@/session/run-state"), import("@/session/schema")]),
@@ -506,11 +514,86 @@ export const quiesce = Effect.fn("TaskIsolation.quiesce")(function* (
     (job) => jobs.cancel(job.id).pipe(Effect.provideService(InstanceRef, work)),
     { concurrency: "unbounded", discard: true },
   )
+  yield* closeTerminals(work, locations)
 })
+
+/**
+ * A checkout's terminals belong to its location's services, the ones the terminal tool opens them in, and core keeps
+ * those for an hour after their last use, so nothing else would end a program still writing in a checkout that is being
+ * saved or retired. With the runs above stopped, no new one opens: each is closed, and its program waited for.
+ */
+const closeTerminals = Effect.fn("TaskIsolation.closeTerminals")(function* (
+  work: InstanceContext,
+  locations: LocationServiceMap.Service["Service"],
+) {
+  const ref = Location.Ref.make({ directory: AbsolutePath.make(work.directory) })
+  // A location nothing has used has no terminals, and getting it here would start its services in the checkout.
+  if (!(yield* RcMap.has(locations.rcMap, ref))) return
+  const closed = yield* Effect.gen(function* () {
+    const pty = yield* Pty.Service
+    const terminals = yield* pty.list()
+    yield* Effect.forEach(
+      terminals,
+      (info) => pty.remove(info.id).pipe(Effect.catchTag("Pty.NotFoundError", () => Effect.void)),
+      { discard: true },
+    )
+    return terminals.filter((info) => info.status === "running")
+  }).pipe(
+    Effect.provide(locations.get(ref)),
+    // Location services that failed to start have no terminal service, so no terminals.
+    Effect.catch((cause) =>
+      Effect.logWarning("isolated checkout's location services did not start", {
+        directory: work.directory,
+        cause,
+      }).pipe(Effect.as([])),
+    ),
+  )
+  yield* Effect.forEach(closed, (info) => ended(info.pid), { concurrency: "unbounded", discard: true })
+})
+
+// The close sent the terminal's program the terminal library's hangup or terminate. One that ignores it is killed, with
+// its process group, after a second; on Windows the close already ends the console's processes. Waiting probes with
+// signal 0, which sends nothing.
+const ended = Effect.fn("TaskIsolation.ended")(function* (pid: number) {
+  if (yield* exited(pid, 50)) return
+  if (process.platform !== "win32") kill(pid)
+  if (yield* exited(pid, 100)) return
+  yield* Effect.logWarning("a closed terminal's program is still running", { pid })
+})
+
+const exited = (pid: number, polls: number) =>
+  Effect.gen(function* () {
+    for (let poll = 0; poll < polls; poll++) {
+      if (!alive(pid)) return true
+      yield* Effect.sleep("20 millis")
+    }
+    return !alive(pid)
+  })
+
+function alive(pid: number) {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (cause) {
+    return (cause as NodeJS.ErrnoException).code === "EPERM"
+  }
+}
+
+// The program may end between the probe and the kill; then there is nothing left to kill.
+function kill(pid: number) {
+  try {
+    process.kill(-pid, "SIGKILL")
+  } catch {
+    try {
+      process.kill(pid, "SIGKILL")
+    } catch {}
+  }
+}
 
 export const make = Effect.gen(function* () {
   const git = yield* Git.Service
   const config = yield* Config.Service
+  const locations = yield* LocationServiceMap.Service
   const audience = yield* SessionAudience.Service
   const database = yield* Database.Service
   const agents = yield* Agent.Service
@@ -1255,7 +1338,7 @@ export const make = Effect.gen(function* () {
   const retire = Effect.fn("TaskIsolation.retire")(function* (record: Record) {
     const work = active.get(record.taskID) ?? TaskPlace.get(record.taskID)?.work
     if (work && FileLock.key(work.directory) === FileLock.key(record.directory)) {
-      yield* quiesce(record.taskID, work)
+      yield* quiesce(record.taskID, work, locations)
       const store = yield* instances()
       yield* store.dispose(work)
     }
@@ -1428,7 +1511,7 @@ export const make = Effect.gen(function* () {
         const placed = active.get(record.taskID) ?? TaskPlace.get(record.taskID)?.work
         const work = placed && FileLock.key(placed.directory) === FileLock.key(record.directory) ? placed : undefined
         // The running parent's own finalizer calls settle; only descendants are stopped here.
-        if (work) yield* quiesce(record.taskID, work)
+        if (work) yield* quiesce(record.taskID, work, locations)
         const omitted = yield* unsupported(record)
         if (omitted.length) {
           const failed = retained(record, omitted, input.attempt)
@@ -2720,9 +2803,16 @@ export const complete = Effect.fn("TaskIsolation.complete")(function* (input: {
   yield* save
 })
 export const layer = Layer.effect(Service, make)
+// The location services the terminal tool opens terminals in (tool/registry.ts), the same instance by the shared layer,
+// so a retiring checkout's terminals are closed where they were opened.
+const locationServiceMapNode = LayerNode.make({
+  service: LocationServiceMap.Service,
+  layer: locationServiceMapLayer,
+  deps: [],
+})
 export const node = LayerNode.make({
   service: Service,
   layer,
-  deps: [Git.node, Config.node, Agent.node, SessionAudience.node, Database.node],
+  deps: [Git.node, Config.node, Agent.node, SessionAudience.node, Database.node, locationServiceMapNode],
 })
 export * as TaskIsolation from "./isolation"
