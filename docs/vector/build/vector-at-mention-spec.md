@@ -685,24 +685,37 @@ Codium's registry maps every 401 or 403 from us to `MODEL_PLAN_RUN_EXPIRED` anyw
 ## 2.5 Repo bindings, bind codes and tickets: `api/_lib/cloud-agents-binding.ts`, `api/_lib/cloud-agents-start.ts`
 
 ```ts
+type SuspendReason = "transferred" | "deleted" | "binder-left"
 type RepoBinding = { repositoryId: string; ownerId: string; repository: string; account: string
-  visibility: "public" | "private" | "internal"   // from the bind token's repository_visibility
+  visibility: "public" | "private" | "internal"   // from the bind token's repository_visibility; "private" when absent
   defaultRef: string                              // "refs/heads/<default branch>", verified at bind (INV-S11)
   generation: number; binder: { githubId: string; login: string }
-  workflowVersion: string; boundAt: number; lastUsedAt?: number
-  suspended?: "transferred" | "deleted" | "binder-left" }
+  workflowVersion: string; boundAt: number; lastUsedAt?: number   // times in ms
+  suspended?: SuspendReason }
+type BindIdentity = Pick<GithubIdentity, "repository" | "repositoryId" | "ownerId" | "actor" | "actorId" | "ref">
+  & { repositoryVisibility?: "public" | "private" | "internal" }   // structural: every GithubIdentity is one (V08 adds the claim)
+type RedeemInput = { code: string
+  account: string                                 // the code's account, as peekBindCode returned it
+  current?: string                                // the account bound when the caller applied O6; absent when unbound
+  identity: BindIdentity; workflowVersion: string
+  takeover: { adminVerified: boolean; allowanceInactive: boolean }; now: number }
+// Every function below except takeoverAllowed and the key builders takes a trailing `store = persistentStore`.
 createBindCode(input: { account: string; repository: string; repositoryId?: string; githubUserId?: string
-  defaultRef?: string; now }): Promise<{ code: string; expiresAt: number }>
-peekBindCode(code: string, identity: GithubIdentity): Promise<{ account: string; defaultRef?: string }>   // GET plus match checks; consumes nothing
-redeemAndBind(input: { code: string; identity: GithubIdentity; workflowVersion: string
-  takeover: { adminVerified: boolean; allowanceInactive: boolean }; now })
-  : Promise<RepoBinding>   // one EVAL: GETDEL the code, re-check O6, INCR the generation, write the binding
-bindingFor(repositoryId: string): Promise<RepoBinding | undefined>
-bindingsForAccount(account: string): Promise<RepoBinding[]>
-revokeBinding(repositoryId: string, account: string): Promise<boolean>   // only the binder; bumps generation
-touchBinding(repositoryId: string, now: number): Promise<void>
-suspendBinding(repositoryId: string, reason: "transferred" | "deleted" | "binder-left"): Promise<void>
-renameBinding(repositoryId: string, repository: string): Promise<void>
+  defaultRef?: string; now: number }, store?): Promise<{ code: string; expiresAt: number }>
+peekBindCode(code: string, identity: BindIdentity, now = Date.now(), store?)
+  : Promise<{ account: string; defaultRef?: string }>   // GET plus match checks; consumes nothing
+takeoverAllowed(current: RepoBinding | undefined, input: { account: string; ownerId: string
+  takeover: { adminVerified: boolean; allowanceInactive: boolean }; now: number }): boolean   // pure: the O6 rule below
+recordRepoBinding(input: RedeemInput, store?): Promise<{ ok: true; binding: RepoBinding }
+  | { ok: false; refusal: "code" | "elsewhere" | "changed" }>   // one EVAL: consume the code, re-check the match and O6, INCR the generation, write the binding
+redeemAndBind(input: RedeemInput, store?): Promise<RepoBinding>   // "code" → 403 BIND_CODE_INVALID; "elsewhere", "changed" → 409 REPO_BOUND_ELSEWHERE
+bindingFor(repositoryId: string, store?): Promise<RepoBinding | undefined>
+bindingsForAccount(account: string, store?): Promise<RepoBinding[]>   // newest boundAt first
+revokeBinding(repositoryId: string, account: string, store?): Promise<boolean>   // only the binder; bumps generation
+touchBinding(repositoryId: string, now: number, store?): Promise<void>
+suspendBinding(binding: Pick<RepoBinding, "repositoryId" | "generation" | "account">, reason: SuspendReason, store?)
+  : Promise<void>   // only the binding the caller read; once it is gone or replaced, only a binder-left acts, on the account's set
+renameBinding(repositoryId: string, repository: string, store?): Promise<void>
 bindingKey(repositoryId: string): string; generationKey(repositoryId: string): string   // key builders for V07
 ```
 
@@ -712,9 +725,15 @@ bindingKey(repositoryId: string): string; generationKey(repositoryId: string): s
 - Format: `vbc_` plus 32 random bytes in base64url, shown once.
 - The server stores only `sha256(code)`, with `{account, repository, repositoryId?, githubUserId?, defaultRef?, exp}`, for 600 s.
 - Steps that can fail (the takeover check, the App or default-branch check, `consumeGithubOidc`) only peek. The code is consumed once, by `redeemAndBind`, in the same EVAL that writes the binding, so a failure never burns it and two parallel binds yield exactly one binding.
-- One binder per `repository_id`. A bind from another account follows decision O6. A rebind by the same account bumps the generation.
+- One binder per `repository_id`. A bind from another account follows decision O6. A rebind by the same account bumps the generation and writes a fresh binding (`boundAt = now`, no `lastUsedAt`, no `suspended`).
+- **O6 as built.** A binding's last use is `max(lastUsedAt ?? 0, boundAt)`, so a binding never used yet is protected for 30 days from its bind. A takeover is refused while `now − lastUse < 30 days` and allowed from exactly 30 days. A binding whose `ownerId` differs from the bind token's `repository_owner_id` counts as suspended (`transferred`). `recordRepoBinding` takes the account the caller judged O6 against as `current`, and refuses with `changed` before any write when the repository's binder has since become another account.
+- Every value is validated, with the reader's own rules, before any store command, and every key a script touches is passed in `KEYS`. Each function sends one store command, except `bindingsForAccount`, which reads the account's set and then the bindings it names.
 
-**Generations.** A generation is an `INCR` counter that is never deleted. Every bind, unbind and takeover bumps it, so every earlier `vrt_` token dies (amendment 11).
+**Generations.** A generation is an `INCR` counter that is never deleted. Every bind (rebind and takeover included), every unbind, and a binding's first suspension bump it, so every earlier `vrt_` token dies (amendment 11). Later suspensions do not bump it. While a binding exists, its `generation` field equals `GET gen:<repositoryId>`.
+
+**Suspensions.** The first reason is kept, except that `binder-left` replaces any other reason and is never replaced, so the repository's detail stays hidden from a former binder (INV-P3). A suspension names the binding it was decided against, as the caller read it, and applies only to that binding: the stored generation must equal the one read, or be one more on a suspended binding (that binding's own first suspension moved it), and the stored account must be the one read. After a rebind, a takeover, an unbind, or an unbind and a new bind, it leaves the binding and the counter alone; a `binder-left` then still reaches the read account's set (below). Suspending, renaming or touching an unknown repository is a no-op.
+
+**Binder-left outlives the binding.** The script that records `binder-left` also adds the repository id to the binding account's `binder-left:<account>` set (2.7). An unbind or a takeover deletes the binding, while the account's run records stay (2.18), so the set, not the binding, is what keeps them hidden (2.16). The member is the account's fact, so a `binder-left` decided against a binding that has since gone (the counter passed its generation) or been replaced by another account's later binding still adds it, and the set ends the same whichever script lands first; only a later binding of the same account skips it. A later bind of the repository by the same account removes its member, because that binding's binder has write access again; nothing else does, except the account's erasure.
 
 **Tickets** (`startCloudRun`):
 - Format: `vtk_` plus 32 random bytes.
@@ -785,10 +804,11 @@ It is typed locally and structurally against Codium's `GatewayHook` (`api/_lib/m
 
 | Key | Type | Holds | Expiry |
 |---|---|---|---|
-| `binding:<repositoryId>` | HASH | `RepoBinding` fields | none (removed on unbind or erase) |
+| `binding:<repositoryId>` | HASH | `RepoBinding` fields (below) | none (removed on unbind or erase) |
 | `gen:<repositoryId>` | STRING | generation counter | none (no personal data) |
 | `bindings:<account>` | SET | repository ids | none |
-| `bind-code:<sha256>` | STRING | JSON | 600 s |
+| `binder-left:<account>` | SET | repository ids whose binder lost access while bound to the account (2.5) | none (a member goes when the account binds that repository again; the key on erase) |
+| `bind-code:<sha256 hex of the whole code>` | STRING | JSON (below) | 600 s |
 | `ticket:<sha256>` | STRING | JSON | 900 s |
 | `binder-ok:<repositoryId>` | STRING | `1`: the binder's write access was verified through the App | 1 hour |
 | `default-branch:<repositoryId>` | STRING | a public repository's default branch, read without credentials | 1 hour |
@@ -798,6 +818,11 @@ It is typed locally and structurally against Codium's `GatewayHook` (`api/_lib/m
 | `run:<rid>` | HASH | run record (2.16) | 90 days |
 | `run:<rid>:actor` | HASH | triggering GitHub login and id | 90 days |
 | `runs:<account>` | ZSET | `rid` by start time, trimmed to 200 | 90 days, refreshed |
+
+The binding keys hold strings only; ids are decimal and times are milliseconds.
+- `binding:<repositoryId>` fields: `repositoryId`, `ownerId`, `repository`, `account`, `visibility`, `defaultRef`, `generation`, `binderGithubId`, `binderLogin`, `workflowVersion`, `boundAt`, and optionally `lastUsedAt` and `suspended`. No other field is ever written; a reader answers 503 for an unknown, missing or malformed one.
+- `bind-code:<sha256>` JSON: `{account, repository, repositoryId?, githubUserId?, defaultRef?, exp}`, with ids as strings and `exp` in ms. The code itself is never stored.
+- While a binding exists, its `generation` field equals `GET gen:<repositoryId>`.
 
 Abuse scopes go through `enforceRateLimit` (HMAC-keyed, `requirePersistent: true`):
 - `cloud-agents-ip`: 120 per 5 min;
@@ -827,7 +852,7 @@ Either way it is followed by `requireUnrevokedAccount`.
 |---|---|---|---|
 | `POST /api/cloud-agents/bind-code` | account | `{repository: "owner/name", repositoryId?: number, githubUserId?: number, defaultRef?: string}` | `{code, expiresAt}` |
 | `POST /api/cloud-agents/bind` | OIDC, audience `bind` | `{code, workflowVersion}` | `{bound: true, repository, repositoryId, generation, workflowUpdate: boolean}` |
-| `GET /api/cloud-agents/bindings` | account | — | `{bindings: [{repository, repositoryId, boundAt, lastUsedAt?, binder: {login}, workflowVersion, codium: "ready" \| "unavailable", suspended?}]}`; a `binder-left` private binding shows no repository name |
+| `GET /api/cloud-agents/bindings` | account | — | `{bindings: [{repository, repositoryId, boundAt, lastUsedAt?, binder: {login}, workflowVersion, codium: "ready" \| "unavailable", suspended?}]}`; a `binder-left` binding shows no repository name, whatever its stored visibility |
 | `POST /api/cloud-agents/unbind` | account | `{repositoryId}` | `{ok: true}` |
 | `POST /api/cloud-agents/mint` | OIDC, audience `mint` | `{purpose: "task" \| "review", thread, workflowVersion, commentId?, pullRequest?, ticket?}` | `{token, runId, deadline, heartbeatSeconds: 60, idleSeconds: 600}` |
 | `POST /api/cloud-agents/heartbeat` | `vrt_` until `exp` | `{state: "starting" \| "running"}` | `{ok: true, stop: boolean}` (`stop` once `now ≥ deadline − 180 s`) |
@@ -1181,8 +1206,8 @@ export const cloudAgentsWebhookHandler: GithubWebhookHandler  // id "cloud-agent
 Handlers are idempotent and never throw on unknown shapes.
 
 **Ours:**
-- `repository.transferred` → `suspendBinding(id, "transferred")`;
-- `repository.deleted` → `suspendBinding(id, "deleted")`;
+- `repository.transferred` → `bindingFor(id)`, then, unless its `ownerId` already equals the payload's `repository.owner.id` (bound after the transfer), `suspendBinding(binding, "transferred")`;
+- `repository.deleted` → `bindingFor(id)`, then `suspendBinding(binding, "deleted")`;
 - `repository.renamed` → `renameBinding`.
 
 **Registration.** Whichever of A47 and our merge to `main` lands second adds the one-line registration of `cloudAgentsWebhookHandler` (A59 adds it when A47 landed first). The shape above, and the `repository` and `installation_repositories` events, go to the Codium lane before A47 builds (section 5).
@@ -1232,7 +1257,7 @@ eraseCloudAgentsAccount(account: string): Promise<void>                         
 
 - The actor's login and id live in a separate `run:<rid>:actor` key with a 90-day expiry.
 - `verdict` is derived by the server at settle: `changes` → `pass`; `draft` and `failed` → `fail`; anything else → `none`. Ship Desk (A49) reads a run's verdict from this record, never from the PR body. Publish writes the marker `<!-- vector:rid <rid> -->` (from `VECTOR_RUN_ID`) into every PR body so A49 can find the record; A49 trusts a record only when its `repositoryId` matches the PR's repository.
-- For a binding suspended as `binder-left` on a non-public repository, `listCloudRuns` and the bindings list omit the repository name, run URL and actor.
+- For a binding suspended as `binder-left`, and for every run of a repository in the account's `binder-left:<account>` set (2.5, 2.7), `listCloudRuns` and the bindings list omit the repository name, run URL and actor, whatever the stored visibility: it is the bind token's, and nothing updates it. Runs read the set, never only the binding, because an unbind or a takeover deletes the binding and its runs stay.
 
 ## 2.17 Copy rules and fixed strings
 
@@ -1257,11 +1282,12 @@ This list is exactly what we store (INV-P3). V11's test compares the store's key
 |---|---|---|
 | Repository id → Vector account binding: repository id, owner id, repository name, visibility, default branch, binding generation, workflow version, bound at, last used at, suspension reason | `binding:<repositoryId>`, `bindings:<account>`, `gen:<repositoryId>` (the counter holds no personal data) | until unbind, account erasure, or a takeover |
 | The binder's GitHub user id and login (to show "bound by" and to check the binder still has access) | `binding:<repositoryId>` | as the binding |
+| Repositories whose binder lost access while bound to the account (repository ids only), so its bindings and run lists keep hiding their detail | `binder-left:<account>` | until the account binds that repository again, or account erasure |
 | Run record: run id, repository id and name, run URL, event, source, purpose, start and stop times, outcome, verdict, and for server-started runs the trigger's source and purpose | `run:<rid>`, `runs:<account>` | 90 days |
 | The triggering GitHub login and user id | `run:<rid>:actor` | 90 days |
 | Agent time per meter epoch (seconds) and scheduled runs per UTC day (a count) | `used:…`, `sched:…` | the period plus 40 days; 2 days |
 | Live run state: start, deadline, last activity, thread, token id | `live:<account>` | until settled, at most the deadline plus 1 day |
-| One-time bind codes and run tickets (hashed) | `bind-code:…`, `ticket:…` | 10 and 15 minutes |
+| One-time bind codes, stored under the code's hash with the account, the repository name and, when given, its id, the requesting GitHub user id and the default branch, and the expiry; run tickets (hashed) | `bind-code:…`, `ticket:…` | 10 and 15 minutes |
 | Short-lived caches: the binder's verified access, a public repository's default branch | `binder-ok:…`, `default-branch:…` | 1 hour |
 | Session artifacts | the repository's own GitHub Actions artifacts, encrypted per conversation | 7 days (GitHub's storage) |
 
@@ -1479,7 +1505,7 @@ Each package lists its files, changes, tests, done-criteria and the checks that 
   - trimmed to 200;
   - `listCloudRuns` order and limit;
   - `verdict` derivation per outcome; `trigger` only on server-started runs;
-  - a `binder-left` private binding hides its name, URL and actors;
+  - a `binder-left` binding hides its name, URL and actors, whatever its stored visibility, and its runs still do after an unbind or a takeover (the account's `binder-left` set);
   - erase removes bindings, the generation's binding pointer, live runs, used ledgers, runs and the actor keys for the account;
   - P1 scan.
 - **Done:** the test passes.
@@ -1758,7 +1784,7 @@ Each package lists its files, changes, tests, done-criteria and the checks that 
 
 ### V26. Website account page: bindings and bind codes
 - **Files:** `packages/web/src/components/marketing/account/GithubAgents.tsx` (new); `AccountPage.tsx` (section `id="github"`); `packages/web/test/account-github-agents.test.ts` (new).
-- **Changes:** 2.15 website. The section renders only when `github-agents` is listed, or at `/account?github-preview=1#github`. A code is shown once, with a copy button and the steps to run `mode=bind` from the Actions tab on the default branch. Bindings show last use, whether Codium is ready, and Unbind; a `binder-left` private binding shows no name.
+- **Changes:** 2.15 website. The section renders only when `github-agents` is listed, or at `/account?github-preview=1#github`. A code is shown once, with a copy button and the steps to run `mode=bind` from the Actions tab on the default branch. Bindings show last use, whether Codium is ready, and Unbind; a `binder-left` binding shows no name.
 - **Tests:**
   - render from fixture responses;
   - hidden when not listed; shown with the preview parameter;
