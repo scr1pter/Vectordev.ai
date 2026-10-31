@@ -1,5 +1,6 @@
 export * as ModelPlanStatus from "./model-plan-status"
 
+import { Billing } from "@vectordevai/schema/billing"
 import { CodiumEntitlements } from "@vectordevai/schema/codium-entitlements"
 import { CodiumPlan } from "@vectordevai/schema/codium-plan"
 import { Option, Schema } from "effect"
@@ -17,8 +18,8 @@ export const MANAGE_URL = `${SITE}/account`
 // layer needs Node (async_hooks), so nothing here may import it, not even lazily: Vite bundles a dynamic import too.
 type Send = (url: string, init: RequestInit) => Promise<Response>
 
-// The stable internal ID stays "vector-plan"; people see the provider as Vector Codium.
-export const PROVIDER_ID = "vector-plan"
+// The stable internal ID, which the shared Billing module owns; people see the provider as Vector Codium.
+export const PROVIDER_ID = Billing.CODIUM_PROVIDER_ID
 
 /** Codium Auto: a listing entry that names a floor, default and ceiling model; never a model the gateway serves. */
 export const AUTO_ID = "vector/codium-auto"

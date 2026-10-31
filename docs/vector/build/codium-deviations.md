@@ -356,3 +356,49 @@ No contract text changes. Details and validation are in [codium-cfix-clock-notes
 - **A real-Valkey fixture scenario keeps Valkey's clock.** `codium-replay`'s Valkey case reaches GENESIS, whose
   ledger expiry follows the fixture's period (2026-12-10), not any caller's time. Nothing in that case reads the
   ledger, so its result does not depend on the date. It is left as it is, with a comment in the test.
+
+## A21 decisions (label plan C1 contract)
+
+Intent-preserving corrections to label plan §7 C1, recorded with the A21 source. Details and validation are in
+[codium-a21-contract-notes.md](codium-a21-contract-notes.md).
+
+- **Built on `codium`, not self-evolving.** Label plan §7 says to build C1 on the self-evolving branch; the build spec
+  (higher precedence) puts A21 on `codium` and follows it with owner step 9, the merge into self-evolving. A21 follows
+  the build spec and leaves that merge to the owner.
+- **No code change in `combineCostKinds`.** C1.2 asks for "a codium case" in `packages/core/src/review/plan.ts`. Its
+  existing rule already gives `"codium"` for Codium passes alone or beside free ones, so A21 pins exactly that with
+  tests and adds no code. Codium mixed with a priced or plan pass still gives `"unknown"`, which `costWording` renders
+  as "cost unknown … (tokens)"; label plan §2 and §3.4 forbid that for Codium work ("$0.40 + Codium"). A21 leaves the
+  mixed result unasserted, and A26 (C11, owner of `review/format.ts`) must define the combined kind and its wording.
+  Nothing produces `"codium"` before A23, so no review reads differently today.
+- **`BudgetStopError` has two copies.** The contract names only the runtime `NamedError` in
+  `packages/core/src/v1/session.ts:77-84`. The wire schema in `packages/schema/src/v1/session.ts:76`, which the assistant
+  error union decodes, is the second copy; `codiumSteps` is added to both, or decoding a stored stop would drop it.
+- **`knowledge.ts` takes the shared type.** `DistillRun.costKind` (`packages/core/src/brain/knowledge.ts`) uses
+  `CostKind` from `review/types` instead of a hand-extended literal union, so the two cannot drift apart again. The
+  intent, letting the distill result carry `"codium"`, is unchanged.
+- **Only the remaining literals are replaced.** A20 already moved `provider-brand.ts`'s later Codium checks (the
+  contract's `:367`, now `:272`, `:281`, `:387-391`) and other app code to `ModelPlanStatus.PROVIDER_ID`, which is now
+  `Billing.CODIUM_PROVIDER_ID`; they stay as they are. The research `vector-plan:` answer prefix, the typed
+  `vector-plan/<model>` hints and the frozen H7 fixtures are not provider-id checks and also stay.
+- **Field styles follow their neighbours.** New counts are `Schema.Finite` where the struct's other counts are
+  (`Session.Info`, `Task.Usage`, `Task.BudgetScope`) and `NonNegativeInt` elsewhere. New V1 part and message fields use
+  the package `optional()` helper (schema/AGENTS.md) rather than the raw `Schema.optional` those structs use elsewhere;
+  `BudgetStopError` keeps `Schema.optional` like its other fields.
+- **`Billing` module shape.** `billing.ts` uses the `.js` self-export of `codium-plan.ts`, so `api/` can import it in
+  C12, and is exported from the root barrel as the contract asks; consumers import the direct entrypoint
+  `@vectordevai/schema/billing`, as they do `provider-policy` and `codium-plan`. `Billing.Kind` carries the stable
+  identifier `Billing.Kind` (generated as `BillingKind`).
+- **Engine-owned fields are tested by type and generation.** The engine `Info` counts and the usage summary fields
+  cannot be decoded from `packages/schema` tests (dependency direction); they are covered by the engine typecheck and the
+  generated SDK diff, and their values by A23's `usage.test.ts`.
+- **Accounting reads the stored flag, never `Billing.of`.** Label plan §4.1 and §4.2 route the projector by the flag
+  of the record it counts (`usage()` and `messageUsage()` read it), while the display surfaces use `Billing.of`, which
+  falls back to the provider id. With no backfill (§4.2), that fallback must stay out of accounting: a Codium step
+  recorded before A22 was added as an ordinary step, and reading it as Codium on revert or removal would leave
+  `codium_steps` at −1, the step's tokens in the totals, and the session failing its `NonNegativeInt` encoding. A
+  record without the flag counts as ordinary on both sides. The provider-id check the contract asks for on
+  AncillaryUsage stays, since nothing subtracts ancillary usage. One gap in C2 and C3 is added to A22: fork
+  (`packages/engine/src/session/session.ts:919-970`) clears a copied step's cost, tokens and `unpriced`, and must
+  clear its `billing` too, or each copied Codium step counts as a Codium step of the fork. Details are in the A21
+  record's A22 obligation.

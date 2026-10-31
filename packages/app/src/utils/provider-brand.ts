@@ -8,6 +8,7 @@ import {
   freeModelOrder,
 } from "@vectordevai/core/free-model-choice"
 import { ModelPlanStatus } from "@vectordevai/core/model-plan-status"
+import { Billing } from "@vectordevai/schema/billing"
 import type { FreeDataPolicy } from "@vectordevai/schema/free-model"
 import { providerAllowed, providerUsable } from "@vectordevai/schema/provider-policy"
 
@@ -113,7 +114,7 @@ export function modelAccess(model: PickerModel): ModelAccess {
   const provider = model.provider
   if (isHiddenProvider(provider.id, provider)) return NO_ACCESS
   // Vector Codium models are included in the signed-in account's Codium plan, never paid from an API key.
-  if (provider.id === "vector-plan") return CODIUM_ACCESS
+  if (Billing.isCodium(provider.id)) return CODIUM_ACCESS
   // An OAuth loader placeholder is not evidence that an API key pays for this model.
   if (provider.options?.apiKey === "vector-oauth-dummy-key") return NO_ACCESS
   const cost = costInput(model.cost)

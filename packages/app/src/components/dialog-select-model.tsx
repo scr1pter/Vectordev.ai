@@ -1,4 +1,5 @@
 import { freeModelRegionLabel, freeModelTrainingLabel } from "@vectordevai/core/free-model-choice"
+import { Billing } from "@vectordevai/schema/billing"
 import { Popover as Kobalte } from "@kobalte/core/popover"
 import {
   Component,
@@ -147,7 +148,7 @@ function createPointerGuard() {
 
 /** Vector's own models (Free models inside of Vector, Vector Codium) carry Vector's chip, drawn in the text colour like
     every other provider's mark. */
-const VECTOR_MARKS = new Set(["vector", "vector-plan"])
+const VECTOR_MARKS = new Set(["vector", Billing.CODIUM_PROVIDER_ID])
 
 function ProviderMark(props: { id?: string }) {
   return (

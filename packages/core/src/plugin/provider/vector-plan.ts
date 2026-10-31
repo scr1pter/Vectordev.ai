@@ -1,3 +1,4 @@
+import { Billing } from "@vectordevai/schema/billing"
 import { Effect, Stream } from "effect"
 import { EventV2 } from "../../event"
 import { Integration } from "../../integration"
@@ -7,7 +8,7 @@ import { define } from "../internal"
 
 /** Vector Codium: the signed-in account's managed coding models, listed from vectordev.ai and never from configuration. */
 export const VectorPlanPlugin = define({
-  id: "vector-plan",
+  id: Billing.CODIUM_PROVIDER_ID,
   effect: Effect.fn(function* (ctx) {
     const plans = yield* ModelPlans.Service
     const credentials = yield* FreeModels.CredentialsService
