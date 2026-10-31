@@ -627,50 +627,51 @@ The names here deliberately differ from Codium's, so that no import alias is eve
 
 ## 2.4 Run tokens and the verifier seam: `api/_lib/cloud-agents-run-token.ts` (amendment 13)
 
-**Format.** `vrt_<base64url(JSON payload)>.<base64url(HMAC-SHA256(key, "vector-run-v1." + payload))>`, at most 1024 characters.
+**Format.** `vrt_<base64url(JSON payload)>.<base64url(HMAC-SHA256(key, "vector-run-v1." + payload))>`, at most 1024 characters: exactly one `.`, and base64url characters only (no padding) on both sides. The longest valid claims make a token of 767 characters.
 
-**Key.** `VECTOR_RUN_TOKEN_SECRET` (at least 32 characters). Otherwise `HMAC-SHA256(VECTOR_LICENSE_SECRET, "vector-run-token-key-v1")`. With neither, the answer is 503 `RUN_TOKENS_UNAVAILABLE`. It never shares raw key material with `cli-token.ts`.
+**Key.** `VECTOR_RUN_TOKEN_SECRET` when it has at least 32 characters. Otherwise `HMAC-SHA256(VECTOR_LICENSE_SECRET, "vector-run-token-key-v1")` as base64url, when the license secret has at least 32 characters, as `cli-token.ts` requires of it. With neither, the answer is 503 `RUN_TOKENS_UNAVAILABLE`. It never shares raw key material with `cli-token.ts`, and even when an operator sets the two dedicated secrets equal, the HMAC domains keep the tokens apart (INV-S7).
 
 **Payload** (strict schema; an unknown key is refused):
 
 ```ts
 type RunTokenClaims = {
   v: 1
-  sub: string                     // Vector account id (UUID)
-  rid: string                     // GithubAgents.runId(...): "gh-<repositoryId>-<runId>-<runAttempt>-<checkRunId>"
-  repo: string                    // repositoryId, decimal
+  sub: string                     // Vector account id: a lowercase UUID in Codium's registry form (version 1-8, variant 8-b)
+  rid: string                     // GithubAgents.runId(...): "gh-<repositoryId>-<runId>-<runAttempt>-<checkRunId>", whose repositoryId is `repo`
+  repo: string                    // repositoryId, decimal with no leading zero, a safe integer
   thr: string                     // thread, GithubAgents.THREAD_PATTERN, fixed at mint: reserveRun's `thread` (a renewal answers the record's)
-  gen: number                     // binding generation at mint
+  gen: number                     // binding generation at mint, an integer of at least 1
   src: "github-comment" | "github-dispatch" | "github-schedule"
-  pur: "task" | "review" | "scheduled"
+  pur: "task" | "review" | "scheduled"   // "scheduled" exactly when src is "github-schedule"
   epoch: string                   // the live record's meter epoch, reserveRun's `epoch`; matches METER_EPOCH_PATTERN (2.6)
   dl: number                      // deadline, ms
-  exp: number                     // dl + SETTLE_GRACE_SECONDS × 1000
-  iat: number                     // ms
-  jti: string                     // 16 random bytes, base64url; equals the live record's jti
-  cs?: number                     // run ceiling share, (0, 1]
+  exp: number                     // dl + SETTLE_GRACE_SECONDS × 1000, exactly
+  iat: number                     // ms, before dl
+  jti: string                     // 16 random bytes, base64url (22 characters); equals the live record's jti
+  cs?: number                     // run ceiling share, finite, in (0, 1]
 }
 ```
 
-It never carries an email, a plan, limits or model authority. The gateway reads model access from the snapshot (SPEC §4.18).
+`dl`, `exp` and `iat` are positive safe integers. The payload is read with these rules alone; its key order does not matter, though `mintRunToken` always writes the order above. It never carries an email, a plan, limits or model authority. The gateway reads model access from the snapshot (SPEC §4.18).
 
-**Functions.**
-- `mintRunToken(claims): { token, deadline, expiresAt }`.
-- `readRunToken(token, now): RunTokenClaims`. This is pure: it checks the prefix, length, timing-safe signature, schema, `v`, `rid` against `RUN_ID_PATTERN`, and `exp > now`.
-- `verifyRunToken(token, deps?): Promise<RunCaller>` is the gateway path. It requires `dl > now`, then makes one EVAL round trip and one seam call:
-  - the EVAL requires that the binding for `repo` exists, its account equals `sub` and its generation equals `gen`; that the live record for `rid` exists (the run is not settled) and its `jti` equals the token's; and that the account is not revoked (`vector:cli-revoked:<id>`, fail-closed). Its keys come from the key builders the binding and ledger modules export, so no key layout is written twice;
-  - `cloudAgentRevokedBefore(sub)` (2.3) is called once; a returned value greater than `iat` refuses the token, and an error fails closed.
-- `requireRunToken(request, { allowAfterDeadline })` is our service-endpoint path. It accepts a token until `exp` and applies the same EVAL and seam checks.
+**Functions.** Each takes the optional dependencies `deps: RunTokenDeps = { now?: number; store?: typeof persistentStore; revokedBefore?: typeof cloudAgentRevokedBefore }` where noted; the defaults are `Date.now()`, `persistentStore` and `cloudAgentRevokedBefore`.
+- `mintRunToken(claims: Omit<RunTokenClaims, "v" | "exp">): { token: string; deadline: number; expiresAt: number }`. It sets `v = 1` and `exp = dl + SETTLE_GRACE_SECONDS × 1000`, and answers 400 `INVALID_REQUEST` for any claim the reader would refuse, an unknown key included, so nothing is signed that `readRunToken` refuses. `deadline` is `dl` and `expiresAt` is `exp`.
+- `readRunToken(token: string, now: number): RunTokenClaims`. This makes no store call: it checks the prefix, the length (before any HMAC), the format, the timing-safe signature, the schema and the rules above, and then `now < exp` (401 `MODEL_PLAN_RUN_EXPIRED` otherwise).
+- `verifyRunToken(token, deps?): Promise<RunCaller>` is the gateway path. After `readRunToken`, it requires `now < dl`, then makes one EVAL round trip and one seam call, started together:
+  - the EVAL is read-only. Its `KEYS` are `bindingKey(repo)`, `generationKey(repo)` (2.5), `liveKey(sub)` (2.6) and the revocation mark `vector:cli-revoked:<sub>`, whose builder `revocation.ts` keeps private. It requires that the account is not revoked; that the binding for `repo` exists, its account equals `sub` and its generation equals `gen`, and that the generation counter equals the binding's generation (2.7); and that the live record for `rid` exists (the run is not settled) and its `jti` equals the token's. The live record is read for its `jti` alone. A suspension moves the generation (2.5), so it needs no check of its own;
+  - `cloudAgentRevokedBefore(sub)` (2.3) is called once; a returned value greater than `iat` refuses the token. `undefined` or a safe integer of at least 0 is an answer; anything else, a rejection or a throw fails closed.
+  - When both refuse or fail, the EVAL's answer is the one reported. A token `readRunToken` refuses, or one past its deadline, costs no store call and no seam call.
+- `requireRunToken(request: Pick<ApiRequest, "headers">, options: { allowAfterDeadline: boolean }, deps?): Promise<RunTokenClaims>` is our service-endpoint path. The `authorization` header must be exactly `Bearer vrt_<base64url>.<base64url>`. With `allowAfterDeadline: true` (heartbeat and settle, V12) it accepts the token until `exp`; otherwise (artifact-key, V27) only until `dl`. It applies the same EVAL and seam checks and returns the claims.
 - `cloudAgentsRunVerifier = { prefix: "vrt_" as const, verify: (token: string) => verifyRunToken(token) }`. **This is the seam.** In A59, Codium adds `registerRunVerifier(cloudAgentsRunVerifier.prefix, cloudAgentsRunVerifier.verify)` to its static registrations (`api/_lib/model-plan-caller.ts`). We never change `requireModelPlanUser`.
 
 ```ts
 type RunCaller = { account: { id: string }; kind: "run"; purpose: "cloud-agents"
   run: { id: string; source: RunSource; deadline: number; ceilingShare?: number; service: "cloud-agents" } }
-// run.id === claims.rid, always
+// run.id === claims.rid, always; run.deadline is dl; ceilingShare is cs, absent when cs is
 ```
 
 This shape passes Codium's registry checks as they stand on `origin/codium` and `origin/codium-next` (`model-plan-caller.ts`, with the grammar from `codium-pool.ts` and `codium-deviations.md` "One run-id grammar"):
-- a UUID account;
+- a UUID account in the registry's form (`sub` is minted only in that form);
 - `kind` `run`;
 - a pool purpose;
 - a run id matching `^[A-Za-z0-9_.-]{1,128}$` that is not `-` and is unique across accounts and services (`run:<id>` and `run-pool:<id>` are keyed by the id alone; the `gh-` prefix and the repository, run, attempt and check-run ids make ours unique);
@@ -679,11 +680,14 @@ This shape passes Codium's registry checks as they stand on `origin/codium` and 
 - service `cloud-agents` (bound to the `vrt_` prefix);
 - a ceiling share in (0, 1].
 
-**Errors.**
-- 401 `RUN_TOKEN_INVALID`: format, signature or schema.
-- 401 `MODEL_PLAN_RUN_EXPIRED`: deadline or exp passed, generation moved, settled, replaced, revoked, or before `revokedBefore`.
+**Errors.** Each code has one message whatever its cause, so no response says why a run was stopped (INV-P1).
+- 400 `INVALID_REQUEST` (mint only): a claim the reader would refuse.
+- 401 `RUN_TOKEN_INVALID`: no `Bearer` header, format, length, signature or schema.
+- 401 `MODEL_PLAN_RUN_EXPIRED`: deadline or exp passed, generation moved (rebind, takeover, unbind or suspension), another account bound at the same generation, settled, replaced, revoked, or before `revokedBefore`.
+- 503 `RUN_TOKENS_UNAVAILABLE`: no usable key, at mint and at read.
+- 503 `PERSISTENT_STORE_UNAVAILABLE`: a store failure (a rejection or a synchronous throw), an answer the module does not know, a seam failure, or stored data that breaks the rules above (a binding account or generation the binding module would refuse, a counter that differs from the binding's generation, a live record that is not a JSON object with a string `jti`, a key of another type). Each logs one server line, `console.warn("Vector cloud-agents run token check failed", {cause, runId})`, with `cause` one of `store`, `corrupt`, `unknown answer`, `seam rejected` and `seam value`, and `runId` the token's `rid`: never the account or the failure's own text (INV-P4). A refusal logs nothing.
 
-Codium's registry maps every 401 or 403 from us to `MODEL_PLAN_RUN_EXPIRED` anyway.
+Codium's registry maps every 401 or 403 from us to `MODEL_PLAN_RUN_EXPIRED` anyway, and passes the 503s through.
 
 ## 2.5 Repo bindings, bind codes and tickets: `api/_lib/cloud-agents-binding.ts`, `api/_lib/cloud-agents-start.ts`
 
@@ -1444,14 +1448,17 @@ Each package lists its files, changes, tests, done-criteria and the checks that 
 
 ### V07. Run tokens and the verifier seam
 - **Files:** `api/_lib/cloud-agents-run-token.ts` (new); `packages/web/test/cloud-agents-run-token.test.ts` (new); `test/cli-token.test.ts` (one new case: a `vrt_` token is refused by `verifyCliToken`).
-- **Changes:** 2.4. The EVAL reads keys only through the binding and ledger modules' key builders.
+- **Changes:** 2.4. The EVAL reads the binding and ledger keys only through those modules' key builders; the revocation mark's key, which `revocation.ts` keeps private, is pinned by the test through `revokeAccountTokens` and `requireUnrevokedAccount`.
 - **Tests:**
-  - INV-S7;
-  - INV-S8: rebind, unbind, settle, replacement by a later mint (`jti`), revoked account, `revokedBefore` through an injected `cloudAgentRevokedBefore` (including a seam error failing closed), and deadline versus exp for the two paths;
+  - INV-S7, with a known-answer check of the `vector-run-v1` signature and the two dedicated secrets set equal, both ways;
+  - INV-S8: rebind, takeover, unbind, suspension, settle, replacement by a later mint (`jti`), revoked account, `revokedBefore` through an injected `cloudAgentRevokedBefore` (at `iat` + 1, `iat` and none), another account's binding at the same generation, and deadline versus exp for the two paths (passes at `dl` − 1 and `exp` − 1, refused at `dl` and `exp`);
+  - INV-S9: the replaced token is refused, and after a re-mint at the deadline is refused, the earlier token still passes the service path until `exp` and settles;
   - INV-P4;
   - INV-K5, on a token minted by `mintRunToken` and verified by `cloudAgentsRunVerifier.verify`: `run.id === rid`, the id matches `^[A-Za-z0-9_.-]{1,128}$` and is not `-`, plus a local `ModelPlanCaller`-shaped type with `satisfies` and the registry's other field rules;
-  - tampering, an unknown key, an oversized token, a `rid` with a colon, and the key-derivation fallback;
-  - one EVAL and one seam call per `verifyRunToken`, counted with a wrapped store and a counting seam.
+  - tampering, an unknown key, an oversized token, the longest valid claims, a `rid` with a colon or of another repository, every claim rule at mint and at read, and the key derivation: a dedicated secret of 31 and of exactly 32 characters, a license secret of 31 and of 32, neither;
+  - one EVAL with exactly the four declared keys and one seam call per `verifyRunToken`, counted with the fake store's log and a counting seam; none for a refused token; the EVAL and the seam call run in parallel;
+  - every refusal of a well-signed token is the same 401 with one message, and every invalid token the same other 401;
+  - fail closed (INV-S16): a store outage, a store that throws, an unknown answer, corrupt or foreign stored data, and every kind of seam failure answer 503, change nothing, and log one line with their cause and the run id only.
 - **Done:** both tests pass; the API typecheck passes.
 
 ### V08. OIDC verifier: `mint` and `bind` audiences, job-workflow claims, review comments, the App bot
@@ -1950,7 +1957,7 @@ Each package lists its files, changes, tests, done-criteria and the checks that 
 
 | Codium package | What it takes from us | Notes |
 |---|---|---|
-| A16 (callers, on `codium` and `codium-next`) | `cloudAgentsRunVerifier` (V07) | Codium registers it statically in A59. Our run id is `gh-<repositoryId>-<runId>-<runAttempt>-<checkRunId>`, in Codium's run-id grammar (`codium-deviations.md`, "One run-id grammar") and unique across services; `RunCaller.run.id === rid`. |
+| A16 (callers, on `codium` and `codium-next`) | `cloudAgentsRunVerifier` (V07) | Codium registers it statically in A59. Our run id is `gh-<repositoryId>-<runId>-<runAttempt>-<checkRunId>`, in Codium's run-id grammar (`codium-deviations.md`, "One run-id grammar") and unique across services; `RunCaller.run.id === rid`. The account id is minted only in the registry's `ACCOUNT` form, and `revokedBefore` answers milliseconds. |
 | A17 (admission and chat) | `cloudAgentsGatewayHook` (V06), registered with `registerGatewayHook` in A59; it calls `recordCodiumRequest` from `afterSettle` | The gateway enforces the deadline, ceiling, daily limit, requests at once and the computer-use refusal (`MODEL_PLAN_BLOCKED`). We enforce mint-time limits. |
 | A18 and A24 (status, Settings → Usage) | `cloudAgentSecondsUsed` (V06) for `meters.cloudAgents {used, exhausted}` | A share only, no seconds, in responses. The two-argument call reads the clock itself and settles only that epoch's idle runs; it answers settled seconds, without live runs' reservations. |
 | A26 (label C11) | — | Edits `github.evidence.ts` and the `github.review.ts` log line. V19 and A26 assert the same label-plan §3.8 strings; whichever lands second rebases. |
