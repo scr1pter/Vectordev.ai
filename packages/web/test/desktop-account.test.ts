@@ -323,6 +323,7 @@ test("desktop start, signed-in website and one-time API exchange complete the sa
     sync: async (token) => {
       desktop.token = token ?? ""
     },
+    models: async () => undefined,
     changed: (value) => {
       desktop.states.push(value)
     },
@@ -478,6 +479,7 @@ test("deleting from the desktop runs through the browser's fresh sign-in and end
     sync: async (token) => {
       desktop.token = token
     },
+    models: async () => undefined,
     changed: (value) => {
       desktop.states.push(value)
     },

@@ -227,7 +227,8 @@ are in [codium-a20-plan-ui-notes.md](codium-a20-plan-ui-notes.md).
   `packages/app/src/pages/layout-new.tsx`, `packages/app/src/app.tsx` and `packages/desktop/src/preload/types.ts`
   (swarm flags, and providers re-read on `codiumChanged()`); `packages/app/src/context/notification.tsx` (the toast's
   code); `packages/app/src/vector-premium.css`, `codium-purchase.css`, `settings-account.css` (badge, detail and
-  scheduled line); `packages/app/src/components/settings-vector-codium.tsx` (below).
+  scheduled line); `packages/app/src/components/settings-vector-codium.tsx` (below); and, after the A20 commit,
+  `packages/web/test/desktop-account.test.ts` (its two desktop account fixtures take the new `models` dependency).
 - **Interim listing resolved.** The A19 "Interim listing" entry no longer applies: the engine provider and the Core V2
   catalog list every entry with its `codium` metadata, now that routing, swarms, pickers, restore and cycling tell them
   apart. `vector models` names Codium Auto and the locked models from that listing.

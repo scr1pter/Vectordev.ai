@@ -319,10 +319,20 @@ portal card update or 3-D Secure confirmation in the billing window (A60, the pr
   `src/components/dialog-select-model.test.ts` (`--isolate`) 51 pass, 0 fail (277 expects); `packages/app`
   `bun typecheck:e2e` exit 0. Every other file's last pass is recorded in the sections above and none of them changed
   after it. Only this record and the A19 record's status line changed after these reruns.
-- **Push.** The commit is pushed through `vector-serial` to `codium-next` and then `codium` (both fast-forwards from
-  `2722736d`); the pre-push hook typechecks every package one at a time, `packages/app` `bun typecheck` included. The
-  push to `codium` starts the scoped `vector-codium.yml` workflow on its own; no workflow is dispatched by hand, and
-  its result is not recorded here.
+- **Push.** The A20 commit (`b151dded`) went through `vector-serial` to `codium-next` (a fast-forward from
+  `2722736d`); its pre-push hook passed, but with `packages/web` replayed from Turbo's cache. The push of the same
+  commit to `codium` ran `packages/web` `astro check` afresh and failed it: `packages/web/test/desktop-account.test.ts`
+  imports the desktop's `createVectorAccount` by relative path (outside Turbo's inputs for web, hence the stale hit),
+  and its two fixtures lacked the new required `models` dependency (ts2345). A follow-up commit adds
+  `models: async () => undefined` to both (neither test refreshes models). After it, through `vector-serial` with the
+  gate's XDG roots: `packages/web` `test/desktop-account.test.ts` 12 pass, 0 fail (132 expects; it also runs the
+  sign-in exchange through the desktop's new `client: "desktop"` check); `test/model-plans.test.ts` 21 pass, 0 fail
+  (163 expects) and `test/model-plan-status-api.test.ts` 20 pass, 0 fail (130 expects), the web files that import the
+  changed `@vectordevai/core/model-plan-status`; `packages/web` `bun typecheck` exit 0 (195 files, 0 errors).
+  `test/model-plans-api.test.ts` also imports it but spawns Bun, so it is left to CI. Both commits are then pushed to
+  `codium-next` and `codium`, the hook typechecking every package one at a time. The push to `codium` starts the
+  scoped `vector-codium.yml` workflow on its own; no workflow is dispatched by hand, and its result is not recorded
+  here.
 
 ## Remaining (open)
 
