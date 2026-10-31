@@ -911,7 +911,7 @@ Remaining:
 - Correction (second review): until the second review this line said the resume's fail-closed catch was the SessionTools hook's catch and that mutation (e) covered it. It was a separate, untested copy. It is now `TaskClaims.familyOf`, shared with the hook, and task.test.ts proves the resume path on its own, so nothing about it remains open.
 - The settings-import owner question stays open, with Option A (fail closed) kept until the owner answers (CI5 entry).
 
-## 2026-10-31 MAIN (integrate origin/main 78526052) — status: origin/main `78526052` merged into multiagent-next by one merge commit (`git merge --no-ff`, no rebase); 14 conflicts resolved, keeping both sides' behaviour, the 3 generated ones regenerated with the repo tooling; every package typecheck named below and every focused file below green here (Linux); the terminal's lock-and-record admission since done in the MAIN step 11 entry below; both review rounds, the push and the full run on the integration pending (Remaining); one owner question raised (terminals for subagents, below)
+## 2026-10-31 MAIN (integrate origin/main 78526052) — status: origin/main `78526052` merged into multiagent-next by one merge commit (`git merge --no-ff`, no rebase); 14 conflicts resolved, keeping both sides' behaviour, the 3 generated ones regenerated with the repo tooling; every package typecheck named below and every focused file below green here (Linux); the terminal's lock-and-record admission since done in the MAIN step 11 entry below; Round A since done with no findings (MAIN Round A entry below); Round B, the push and the full run on the integration pending (Remaining); one owner question raised (terminals for subagents, below)
 
 Inputs. Branch head `76a6c0f5` (= origin/self-evolving), origin/main `78526052` (desktop 1.99.112 published; includes `dfc98974`), merge base `6eaf445a`; main was 28 commits ahead of the base and the branch 42. Before merging, run 41171765221 on `76a6c0f5` was read complete and green (WP28 Remaining). `git merge --no-ff origin/main` conflicted in exactly the 14 files a `git merge-tree` dry run had listed; the local-fit fixture (CI5's byte-identical port) merged cleanly.
 
@@ -983,7 +983,8 @@ CI-only:
 
 Remaining:
 - Terminal admission: done, a commit of its own after the merge commit (MAIN step 11 entry below).
-- Round A (the resolutions against both parents) and Round B (main × multi-agent):
+- Round A (the resolutions against both parents): done, no findings (MAIN Round A entry below).
+- Round B (main × multi-agent):
   - the terminal lifetime finding above, and closing a family's terminals in a retiring checkout;
   - the ask order;
   - `FreeModelGuests.marked` in the terminal's own-terminal filter against WP28's durable guest input;
@@ -1026,3 +1027,13 @@ Runs (2026-10-31; Linux, uid 0; one file at a time through the lock wrapper, fro
 CI-only: terminal.test.ts's 22 cases that start Bun as the terminal's program; the Windows engine shards (the new file does not run there; shell-ownership's PowerShell and cmd cases do).
 
 Remaining: as the MAIN entry's Remaining (the merge commit first, then this commit, the two review rounds, the push and the full run).
+
+## 2026-10-31 MAIN Round A (the resolutions against both parents) — status: done; no findings; no source change
+
+Round A reads every hand-resolved conflict against both parents (merge base `6eaf445a`, branch `76a6c0f5`, main `78526052`). The MAIN entry's spot checks covered `shell.ts`, permission-policy, the registry and app-runtime, the memory-erase test, the HttpApi memory text and the regenerated output. This round finishes the four files left: for each, the lines main changed since the base were compared with the merge result against the branch, and the lines the branch changed with the merge result against main (`git diff -U0`, added and removed lines only).
+- `web/src/data/vector-releases.ts`: both sides' changed lines are in the merge unchanged: main's `publishedDesktopVersion` 1.99.112, its `brainCopy` comment, its release112 helpers and its 1.99.112 release row; the branch's release113 helpers, after main's release112 ones, so the 1.99.113 copy still reads "Coming in desktop 1.99.113".
+- `web/src/pages/docs/models.astro`: both sides' changed lines are in the merge unchanged. The branch's learned-defaults paragraph (and its `release113` import) sits right after the `--variant` paragraph, before main's new environment-variable sections.
+- `web/src/pages/docs/skills-and-commands.astro`: main's changed lines are in the merge unchanged. Of the branch's, only its first two paragraphs are missing, as the MAIN entry records. Every fact in them is in main's text except the V2-catalog aside the MAIN entry drops: the skill folders (`skill/` and `skills/` of the config and `.vector` folders, `.claude/skills` and `.agents/skills` in the home folder and the repository, `skills.paths`, `skills.urls`), that a repository's skills load only once the repository is trusted ("The repository's folders are read only once you trust the repository"), and the versioned download cache (a changed `version` is downloaded whole and replaces the old folder). The branch's Learned skills section follows main's text unchanged.
+- `app/src/components/settings-v2/memory.tsx`: every changed line of both sides is in the merge unchanged except the one both changed, the repository erase line. It now names both sides' additions ("its failure memory, skills, workflow insights, Deep research runs and the app's model recommendations included"), as the MAIN entry records. The `all` line is main's ("…and about you, and every Deep research run"), which the branch had not changed.
+
+No source changed, so nothing was run for this round.
