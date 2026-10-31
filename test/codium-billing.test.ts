@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test"
+import { afterEach, beforeEach, describe, expect, setSystemTime, spyOn, test } from "bun:test"
 import { RedisClient } from "bun"
 import { ENTITLEMENTS, type EntitlementSnapshot } from "../packages/schema/src/codium-entitlements"
 import type { PlanId } from "../packages/schema/src/codium-plan"
@@ -59,7 +59,10 @@ let restore = () => {}
 beforeEach(() => {
   restore = codiumTestEnvironment()
 })
-afterEach(() => restore())
+afterEach(() => {
+  restore()
+  setSystemTime()
+})
 
 const HOUR = 3_600_000
 const DAY = 24 * HOUR
@@ -260,6 +263,9 @@ describe("Stripe → state (contract §4.4), from fixtures", () => {
     const fakes = seed(fixture)
     const id = fixture.accountId
     const paid = await reconcileModelPlanAccount(id, fakes.fetcher, fixture.now * 1000)
+    // Deletion reads the clock itself: it comes an hour into the fixture's paid month.
+    const deleted = fakes.clock.advance(HOUR)
+    setSystemTime(new Date(deleted))
     await cancelModelPlanAccount(id, fakes.fetcher)
     const closing = await readSnapshot(id, fakes.fetcher)
     expect(closing).toMatchObject({
@@ -268,16 +274,20 @@ describe("Stripe → state (contract §4.4), from fixtures", () => {
       plan: "vector-10",
       subscription: paid.subscription,
       version: 2,
+      checkedAt: deleted,
     })
     expect([...fakes.openRouter.keys.values()].every((key) => key.disabled === true)).toBe(true)
     expect(fakes.stripe.subscription(paid.subscription!)?.status).toBe("canceled")
-    await expect(requireEntitlement(id, "codium", fakes.fetcher, Date.now())).rejects.toMatchObject({
+    await expect(requireEntitlement(id, "codium", fakes.fetcher, deleted)).rejects.toMatchObject({
       statusCode: 409,
       code: "MODEL_PLAN_ACCOUNT_CLOSING",
     })
     // A later reconcile keeps it closed and asks Stripe nothing.
     const calls = fakes.stripe.calls.length
-    expect(await reconcileModelPlanAccount(id, fakes.fetcher)).toMatchObject({ state: "ended", reason: "closing" })
+    expect(await reconcileModelPlanAccount(id, fakes.fetcher, fakes.clock.advance(HOUR))).toMatchObject({
+      state: "ended",
+      reason: "closing",
+    })
     expect(fakes.stripe.calls).toHaveLength(calls)
   })
 })
@@ -293,6 +303,9 @@ const disputeEvent = (type: string, dispute: Record<string, unknown>) => ({
 })
 
 describe("a dispute on any Codium charge freezes the account (M5)", () => {
+  // These scenarios run on their fixtures' clocks, so a wall clock past every fixture's period must change nothing.
+  beforeEach(() => setSystemTime(new Date(Date.UTC(2031, 0, 1))))
+
   test("a dispute on last month's charge freezes through the webhook, survives the next payment and lifts once won", async () => {
     const fixture = loadStripeFixture("frozen-dispute-previous-charge")
     const dispute = fixture.objects.disputes![0]!
@@ -308,7 +321,9 @@ describe("a dispute on any Codium charge freezes the account (M5)", () => {
     // The bank disputes last month's charge. The notification names that charge only.
     charge.disputed = true
     fakes.stripe.load({ disputes: [dispute] })
-    await reconcileModelPlanEvent(disputeEvent("charge.dispute.created", dispute), fakes.fetcher)
+    await reconcileModelPlanEvent(disputeEvent("charge.dispute.created", dispute), fakes.fetcher, {
+      now: fakes.clock.advance(HOUR),
+    })
     const frozen = await readSnapshot(id, fakes.fetcher)
     expect(frozen).toMatchObject({ state: "frozen", reason: "disputed", version: 2 })
     expect(frozen?.revokedBefore).toBeNumber()
@@ -321,9 +336,10 @@ describe("a dispute on any Codium charge freezes the account (M5)", () => {
     await reconcileModelPlanEvent(
       { id: "evt_paid_again", type: "invoice.paid", livemode: false, data: { object: invoice } },
       fakes.fetcher,
+      { now: fakes.clock.advance(HOUR) },
     )
     expect(await readSnapshot(id, fakes.fetcher)).toMatchObject({ state: "frozen", reason: "disputed", version: 2 })
-    await expect(modelPlanCredential(id, fakes.fetcher, Date.now(), 0.01)).rejects.toMatchObject({
+    await expect(modelPlanCredential(id, fakes.fetcher, fakes.clock.now, 0.01)).rejects.toMatchObject({
       statusCode: 403,
       code: "MODEL_PLAN_BLOCKED",
       detail: { reason: "disputed" },
@@ -336,7 +352,9 @@ describe("a dispute on any Codium charge freezes the account (M5)", () => {
     // Won: the same notification path lifts it, and the key comes back on.
     dispute.status = "won"
     fakes.stripe.load({ disputes: [dispute] })
-    await reconcileModelPlanEvent(disputeEvent("charge.dispute.closed", dispute), fakes.fetcher)
+    await reconcileModelPlanEvent(disputeEvent("charge.dispute.closed", dispute), fakes.fetcher, {
+      now: fakes.clock.advance(HOUR),
+    })
     expect(await readSnapshot(id, fakes.fetcher)).toMatchObject({ state: "active", version: 3 })
     expect(fakes.openRouter.keys.get(SEEDED)?.disabled).toBe(false)
     expect((await storedAccount(fakes, id))?.risk?.openDisputes).toEqual({})
@@ -350,12 +368,14 @@ describe("a dispute on any Codium charge freezes the account (M5)", () => {
     await reconcileModelPlanEvent(
       { id: "evt_efw", type: "radar.early_fraud_warning.created", livemode: false, data: { object: warning } },
       fakes.fetcher,
+      { now: fakes.clock.advance(HOUR) },
     )
     expect(await readSnapshot(id, fakes.fetcher)).toMatchObject({ state: "frozen", reason: "early_fraud_warning" })
     const invoice = fixture.objects.invoices![0]!
     await reconcileModelPlanEvent(
       { id: "evt_paid", type: "invoice.paid", livemode: false, data: { object: invoice } },
       fakes.fetcher,
+      { now: fakes.clock.advance(HOUR) },
     )
     expect(await readSnapshot(id, fakes.fetcher)).toMatchObject({ state: "frozen", reason: "early_fraud_warning" })
     expect(fakes.openRouter.keys.get(SEEDED)?.disabled).toBe(true)
@@ -378,7 +398,7 @@ describe("a dispute on any Codium charge freezes the account (M5)", () => {
     // A model request gets the answer every service gives an ended plan (contract §4.4, §4.10): 402 REQUIRED with the
     // reason, not the 403 of a freeze.
     const ended = { statusCode: 402, code: "MODEL_PLAN_REQUIRED", detail: { reason: "disputed" } }
-    await expect(modelPlanCredential(id, fakes.fetcher, Date.now(), 0.01)).rejects.toMatchObject(ended)
+    await expect(modelPlanCredential(id, fakes.fetcher, fixture.now * 1000 + HOUR, 0.01)).rejects.toMatchObject(ended)
     await expect(requireEntitlement(id, "codium", fakes.fetcher, fixture.now * 1000 + HOUR)).rejects.toMatchObject(
       ended,
     )
@@ -660,7 +680,7 @@ describe("the snapshot write", () => {
 
   test("sales-opened-at is never set by an unpaid account and never moved by a later one", async () => {
     const none = seed(loadStripeFixture("none-incomplete"))
-    await reconcileModelPlanAccount(loadStripeFixture("none-incomplete").accountId, none.fetcher)
+    await reconcileModelPlanAccount(loadStripeFixture("none-incomplete").accountId, none.fetcher, none.clock.now)
     expect(none.store.get(codiumKey("sales-opened-at"))).toBeUndefined()
     expect(none.store.zset(codiumKey("idx", "period-end")).size).toBe(0)
 
@@ -682,8 +702,9 @@ describe("the snapshot write", () => {
     expect(renewed).toMatchObject({ version: 2, meterEpoch: `sub_active:${start * 1000}`, state: "active" })
     expect(renewed.meterEpoch).not.toBe(first.meterEpoch)
     expect(transitionCause(first, renewed)).toBe("renewal")
-    // A write that carries an older version than the one stored is refused by the script.
-    const { written } = await writeSnapshot({ ...first, checkedAt: Date.now() }, undefined, fakes.fetcher)
+    // A write that carries an older version than the one stored is refused by the script, even with a later checkedAt.
+    const late = (start + 660) * 1000
+    const { written } = await writeSnapshot({ ...first, checkedAt: late }, undefined, fakes.fetcher, late)
     expect(written).toBe(false)
     expect(await readSnapshot(id, fakes.fetcher)).toEqual(renewed)
   })

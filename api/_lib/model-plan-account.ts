@@ -561,6 +561,7 @@ export async function reconcileModelPlanAccount(
         standing.state === "active",
         fetcher,
         verify,
+        now,
       )
       if (accountChanged(account, updated)) {
         await verify()
@@ -2542,6 +2543,7 @@ async function recordCheckoutConsent(
   active: boolean,
   fetcher: typeof fetch,
   verify: () => Promise<void>,
+  now: number,
 ) {
   if (!active || !account.checkout) return account
   if (account.consent?.session === account.checkout.id) {
@@ -2552,6 +2554,7 @@ async function recordCheckoutConsent(
         { account: id, session: account.checkout.id, customer: account.customer, plan: account.checkout.plan },
         undefined,
         fetcher,
+        now,
       )
     return account
   }
@@ -2572,7 +2575,7 @@ async function recordCheckoutConsent(
   }
   await verify()
   await saveAccount(id, { ...account, consent }, fetcher)
-  return recordCheckoutConsent(id, { ...account, consent }, active, fetcher, verify)
+  return recordCheckoutConsent(id, { ...account, consent }, active, fetcher, verify, now)
 }
 
 /**

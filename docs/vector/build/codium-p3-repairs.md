@@ -143,7 +143,9 @@ either…" reconcile on the real clock at a step that does not pass the fixture'
 the period, so reconcile sees a renewal (`paused`, `payment_pending`, received in the first case) instead of the paid
 month the test assumes. Neither path reaches the code changed here. The Vector Codium workflow runs every file in
 `test/`, so these two cases fail there too on any date past that period, until the fixtures or the two tests stop
-depending on the real clock. That fix is outside this review and is left for a separate change.
+depending on the real clock. That fix was outside this review. CFIX makes it: the fixture scenarios now run on their
+fixtures' clocks, with no fixture change and one production change, reconcile's own `now` reaching its purchase
+confirmation (see [codium-cfix-clock-notes.md](codium-cfix-clock-notes.md)).
 
 Mutation checks (each reverted by restoring the tested file):
 
@@ -163,5 +165,7 @@ Typechecks, all through `vector-serial`, with the same results at both runs:
 Prettier `--check` passes on every changed file except `test/codium-billing.test.ts`. That file was already
 unformatted at `HEAD` on a line this change does not touch, and that line was left as it was.
 
-Committed as `fix(codium): P3 review` and pushed to `codium-next` and `codium`. The push to `codium` starts the
-Vector Codium workflow (`.github/workflows/vector-codium.yml`) by itself; its result is not recorded here.
+Committed as `fix(codium): P3 review` and pushed to `codium-next` and `codium`. The push to `codium` started the
+Vector Codium workflow (`.github/workflows/vector-codium.yml`). That run, 41164998802 at `99fcf1c0`, failed only on
+the two calendar cases (\*) in its "Run the Codium test files" step. Its browser specs, its 8 typecheck jobs, the
+HttpApi exerciser gates and the generated-client check passed. CFIX records the run's evidence.

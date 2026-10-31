@@ -875,9 +875,9 @@ describe("Codium plan change", () => {
     process.env.RESEND_API_KEY = "fixture-email-key"
     process.env.VECTOR_PURCHASE_EMAIL_FROM = "Vector <receipts@example.invalid>"
     fakes.stripe.objects.customers.get(String(fixture.account.customer))!.email = user.email
-    await drainOutbox({ now: Date.now(), fetcher: fakes.fetcher })
+    await drainOutbox({ now, fetcher: fakes.fetcher })
     await reconcileModelPlanAccount(id, fakes.fetcher, now)
-    await drainOutbox({ now: Date.now(), fetcher: fakes.fetcher })
+    await drainOutbox({ now, fetcher: fakes.fetcher })
     expect((await readModelPlanAccount(id, fakes.fetcher))!.consent!.confirmationSent).toBe(true)
     expect(fakes.mail.sent).toHaveLength(1)
   })

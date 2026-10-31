@@ -205,6 +205,8 @@ describe("the webhook (contract §4.5)", () => {
   test("a bad signature is refused with 400 before anything is read; a good one is handled and marked done", async () => {
     const fixture = loadStripeFixture("none-no-subscription")
     const fakes = seed(fixture)
+    // The route reads the clock itself: Stripe's notification arrives at the fixture's moment.
+    setSystemTime(new Date(fixture.now * 1000))
     const id = fixture.accountId
     const customer = String(fixture.account.customer)
     const raw = JSON.stringify(event("customer.subscription.updated", { id: "sub_x", customer }, "evt_signed"))
@@ -230,6 +232,8 @@ describe("the webhook (contract §4.5)", () => {
   test("invoice.created queues finalize-renewal and answers 200, even with the store down", async () => {
     const fixture = loadStripeFixture("renewing-draft-invoice")
     const fakes = seed(fixture)
+    // The route reads the clock itself: Stripe's notification arrives at the fixture's moment.
+    setSystemTime(new Date(fixture.now * 1000))
     const invoice = fixture.objects.invoices!.find((value) => value.id === "in_renewal")!
     const raw = JSON.stringify(event("invoice.created", invoice, "evt_renewal_created"))
 
@@ -334,6 +338,8 @@ describe("the webhook (contract §4.5)", () => {
     const fixture = loadStripeFixture("active-paid")
     const invoice = fixture.objects.invoices!.at(-1)!
     const raw = JSON.stringify(event("invoice.paid", invoice, "evt_paid_lost"))
+    // The route reads the clock itself: Stripe's notification arrives at the fixture's moment.
+    setSystemTime(new Date(fixture.now * 1000))
     const warn = spyOn(console, "warn").mockImplementation(() => {})
     try {
       // Reconcile fails, and so does the store's ENQUEUE.
@@ -1025,9 +1031,9 @@ describe("M7: no renewal charge Vector should not take", () => {
   test("the outbox cron runs finalize-renewal: its module registers the handler", async () => {
     expect(() => registerAction("finalize-renewal", async () => {})).toThrow()
     // The replay path (reconcileModelPlanEvent) queues the same action as the route.
-    const { fakes } = renewal()
+    const { fakes, at } = renewal()
     const invoice = fixture().objects.invoices!.find((value) => value.id === "in_renewal")!
-    await reconcileModelPlanEvent(event("invoice.created", invoice), fakes.fetcher)
+    await reconcileModelPlanEvent(event("invoice.created", invoice), fakes.fetcher, { now: at })
     expect(outboxIds(fakes)).toEqual(["finalize-renewal:in_renewal"])
   })
 })

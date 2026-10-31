@@ -1010,6 +1010,9 @@ describe.skipIf(!valkeyURL)("the sweep's walk and replay's cursor on Valkey", ()
   })
 
   test("replay skips done events through MGET and only ever raises its cursor", async () => {
+    // The key reconcile makes here gets a ledger whose expiry Valkey's own clock reads: 40 days after the fixture's
+    // period, 2026-12-10. From then Valkey drops that ledger at once. Nothing here reads it afterwards, reconcile
+    // included; an assertion that does needs a period relative to Date.now().
     const fixture = loadStripeFixture("active-paid")
     const fakes = seed(fixture)
     const fetcher = through(fakes)

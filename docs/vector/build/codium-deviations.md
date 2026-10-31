@@ -336,3 +336,23 @@ Intent-preserving corrections from the P3 phase review. Details and validation a
 - **A lost admission answer is cancelled at once as well.** See the corrected A17 "Lost admission answer" entry: the
   immediate cancel frees the account's in-flight slot and the reservation without waiting 11 minutes, and the deferred
   cancel past the deadline remains for an EVAL still on its way.
+
+## CFIX decisions (test clocks)
+
+No contract text changes. Details and validation are in [codium-cfix-clock-notes.md](codium-cfix-clock-notes.md).
+
+- **Fixture scenarios run on their fixtures' clocks.** The Stripe fixtures stay fixed epochs, each with its own
+  `now`. They are neither moved nor rebased. Every step of a scenario that seeds one passes `fixture.now` or the
+  shared `FakeClock` to the function's `now`. Where the code under test reads the wall clock itself (the webhook
+  route and its signature check, `cancelModelPlanAccount`'s closing snapshot), the test pins bun:test's
+  `setSystemTime` to the fixture's moment. No exported signature changes. A pin is used only where no lease is
+  contended, because a frozen clock never reaches a lease or drain deadline. The M5 describe pins a wall clock past
+  every fixture's period as a guard. This follows M11's test-clock intent, and every assertion is unchanged.
+- **Reconcile's `now` reaches its purchase confirmation.** `reconcileModelPlanAccount` already passed its `now` to
+  every other step and every other item it queues. It now also passes it, through the private
+  `recordCheckoutConsent`, to `enqueueAction`'s existing `now` for `purchase-confirmation`, which before used
+  `Date.now()`. Production callers pass a real time taken at the start of their run, so the confirmation is still due
+  at once. Only its due time and `createdAt` can be earlier, by at most that caller's run so far.
+- **A real-Valkey fixture scenario keeps Valkey's clock.** `codium-replay`'s Valkey case reaches GENESIS, whose
+  ledger expiry follows the fixture's period (2026-12-10), not any caller's time. Nothing in that case reads the
+  ledger, so its result does not depend on the date. It is left as it is, with a comment in the test.
