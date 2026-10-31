@@ -911,7 +911,7 @@ Remaining:
 - Correction (second review): until the second review this line said the resume's fail-closed catch was the SessionTools hook's catch and that mutation (e) covered it. It was a separate, untested copy. It is now `TaskClaims.familyOf`, shared with the hook, and task.test.ts proves the resume path on its own, so nothing about it remains open.
 - The settings-import owner question stays open, with Option A (fail closed) kept until the owner answers (CI5 entry).
 
-## 2026-10-31 MAIN (integrate origin/main 78526052) — status: origin/main `78526052` merged into multiagent-next by one merge commit (`git merge --no-ff`, no rebase); 14 conflicts resolved, keeping both sides' behaviour, the 3 generated ones regenerated with the repo tooling; every package typecheck named below and every focused file below green here (Linux); the terminal's lock-and-record admission, both review rounds, the push and the full run on the integration pending (Remaining); one owner question raised (terminals for subagents, below)
+## 2026-10-31 MAIN (integrate origin/main 78526052) — status: origin/main `78526052` merged into multiagent-next by one merge commit (`git merge --no-ff`, no rebase); 14 conflicts resolved, keeping both sides' behaviour, the 3 generated ones regenerated with the repo tooling; every package typecheck named below and every focused file below green here (Linux); the terminal's lock-and-record admission since done in the MAIN step 11 entry below; both review rounds, the push and the full run on the integration pending (Remaining); one owner question raised (terminals for subagents, below)
 
 Inputs. Branch head `76a6c0f5` (= origin/self-evolving), origin/main `78526052` (desktop 1.99.112 published; includes `dfc98974`), merge base `6eaf445a`; main was 28 commits ahead of the base and the branch 42. Before merging, run 41171765221 on `76a6c0f5` was read complete and green (WP28 Remaining). `git merge --no-ff origin/main` conflicted in exactly the 14 files a `git merge-tree` dry run had listed; the local-fit fixture (CI5's byte-identical port) merged cleanly.
 
@@ -933,7 +933,7 @@ Resolutions:
 
 Contract corrections (intent kept):
 - F.3 "The scan" and "The ask": both now live in `tool/shell.ts`'s `ShellPermission` (main's extraction). `ask()` still calls `ctx.assertWritable` first. `ShellPermission.ask` runs WP28's guest read and git guards before the asks and returns the scan. The shell tool then takes its brief FileLock admission.
-- F.2/F.3 and WP28's Tool.Context wiring list now include main's terminal tool, which submits lines through `ShellPermission.ask`. Its open command lines (and an interactive shell's starting folder) and every submitted line get the F.3 pre-ask ownership and git-rule refusal and WP28's guest read and git guards. Its output was already covered by `Tool.define`'s `assertOutput`. What the terminal does not get yet is the shell's FileLock admission and `TaskClaims.touch` (Remaining).
+- F.2/F.3 and WP28's Tool.Context wiring list now include main's terminal tool, which submits lines through `ShellPermission.ask`. Its open command lines (and an interactive shell's starting folder) and every submitted line get the F.3 pre-ask ownership and git-rule refusal and WP28's guest read and git guards. Its output was already covered by `Tool.define`'s `assertOutput`. What the terminal did not get in the merge commit is the shell's FileLock admission and `TaskClaims.touch`; the MAIN step 11 entry below adds them.
 - R10 / F.3 "Not seen" now also covers:
   - terminal input Vector cannot read: recalled or completed lines, keys, and lines typed into foreign programs;
   - commands typed after a `cd`, which are scanned with the terminal's starting cwd;
@@ -982,12 +982,7 @@ CI-only:
 - macOS is unverified anywhere: there is no runner.
 
 Remaining:
-- Terminal admission, a commit of its own after the merge commit: `ShellPermission.admit(ctx, scans)`, shared by the shell and the terminal. It takes one `FileLock.withFiles` over the union of every line's `written` and `mutates` for the call, runs `assertOwnership` on the union, and only then calls `TaskClaims.touch`. This runs before `pty.create` (open) or before the first `pty.write` (type and keys). One admission per call matters: per-line admission could record a claim for line 1 and then refuse line 2, leaving a claim on a file never written. Regressions, which must fail with the admission removed:
-  - a guest next to an owner-only family whose terminal command or typed line writes `notes.md` or the claimed `vault` gets the P5F10 generic refusal before any PTY or keystroke;
-  - the owner's family gets the named refusal;
-  - a typed line that writes a file makes it the helper's change;
-  - a two-line `type` whose second line writes a sibling-claimed file types nothing and records no claim for the first line's file;
-  - a guest family's terminal can neither open in a private task folder nor type `git worktree list` there.
+- Terminal admission: done, a commit of its own after the merge commit (MAIN step 11 entry below).
 - Round A (the resolutions against both parents) and Round B (main × multi-agent):
   - the terminal lifetime finding above, and closing a family's terminals in a retiring checkout;
   - the ask order;
@@ -996,3 +991,38 @@ Remaining:
   - helpers' per-call models under free-model guest routes and Vector Local Web None.
 - After the merge commit: the push (a fast-forward of self-evolving, through the pre-push hook), a `workflow_dispatch` of test.yml on self-evolving, and a reading of every job.
 - The owner questions: terminals for subagents (above); settings import (CI5 entry), where Option A (fail closed) is kept until the owner answers.
+
+## 2026-10-31 MAIN step 11 (terminal admission) — status: the terminal's command lines and typed lines now take the shell's file-lock admission and become the session's changes, once per call and only after every line's check passes; five SessionTools-driven regressions, each failing under its mutation (sha256-checked) and passing with the fix; the engine typecheck and every changed file's tests green here (Linux), terminal.test.ts's Bun cases left to CI; not committed yet (the merge commit comes first)
+
+Change (engine `tool/shell.ts`, `tool/terminal.ts`):
+- `ShellPermission.admit(ctx, scans)`, shared by the shell and the terminal. It takes one `FileLock.withFiles` over the union of every scan's `written` and `mutates`, runs `assertOwnership` on the union inside the locks (files, recursive targets and git mutations of every scan), and only after that passes calls `TaskClaims.touch` for each file. `assertOwnership` now takes a list of scans; `ask()` passes its one scan, so the pre-ask check (F.3) is unchanged.
+- The shell tool calls `admit(ctx, [scan])` where it had its own copy of the same admission. Same locks, same check, same touches: no behaviour change.
+- Terminal `open`: after the asks and the `shell.env` hook, immediately before `pty.create`. The files its command line writes become the session's changes before the program starts, as the shell's do before it spawns.
+- Terminal `type` and `keys`: every line the strokes submit is asked first (each with its own pre-ask check), then one admission over all of them, before the pending line is updated and before the first `pty.write`. A line refused at its ask or at the admission refuses the whole call: nothing is typed and no file is recorded, so a refused second line leaves no claim on a file the first line names. Admission per line would have recorded the first line's file and then refused the second.
+- No Bun API: Effect, `FileLock` and `TaskClaims` only, so the engine runtime stays Node-compatible. No public Protocol or HttpApi change, so no generator.
+
+Contract corrections (intent kept):
+- F.2/F.3 for the terminal: the MAIN entry's "What the terminal did not get in the merge commit" is done. A terminal call's lines are one admission, as a shell command is one.
+- What admission records is what the scan resolves. A line Vector cannot read (recalled or completed text, keys, a foreign program's input) has no resolved targets, so it records nothing, and writes a terminal's process makes after the call returns are not seen (R10 / F.3 "Not seen", unchanged from the MAIN entry). A recorded file stays the helper's change until its claim settles, as a shell write does.
+
+Tests (new `engine/test/session/terminal-admission.test.ts`; the real terminal tool through `SessionTools.resolve` with the real audience, claims, chokepoint and guest guards; every ask recorded and allowed; terminals run `/bin/sh`; gated off Windows, where terminals do not start in tests, as terminal.test.ts's `ptyTest` is; no Bun subprocess). "Nothing typed" is shown by typing `echo done` after the refusal, waiting for its output and reading the whole terminal: a line typed before it would have been echoed and run first.
+1. "a guest next to an owner-only family is refused that family's files without its names, before any terminal or keystroke; the owner is told which subagent". The owner's conversation has two running helpers, one fenced owner-only: one changed `notes.md`, the other owns `vault`; the guest's root works in the same folder. For the guest and then the owner: `open` with `printf x > notes.md` and with `printf x > vault/new.ts` is refused with no ask, and the owner's list shows no terminal; in an open `/bin/sh`, typing each line is refused with only the `terminal_input` ask, and the shell never sees it. The guest's four refusals are the exact P5F10 generic texts, without either title, any session ID or "which owns"; the owner's are the exact named texts. `notes.md` is unchanged and `vault/new.ts` absent.
+2. "a typed line that writes a file makes it the helper's change". An unscoped helper types `printf report > out.txt; echo written` into its terminal; the file is written and `TaskClaims.conflicts` from the parent names the helper; the parent's own terminal `open` writing `out.txt` is refused with "was changed by the running subagent "Write the report" (<id>)", and the file keeps the helper's bytes.
+3. "a two-line type whose second line writes a sibling's file types nothing and claims nothing for the first". `printf a > first.txt` then `printf b > vault/x.ts` (a sibling owns `vault`): refused with the named text and "Report the change you need to the parent."; nothing typed, `first.txt` absent and claimed by no one.
+4. "a claim made while a call's lines are asked for refuses the whole call at admission". The sibling claims `second.txt` inside the ask for the second line's edit, after that line's pre-ask check passed: the admission's check inside the locks refuses the call with the named text; nothing typed, neither file exists, and `first.txt` is claimed by no one.
+5. "a guest family's terminal neither opens in a private task folder nor types git worktree list beside it; an owner's does both". A real linked worktree of the project repository, fenced (checkout and its Git metadata), reached through an `alias` link so the arguments never spell it: the guest's `open` there is refused ("This operation could expose private task data.") with no ask and no terminal; in the guest's own shell in the project, typing `git worktree list` is refused with only the `terminal_input` ask, without the private path, and the owner's full read of that terminal shows the command never ran. The owner opens a terminal through the link and its `git worktree list` prints the private checkout.
+
+Mutations (each applied to the fixed source, run on the whole new file, reverted and checked by sha256 against the fixed copies; all on the final test file):
+- M0, the staged merge's `shell.ts` and `terminal.ts` (the terminal with no admission): 3/5, cases 2 and 4 failing.
+- M2, admission per line inside the type loop instead of once after it: 3/5, cases 3 and 4 failing.
+- M3, `ask()` without its pre-ask `assertOwnership` (the admission kept): 4/5, case 1 failing (the line's asks come before the refusal). M5, M3 with the terminal's admission also removed: case 1 fails at its first `open`, which is then not refused (and case 2 fails, as under M0).
+- M4, `ShellPermission.ask` without the guest read and Git guards: 4/5, case 5 failing at the guest's `open`. M4b, without only the Git guard: case 5 fails (the line's `bash` ask is made before any refusal).
+
+Runs (2026-10-31; Linux, uid 0; one file at a time through the lock wrapper, from packages/engine, `--timeout 30000`; fresh XDG roots per run under `/tmp/vector-engine/main-step11/`, TMPDIR `/var/tmp/vector-engine/main-step11`):
+- terminal-admission 5/5 (before the mutations, and again on the final file after them).
+- shell-ownership 36/36; shell-writes 4/4; shell.test.ts 51/51 with the same 12 Bun cases filtered out by name as in the MAIN entry; session-tools-writable 4/4; private-tools 6/6; permission/terminal-policy 3/3; terminal.test.ts's four cases that start no Bun process, by name, 4/4 (22 filtered out).
+- Engine typecheck green. `prettier --check` clean on the three changed code files (the new test after one `--write`, layout only); `git diff --check` clean.
+
+CI-only: terminal.test.ts's 22 cases that start Bun as the terminal's program; the Windows engine shards (the new file does not run there; shell-ownership's PowerShell and cmd cases do).
+
+Remaining: as the MAIN entry's Remaining (the merge commit first, then this commit, the two review rounds, the push and the full run).

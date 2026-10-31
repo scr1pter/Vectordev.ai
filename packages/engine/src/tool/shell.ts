@@ -1038,11 +1038,13 @@ const cloudRequests = Effect.fn("ShellTool.cloudRequests")(function* (
   return nested.flat()
 })
 
-const assertOwnership = (ctx: Tool.Context, scan: Scan) =>
+// The ownership check over every line a call hands to a shell: the shell tool's one command, or each line a terminal
+// call submits.
+const assertOwnership = (ctx: Tool.Context, scans: readonly Scan[]) =>
   ctx.assertWritable?.({
-    files: [...scan.written, ...scan.mutates],
-    recursive: [...scan.written, ...scan.recursive],
-    git: scan.git,
+    files: scans.flatMap((scan) => [...scan.written, ...scan.mutates]),
+    recursive: scans.flatMap((scan) => [...scan.written, ...scan.recursive]),
+    git: scans.flatMap((scan) => scan.git),
     via: "shell",
   }) ?? Effect.void
 
@@ -1051,7 +1053,7 @@ const ask = Effect.fn("ShellTool.ask")(function* (
   scan: Scan,
   input: { readonly command: string; readonly unread?: boolean; readonly recalled?: boolean },
 ) {
-  yield* assertOwnership(ctx, scan)
+  yield* assertOwnership(ctx, [scan])
   if (scan.dirs.size > 0) {
     const directories = Array.from(scan.dirs)
     const globs = directories.map((dir) => {
@@ -1306,8 +1308,9 @@ const psParser = grammar(
 )
 
 /**
- * The shell tool's permission scan and asks, for a command line another tool hands to a shell (the terminal tool's
- * submitted lines). It reads with the child process spawner (git check-ignore, cygpath) and FSUtil, as the shell does.
+ * The shell tool's permission scan, asks and admission, for a command line another tool hands to a shell (the terminal
+ * tool's submitted lines). It reads with the child process spawner (git check-ignore, cygpath) and FSUtil, as the shell
+ * does.
  */
 export const ShellPermission = Effect.gen(function* () {
   const spawner = yield* ChildProcessSpawner
@@ -1808,6 +1811,19 @@ export const ShellPermission = Effect.gen(function* () {
         }),
       )
     }),
+    // Admission, after every ask of the call and right before its lines start or are typed. It is brief and takes the
+    // same file locks as edit, write and apply_patch: the ownership check repeats inside them, so another writer that
+    // claimed a file while the asks waited is refused here, and only then do the files become this session's changes.
+    // One admission for all of a call's lines, so a refused line leaves no claim on a file an earlier line names.
+    admit: Effect.fn("ShellPermission.admit")(function* (ctx: Tool.Context, scans: readonly Scan[]) {
+      const files = [...new Set(scans.flatMap((scan) => [...scan.written, ...scan.mutates]))]
+      yield* FileLock.withFiles(files)(
+        Effect.gen(function* () {
+          yield* assertOwnership(ctx, scans)
+          for (const file of files) TaskClaims.touch(ctx.sessionID, file)
+        }),
+      )
+    }),
   }
 })
 
@@ -2079,14 +2095,9 @@ export const ShellTool = Tool.define(
               const refused = webNone() ? Sandbox.offlineRefusal() : undefined
               if (refused) return yield* Effect.die(new Error(refused))
               const scan = yield* permission.ask(ctx, { command: params.command, cwd, shell })
-              // Admission is brief and takes the same file locks as edit/write/patch. Reserve resolved shell targets
-              // before spawning: another unscoped writer must not pass while this command is running.
-              yield* FileLock.withFiles([...scan.written, ...scan.mutates])(
-                Effect.gen(function* () {
-                  yield* assertOwnership(ctx, scan)
-                  for (const file of new Set([...scan.written, ...scan.mutates])) TaskClaims.touch(ctx.sessionID, file)
-                }),
-              )
+              // Reserve resolved shell targets before spawning: another unscoped writer must not pass while this
+              // command is running.
+              yield* permission.admit(ctx, [scan])
 
               return yield* run(
                 {
