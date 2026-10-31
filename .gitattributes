@@ -16,3 +16,8 @@ packages/core/src/database/migration.gen.ts linguist-generated
 # Prompts and tool descriptions go to the model as written, so a Windows checkout must not add carriage returns to them.
 /packages/engine/src/**/*.txt text eol=lf
 /packages/core/src/**/*.txt text eol=lf
+
+# Vector Hands' helper inputs: blocklist.json is compared byte-for-byte with a fresh render and embedded verbatim in
+# the native helpers' generated sources, and the native helpers read the conformance transcripts line by line.
+/packages/desktop/native/computer-helper/*.json text eol=lf
+/packages/desktop/test/fixtures/computer-protocol/*.jsonl text eol=lf

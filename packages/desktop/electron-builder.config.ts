@@ -5,6 +5,7 @@ import { promisify } from "node:util"
 
 import { Arch } from "electron-builder"
 import type { Configuration } from "electron-builder"
+import { APP_IDS, EXECUTABLE_NAMES } from "./scripts/channel-ids"
 import { verifyNativeModules } from "./scripts/verify-native"
 
 const execFileAsync = promisify(execFile)
@@ -56,18 +57,6 @@ if (process.env.GITHUB_ACTIONS === "true" && channel === "prod" && !allowUnsigne
     throw new Error("Production Windows artifacts require VECTOR_WINDOWS_PUBLISHER_NAME.")
   }
 }
-
-const APP_IDS = {
-  dev: "ai.vector.app.dev",
-  beta: "ai.vector.app.beta",
-  prod: "ai.vector.app",
-} as const
-
-const EXECUTABLE_NAMES = {
-  dev: "vector-desktop-dev",
-  beta: "vector-desktop-beta",
-  prod: "vector-desktop",
-} as const
 
 const getBase = (appId: string, executableName: string): Configuration => ({
   // Updater artifacts are immutable by version. Publishing latest*.yml last can

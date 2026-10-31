@@ -18,6 +18,15 @@
     "types": ["vite/client", "node", "electron"]
   },
   "references": [{ "path": "../app" }],
-  "include": ["src", "package.json"],
+  "include": [
+    "src",
+    "package.json",
+    "scripts/channel-ids.ts",
+    "scripts/computer-helper-identity.ts",
+    "test/computer/fake-desktop.ts",
+    "test/computer/fake-helper.ts",
+    "test/computer/png.ts",
+    "test/computer/transcript.ts"
+  ],
   "exclude": ["src/**/*.test.ts"]
 }
