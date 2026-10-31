@@ -236,6 +236,7 @@ Tests:
 Tests:
 - `github.route-script.test.ts` › "bot comments and bot dispatches without a ticket route to none" (V14)
 - `packages/web/test/cloud-agents-mint-api.test.ts` › "dispatch tokens from github-actions[bot] and dependabot[bot] are refused, with and without the App" (V12)
+- `packages/web/test/github-app-api.test.ts` › "a Bot-type author without the [bot] suffix is refused" (V09)
 - `packages/web/test/cloud-agents-start.test.ts` › "a ticket is single-use and bound to its repository and binding" (V13)
 - `packages/web/test/cloud-agents-ledger.test.ts` › "a ticket starts one run: parallel mints from different check runs that peeked it reserve once" (V06)
 
@@ -988,7 +989,7 @@ The following apply to every audience:
 
 The job-workflow claims are accepted only when `job_workflow_ref === workflow_ref` and `job_workflow_sha === workflow_sha`, or when both are absent. Exactly one present, or unequal values, is refused. These claims are recorded in the identity.
 
-**Actors.** Today's actor pattern (`^[A-Za-z0-9][A-Za-z0-9-]{0,38}$`) stays for every audience and event, with one exception: on the `mint` audience, for `workflow_dispatch` only, an actor matching `^[a-z0-9][a-z0-9-]{0,98}\[bot\]$` is accepted and recorded with `actorIsBot: true`. The mint then applies step 8 of 2.8; nothing else accepts a bot.
+**Actors.** Today's actor pattern (`^[A-Za-z0-9][A-Za-z0-9-]{0,38}$`) stays for every audience and event, with one exception: on the `mint` audience, for `workflow_dispatch` only, an actor matching `^[a-z0-9][a-z0-9-]{0,98}\[bot\]$` is accepted and recorded with `actorIsBot: true`. The mint then applies step 8 of 2.8; nothing else accepts a `[bot]` login. The token carries no account-type claim, so a Bot account whose login has no `[bot]` suffix (GitHub's `Copilot`, for one) matches today's pattern and is recorded with `actorIsBot: false` on every audience and event: `actorIsBot: false` means "no `[bot]` suffix", not "a human". With the App, V09's author-type check refuses such an author on comment, review-comment and issue events; without the App, the route job's `user.type != 'Bot'` pre-filter (2.11.3) is the only check, as the route job's writer check is for INV-S1.
 
 | Audience | Events | Ref and subject |
 |---|---|---|
@@ -997,6 +998,39 @@ The job-workflow claims are accepted only when `job_workflow_ref === workflow_re
 | `bind` | `workflow_dispatch` only | `refs/heads/*` |
 
 The identity also gains `runnerEnvironment` (from `runner_environment`, required on `mint`), `refProtected` (from `ref_protected`), `actorIsBot`, and the optional `repositoryVisibility`, `jobWorkflowRef`, `pullRequest`, `headRef` and `baseRef`. Nothing authorizes on `sub`. Everything keys on `repository_id` plus `repository_owner_id`.
+
+**The identity** (V08). `GithubIdentity` is the verifier's inferred return type, one type for every audience. Every `GithubIdentity` is a `BindIdentity` (2.5).
+
+```ts
+type GithubIdentity = {
+  repository: string; repositoryId: string; owner: string; ownerId: string
+  actor: string; actorId: string
+  actorIsBot: boolean                       // true only for a `<slug>[bot]` actor on mint with workflow_dispatch; false is not "a human"
+  runId: string; runAttempt: string; checkRunId: string   // decimal ids, safe integers
+  sha: string; workflowSha: string; ref: string; workflowRef: string
+  jobWorkflowRef: string | undefined        // equal to workflowRef when present; no jobWorkflowSha, which would equal workflowSha
+  event: string; subject: string; jti: string; expiresAt: number   // expiresAt in seconds
+  audience: (typeof githubOidcAudiences)[GithubOidcPurpose]
+  runnerEnvironment: string | undefined     // ^[a-z][a-z0-9-]{0,39}$; always a string on mint
+  refProtected: boolean                     // true only for the claim string "true"
+  repositoryVisibility: "public" | "private" | "internal" | undefined
+  pullRequest: number | undefined           // these three only for a mint review comment
+  headRef: string | undefined
+  baseRef: string | undefined
+}
+```
+
+**Subjects.** For every event except a review comment, `repo:O/R:ref:<ref>` or `repo:O@<ownerId>/R@<repositoryId>:ref:<ref>`, as today. For a review comment on `mint`, `repo:O/R:pull_request` or `repo:O@<ownerId>/R@<repositoryId>:pull_request`.
+
+**The added claims.** On `mint` and `bind`, `runner_environment` (`^[a-z][a-z0-9-]{0,39}$`), `ref_protected` (`"true"` or `"false"`) and `repository_visibility` (`public`, `private` or `internal`) must each be absent or well-formed, and `mint` requires `runner_environment`. On `token` and `installation`, which never read them, a malformed value is recorded as absent (`refProtected: false`), so those audiences accept exactly what they accepted before V08, apart from the job-workflow rule.
+
+**Refusal codes, in check order** (today's codes and order):
+1. 401 `OIDC_INVALID`: the format, header, signature, issuer, audience and times; `environment`; the job-workflow rule, checked against the raw claims; then every claim's shape: repository and owner, the event name, the ref (`^refs/pull/[1-9]\d{0,9}/merge$` for a mint review comment, `refs/heads/*` otherwise), the added claims above, the actor (a `[bot]` login only on mint with `workflow_dispatch`), the ids, `sha`, `workflow_sha`, `workflow_ref`, `sub` and `jti`.
+2. 403 `WORKFLOW_NOT_TRUSTED`: `ref_type` (`branch`; for a review comment, `branch` or absent); `head_ref` and `base_ref` (absent or empty, except on a review comment, where both must match `^[^\s:~^?*\[\\]{1,240}$`); `workflow_ref` other than `<repository>/.github/workflows/vector.yml@<ref>`; `workflow_sha ≠ sha`.
+3. 401 `OIDC_INVALID`: a `sub` that is not one of the event's two subject forms.
+4. 403 `EVENT_NOT_ALLOWED`: an event outside the audience's list, checked last.
+
+So a review-comment token signed for `token`, `installation` or `bind` fails at its ref (401) before the event list, and a `[bot]` actor anywhere but a mint dispatch fails at the actor pattern (401).
 
 ## 2.11 Workflow v3 (`packages/core/src/review/workflow.ts`) and the version handshake
 
@@ -1464,14 +1498,22 @@ Each package lists its files, changes, tests, done-criteria and the checks that 
 ### V08. OIDC verifier: `mint` and `bind` audiences, job-workflow claims, review comments, the App bot
 - **Files:** `api/_lib/github-oidc.ts`; `packages/web/test/github-oidc.test.ts`.
 - **Changes:** 2.10.
-- **Tests:**
-  - equal job-workflow claims accepted on every audience;
-  - unequal claims, or exactly one present, refused;
-  - `environment` refused;
-  - `mint` accepts a review comment with the `pull_request` subject and a `refs/pull/N/merge` ref, and `token` still refuses it;
-  - `bind` accepts only `workflow_dispatch`;
-  - `<slug>[bot]` on `mint` with `workflow_dispatch` is accepted with `actorIsBot: true`; a bot actor on `issue_comment`, and on the `token`, `installation` and `bind` audiences, is refused;
-  - `runner_environment` and `ref_protected` are recorded, and a `mint` token without `runner_environment` is refused;
+- **Tests** (`github-oidc.test.ts`; "every audience" is `token`, `installation`, `mint`, `bind` and a mint review comment, each signed for the audience it is verified against):
+  - "equal job-workflow claims are accepted on every audience" (recorded as `jobWorkflowRef`; equal claims excuse neither the workflow path nor the commit);
+  - "unequal or lone job-workflow claims are refused on every audience";
+  - "environment is refused on every audience";
+  - "mint accepts a review comment, and token still refuses it" (both `pull_request` subject forms, `ref_type` `branch` or absent, `refs/pull/9999999999/merge`; the same claims signed for `token`, `installation` and `bind` fail at the ref; on `mint`, a `ref:` subject, a non-merge or out-of-range ref, a missing, empty or malformed `head_ref` or `base_ref`, `ref_type` `tag` or empty, and the workflow at another ref or commit are refused);
+  - "events other than review comments keep ref_type branch and no head or base ref on every audience" (`ref_type` absent, empty or `tag`, and a non-empty `head_ref` or `base_ref`, on `token`, `installation`, `mint` `issue_comment`, `mint` `workflow_dispatch` and `bind`);
+  - "token and installation keep their four events, and refuse a review comment at the event list";
+  - "bind accepts only workflow_dispatch";
+  - "the App bot is accepted only on mint for workflow_dispatch" (`actorIsBot: true`, up to 99 characters before `[bot]`; refused on `mint` for `issue_comment`, `issues`, `schedule` and review comments, on `token`, `installation` and `bind`, and when malformed);
+  - "runner_environment is recorded" (INV-S19; a `mint` token without it, or with a malformed one, is refused);
+  - "ref_protected and repository_visibility are recorded";
+  - "token and installation accept a malformed added claim as absent, as they did before V08";
+  - "mint takes its five events and no others";
+  - "audiences are separate";
+  - "mint and bind proofs are single-use, keyed by audience";
+  - "the identity has 2.10's shape" (type level; `packages/web`'s typecheck checks it);
   - every existing case still passes unchanged.
 - **Done:** the test passes; the `token` and `installation` event, ref and actor rules are unchanged in `github-app-api.test.ts`, run in CI.
 - **CI-only:** `github-app-api.test.ts` (Redis); run it locally only with a loopback Redis.
@@ -1484,6 +1526,7 @@ Each package lists its files, changes, tests, done-criteria and the checks that 
     - **the comment check:** `issues/comments/{id}` or `pulls/comments/{id}`; the author id equals `actorId`; the body still has a mention, by importing `parseReviewCommand` from `../../packages/core/src/review/command.js` with `mentions(slug)`; otherwise 403 `COMMENT_CHANGED`;
     - **the thread check:** for comment events, `thread` equals the comment's issue or PR number; for `issues` events, the issue's number, its `user.id` equals `actorId`, and its title or body still parses to a task;
     - **the binder check:** `GET /user/{binder.githubId}` resolves the login, then the collaborator-permission check; without write, maintain or admin the result is `binder-left`; a pass is cached in `binder-ok:<repositoryId>` for 1 hour;
+    - **the author-type check:** for comment, review-comment and `issues` events, the fetched comment's or issue's `user.type` is `User`, otherwise 403 `ACTOR_NOT_ALLOWED`. The OIDC token has no account-type claim and a Bot account's login need not end in `[bot]`, so `identity.actorIsBot: false` never proves a human (2.10, INV-S2);
     - **the bot check:** with `bot: true`, the actor id equals the App bot's user id (`GET /users/<slug>[bot]`), and the default-branch checks apply as for any dispatch;
     - **the admin check** for bind takeovers (O6).
   - **Review-comment rules:** the PR is open and same-repository, and the comment's PR matches. The default-branch head checks are replaced, not skipped: the run's and the job's `head_sha` equal the PR's `head.sha`, their `head_branch` equals the PR's `head.ref`, and the OIDC `sha` is the PR's merge commit. The blob SHA of `.github/workflows/vector.yml` at `identity.workflowSha` must equal its blob on the head of `binding.defaultRef`; otherwise 403 `WORKFLOW_NOT_TRUSTED` (INV-S11).
@@ -1496,6 +1539,7 @@ Each package lists its files, changes, tests, done-criteria and the checks that 
   - an edited comment → `COMMENT_CHANGED`;
   - a thread that differs from the comment's issue → refused;
   - an issue whose author is not the actor → refused;
+  - a comment, a review comment and an issue whose author's `user.type` is `Bot` and whose login has no `[bot]` suffix (`Copilot`), with an identity that has `actorIsBot: false` → `ACTOR_NOT_ALLOWED` (INV-S2);
   - a fork review comment → `EVENT_NOT_ALLOWED`;
   - a review comment with a changed `vector.yml` → `WORKFLOW_NOT_TRUSTED`; one with the same blob passes the head checks;
   - a bot with a mismatched user id refused;
