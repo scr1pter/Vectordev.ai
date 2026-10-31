@@ -806,7 +806,9 @@ async function openJourney(
      */
     async step() {
       if (turn.steps.length > 0) await close({ finish: "tool-calls" })
-      const id = `msg_zz_journey_${turn.steps.length + 1}`
+      // The app keeps messages in id order, as engine ids ascend, so the step number is zero-padded to keep a turn of
+      // ten or more steps in order.
+      const id = `msg_zz_journey_${String(turn.steps.length + 1).padStart(2, "0")}`
       turn.steps.push(id)
       await message(assistant(id, turn.parentID, START + turn.steps.length * 1_000))
       return id

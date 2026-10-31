@@ -14,6 +14,7 @@ import {
   onMount,
   Show,
   Switch,
+  untrack,
   type Accessor,
   type JSX,
 } from "solid-js"
@@ -1065,7 +1066,11 @@ export function MessageTimeline(props: {
   }
 
   const renderAssistantPartGroup = (row: Accessor<TimelineRowMap["AssistantPart"]>, onSizeChange?: () => void) => {
-    if (row().group.type === "context") {
+    // This runs inside the insert effect of the row's JSX, so a tracked read of the row would remount the whole group
+    // (a run card losing its DOM as its run grows) whenever the row object changes. The row key carries the group
+    // type, so a mounted row never changes type, and only the memos below follow the row.
+    const type = untrack(() => row().group.type)
+    if (type === "context") {
       const parts = createMemo(() => {
         const group = row().group
         if (group.type !== "context") return emptyTools
@@ -1091,7 +1096,7 @@ export function MessageTimeline(props: {
       )
     }
 
-    if (row().group.type === "computer") {
+    if (type === "computer") {
       // Tool calls and the agent's notes between them, in order; the open state lives with the other tool rows so
       // it survives virtualization and the session cache.
       const parts = createMemo(() => {

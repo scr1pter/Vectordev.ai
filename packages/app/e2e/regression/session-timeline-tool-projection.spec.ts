@@ -96,6 +96,8 @@ test("labels web search calls from earlier versions without their search service
   await expect(page.getByRole("button", { name: /Exa/ })).toHaveCount(0)
 })
 
+// The app keeps a message's parts in id order, as engine ids ascend, so each Hands case numbers its part ids in the
+// order the engine would write them.
 const NUMBERS = { key: "app:macos:com.apple.iwork.numbers", name: "Numbers" }
 const INTENT = "SENTINEL agent intent"
 const PNG =
@@ -106,23 +108,23 @@ test("a Hands run renders one card with Vector-built labels and the agent's word
   page,
 }) => {
   const parts = [
-    textPart("prt_run_lead", "I'll update the spreadsheet."),
-    computer("prt_run_1", { action: "screenshot", frame }, { action: "screenshot" }, true),
-    textPart("prt_run_note_1", "Saving the sheet now."),
-    reasoningPart("prt_run_reason_1", "The Save button is in the toolbar."),
+    textPart("prt_run_01_lead", "I'll update the spreadsheet."),
+    computer("prt_run_02", { action: "screenshot", frame }, { action: "screenshot" }, true),
+    textPart("prt_run_03_note", "Saving the sheet now."),
+    reasoningPart("prt_run_04_reason", "The Save button is in the toolbar."),
     computer(
-      "prt_run_2",
+      "prt_run_05",
       { action: "click", target: { role: "button", name: "Save" }, intent: INTENT },
       { action: "click", intent: INTENT },
     ),
     computer(
-      "prt_run_3",
+      "prt_run_06",
       { action: "type", text: { length: 16, preview: "October receipts" } },
       { action: "type", text: "October receipts" },
     ),
-    computer("prt_run_4", { action: "key", keys: "cmd+s" }, { action: "key", keys: "cmd+s" }),
-    computer("prt_run_5", { action: "scroll", screenshotRemoved: true }, { action: "scroll", direction: "down" }),
-    textPart("prt_run_done", "Done."),
+    computer("prt_run_07", { action: "key", keys: "cmd+s" }, { action: "key", keys: "cmd+s" }),
+    computer("prt_run_08", { action: "scroll", screenshotRemoved: true }, { action: "scroll", direction: "down" }),
+    textPart("prt_run_09_done", "Done."),
   ]
   await setupTimeline(page, {
     messages: [userMessage(), assistantMessage(parts)],
@@ -138,10 +140,10 @@ test("a Hands run renders one card with Vector-built labels and the agent's word
   await expect(card.getByText("Screenshot removed", { exact: true })).toBeVisible()
   await expect(card.locator('[data-slot="computer-run-last"]')).toHaveText("Scrolled down")
   // Text before and after the run keeps its own rows; the notes between steps are only in the card.
-  await expect(page.locator('[data-component="text-part"][data-timeline-part-id="prt_run_lead"]')).toBeVisible()
-  await expect(page.locator('[data-component="text-part"][data-timeline-part-id="prt_run_done"]')).toBeVisible()
-  await expect(page.locator('[data-timeline-part-id="prt_run_note_1"]')).toHaveCount(0)
-  await expect(page.locator('[data-timeline-part-id="prt_run_reason_1"]')).toHaveCount(0)
+  await expect(page.locator('[data-component="text-part"][data-timeline-part-id="prt_run_01_lead"]')).toBeVisible()
+  await expect(page.locator('[data-component="text-part"][data-timeline-part-id="prt_run_09_done"]')).toBeVisible()
+  await expect(page.locator('[data-timeline-part-id="prt_run_03_note"]')).toHaveCount(0)
+  await expect(page.locator('[data-timeline-part-id="prt_run_04_reason"]')).toHaveCount(0)
 
   await trigger.click()
   const steps = card.locator('[data-slot="computer-run-step-label"]')
@@ -157,20 +159,20 @@ test("a Hands run renders one card with Vector-built labels and the agent's word
     "The agent: The Save button is in the toolbar.",
     `The agent: ${INTENT}`,
   ])
-  await expect(card.locator('[data-timeline-part-id="prt_run_5"]')).toContainText("Screenshot removed")
+  await expect(card.locator('[data-timeline-part-id="prt_run_08"]')).toContainText("Screenshot removed")
 })
 
 test("a Hands thumbnail opens its preview, with the ring only where a single call clicked", async ({ page }) => {
   const parts = [
     computer(
-      "prt_ring_click",
+      "prt_ring_01_click",
       { action: "click", target: { name: "Save" }, point: { x: 50, y: 25 }, frame },
       { action: "click", x: 50, y: 25 },
       true,
     ),
     // A batch rewrites the point for each group of steps, so its point inside the frame still draws no ring.
     computer(
-      "prt_ring_batch",
+      "prt_ring_02_batch",
       { action: "click", point: { x: 120, y: 60 }, frame },
       {
         action: "click",
@@ -183,13 +185,13 @@ test("a Hands thumbnail opens its preview, with the ring only where a single cal
     ),
     // A paused click's screenshot is the frame after the user, and the click may never have run, so no ring.
     computer(
-      "prt_ring_paused",
+      "prt_ring_03_paused",
       { action: "click", point: { x: 50, y: 25 }, frame, paused: { by: "pointer", ms: 2_000 } },
       { action: "click", x: 50, y: 25 },
       true,
     ),
     // The engine records no point for a zoom, so its preview has no ring.
-    computer("prt_ring_zoom", { action: "zoom", frame }, { action: "zoom" }, true),
+    computer("prt_ring_04_zoom", { action: "zoom", frame }, { action: "zoom" }, true),
   ]
   await setupTimeline(page, { messages: [userMessage(), assistantMessage(parts)] })
 
@@ -204,9 +206,9 @@ test("a Hands thumbnail opens its preview, with the ring only where a single cal
   await card.locator('[data-slot="computer-run-trigger"]').click()
   // Each step of the batch has its own label.
   await expect(
-    card.locator('[data-timeline-part-id="prt_ring_batch"] [data-slot="computer-run-step-label"]'),
+    card.locator('[data-timeline-part-id="prt_ring_02_batch"] [data-slot="computer-run-step-label"]'),
   ).toHaveText(["Clicked in Numbers", "Pressed keys in Numbers"])
-  for (const id of ["prt_ring_batch", "prt_ring_paused"]) {
+  for (const id of ["prt_ring_02_batch", "prt_ring_03_paused"]) {
     await card.locator(`[data-timeline-part-id="${id}"]`).getByRole("button", { name: "View screenshot" }).click()
     await expect(preview.locator('[data-slot="image-preview-image"]')).toBeVisible()
     await expect(preview.locator('[data-slot="computer-ring"]')).toHaveCount(0)
@@ -215,7 +217,7 @@ test("a Hands thumbnail opens its preview, with the ring only where a single cal
   }
 
   await card
-    .locator('[data-timeline-part-id="prt_ring_click"]')
+    .locator('[data-timeline-part-id="prt_ring_01_click"]')
     .getByRole("button", { name: "View screenshot" })
     .click()
   const ring = preview.locator('[data-slot="computer-ring"]')
@@ -226,9 +228,9 @@ test("a Hands thumbnail opens its preview, with the ring only where a single cal
 
 test("a non-computer tool between Hands calls makes two cards", async ({ page }) => {
   const parts = [
-    computer("prt_split_1", { action: "click" }, { action: "click" }),
-    toolPart("prt_split_read", "read", "completed", { filePath: "src/app.ts" }),
-    computer("prt_split_2", { action: "click" }, { action: "click" }),
+    computer("prt_split_01", { action: "click" }, { action: "click" }),
+    toolPart("prt_split_02_read", "read", "completed", { filePath: "src/app.ts" }),
+    computer("prt_split_03", { action: "click" }, { action: "click" }),
   ]
   await setupTimeline(page, { messages: [userMessage(), assistantMessage(parts)] })
 
@@ -237,9 +239,9 @@ test("a non-computer tool between Hands calls makes two cards", async ({ page })
 
 test("an interrupted Hands call is labeled by Vector, never by its raw error", async ({ page }) => {
   const parts = [
-    computer("prt_abort_1", { action: "screenshot" }, { action: "screenshot" }),
+    computer("prt_abort_01", { action: "screenshot" }, { action: "screenshot" }),
     toolPart(
-      "prt_abort_2",
+      "prt_abort_02",
       "computer",
       "error",
       { action: "open_app", app: INTENT },
@@ -261,7 +263,7 @@ test("an interrupted Hands call is labeled by Vector, never by its raw error", a
   await expect(last).toContainText("Opened the app")
   await expect(last.locator('[data-slot="computer-run-step-status"]')).toHaveText("Failed")
   await card.locator('[data-slot="computer-run-trigger"]').click()
-  await expect(card.locator('[data-timeline-part-id="prt_abort_2"]')).toContainText("Failed")
+  await expect(card.locator('[data-timeline-part-id="prt_abort_02"]')).toContainText("Failed")
   await expect(card).not.toContainText("Tool execution aborted")
   await expect(card).not.toContainText(INTENT)
 })
@@ -270,11 +272,11 @@ test("an interrupted Hands call is labeled by Vector, never by its raw error", a
 // claim the text was typed. The note between the steps is only in the card, so the turn's footer stays on its own text.
 test("a stopped Hands call never reads as done, and the turn keeps its footer", async ({ page }) => {
   const parts = [
-    textPart("prt_stop_lead", "I'll send the reply."),
-    computer("prt_stop_1", { action: "click", target: { name: "Reply" } }, { action: "click" }),
-    textPart("prt_stop_note", "Typing the reply now."),
+    textPart("prt_stop_01_lead", "I'll send the reply."),
+    computer("prt_stop_02", { action: "click", target: { name: "Reply" } }, { action: "click" }),
+    textPart("prt_stop_03_note", "Typing the reply now."),
     computer(
-      "prt_stop_2",
+      "prt_stop_04",
       { action: "type", text: { length: 18, preview: "Dear Bob, I resign" }, code: "stopped" },
       { action: "type" },
     ),
@@ -287,11 +289,11 @@ test("a stopped Hands call never reads as done, and the turn keeps its footer", 
   await expect(card.locator('[data-slot="computer-run-last"]')).toHaveText("Stopped")
   await expect(page.locator('[data-slot="text-part-copy-wrapper"]')).toHaveCount(1)
   await expect(
-    page.locator('[data-timeline-part-id="prt_stop_lead"] [data-slot="text-part-copy-wrapper"]'),
+    page.locator('[data-timeline-part-id="prt_stop_01_lead"] [data-slot="text-part-copy-wrapper"]'),
   ).toHaveCount(1)
 
   await card.locator('[data-slot="computer-run-trigger"]').click()
-  const typed = card.locator('[data-timeline-part-id="prt_stop_2"] [data-slot="computer-run-step-label"]')
+  const typed = card.locator('[data-timeline-part-id="prt_stop_04"] [data-slot="computer-run-step-label"]')
   await expect(typed).toHaveCount(2)
   await expect(typed.first()).toHaveAttribute("data-state", "unconfirmed")
   await expect(typed.first()).toContainText("Typed text in Numbers")
@@ -304,9 +306,9 @@ test("a stopped Hands call never reads as done, and the turn keeps its footer", 
 // turn is a note inside the card, the card carries them instead.
 test("a turn whose only text is a note in a Hands run keeps its footer under the card", async ({ page }) => {
   const parts = [
-    computer("prt_held_1", { action: "screenshot" }, { action: "screenshot" }),
-    textPart("prt_held_note", "Now I'll click Save."),
-    toolPart("prt_held_2", "computer", "error", { action: "click" }, { error: "Tool execution aborted" }),
+    computer("prt_held_01", { action: "screenshot" }, { action: "screenshot" }),
+    textPart("prt_held_02_note", "Now I'll click Save."),
+    toolPart("prt_held_03", "computer", "error", { action: "click" }, { error: "Tool execution aborted" }),
   ]
   await setupTimeline(page, {
     messages: [
@@ -331,7 +333,7 @@ test("a live Hands run grows in one card without adding and removing note rows",
   const timeline = await setupTimeline(page, {
     messages: [
       userMessage(),
-      assistantMessage([computer("prt_live_1", { action: "screenshot" }, { action: "screenshot" })], {
+      assistantMessage([computer("prt_live_01", { action: "screenshot" }, { action: "screenshot" })], {
         completed: false,
       }),
     ],
@@ -352,16 +354,16 @@ test("a live Hands run grows in one card without adding and removing note rows",
     }).observe(document.body, { childList: true, subtree: true })
   })
 
-  await timeline.send(partUpdated(textPart("prt_live_note_2", "Now clicking Save.")), 120)
-  await timeline.send(partUpdated(toolPart("prt_live_2", "computer", "pending", { action: "click" })), 120)
-  await timeline.send(partUpdated(toolPart("prt_live_2", "computer", "running", { action: "click" })), 120)
+  await timeline.send(partUpdated(textPart("prt_live_02_note", "Now clicking Save.")), 120)
+  await timeline.send(partUpdated(toolPart("prt_live_03", "computer", "pending", { action: "click" })), 120)
+  await timeline.send(partUpdated(toolPart("prt_live_03", "computer", "running", { action: "click" })), 120)
   await timeline.send(
-    partUpdated(computer("prt_live_2", { action: "click", target: { name: "Save" } }, { action: "click" })),
+    partUpdated(computer("prt_live_03", { action: "click", target: { name: "Save" } }, { action: "click" })),
     120,
   )
-  await timeline.send(partUpdated(textPart("prt_live_note_3", "Typing the title.")), 120)
+  await timeline.send(partUpdated(textPart("prt_live_04_note", "Typing the title.")), 120)
   await timeline.send(
-    partUpdated(computer("prt_live_3", { action: "type", text: { length: 5, preview: "Hello" } }, { action: "type" })),
+    partUpdated(computer("prt_live_05", { action: "type", text: { length: 5, preview: "Hello" } }, { action: "type" })),
     120,
   )
 
@@ -369,7 +371,7 @@ test("a live Hands run grows in one card without adding and removing note rows",
   await expect(page.locator('[data-component="computer-run"][data-probe="live"]')).toHaveCount(1)
   await expect(card).toHaveAttribute(
     "data-timeline-part-ids",
-    "prt_live_1,prt_live_note_2,prt_live_2,prt_live_note_3,prt_live_3",
+    "prt_live_01,prt_live_02_note,prt_live_03,prt_live_04_note,prt_live_05",
   )
   expect(await page.evaluate(() => (window as unknown as { __noteRows: string[] }).__noteRows)).toEqual([])
 })
@@ -378,16 +380,16 @@ test("a live Hands run grows in one card without adding and removing note rows",
 // before it must still show while it waits, not stay hidden in the collapsed card.
 test("a question the turn waits on ends a live Hands run before the agent's words", async ({ page }) => {
   const parts = [
-    computer("prt_ask_1", { action: "click", target: { name: "Save" } }, { action: "click" }),
-    textPart("prt_ask_note", "The file already exists. I can overwrite it or save a copy."),
-    toolPart("prt_ask_question", "question", "pending", questionInput()),
+    computer("prt_ask_01", { action: "click", target: { name: "Save" } }, { action: "click" }),
+    textPart("prt_ask_02_note", "The file already exists. I can overwrite it or save a copy."),
+    toolPart("prt_ask_03_question", "question", "pending", questionInput()),
   ]
   await setupTimeline(page, { messages: [userMessage(), assistantMessage(parts, { completed: false })] })
 
   const card = page.locator('[data-component="computer-run"]')
   await expect(card).toHaveCount(1)
-  await expect(card).toHaveAttribute("data-timeline-part-ids", "prt_ask_1")
-  await expect(page.locator('[data-component="text-part"][data-timeline-part-id="prt_ask_note"]')).toBeVisible()
+  await expect(card).toHaveAttribute("data-timeline-part-ids", "prt_ask_01")
+  await expect(page.locator('[data-component="text-part"][data-timeline-part-id="prt_ask_02_note"]')).toBeVisible()
 })
 
 function computer(id: string, metadata: Record<string, unknown>, input: Record<string, unknown>, image = false) {

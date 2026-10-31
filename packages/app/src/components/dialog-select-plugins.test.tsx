@@ -41,7 +41,8 @@ beforeAll(async () => {
   Bun.plugin({
     name: "plugins dialog Solid DOM fixture",
     setup(build) {
-      build.onLoad({ filter: /(?:dialog-select-plugins|plugins\/catalog)\.tsx$/ }, async (args) => ({
+      // Windows paths use backslashes, so the catalog's directory separator matches either one.
+      build.onLoad({ filter: /(?:dialog-select-plugins|plugins[\\/]catalog)\.tsx$/ }, async (args) => ({
         contents:
           babel.transformSync(await Bun.file(args.path).text(), {
             filename: args.path,
