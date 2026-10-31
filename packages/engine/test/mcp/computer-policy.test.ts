@@ -6,17 +6,21 @@ import { LayerNode } from "@vectordevai/core/effect/layer-node"
 import { ConfigComputerV1 } from "@vectordevai/core/v1/config/computer"
 import { ConfigV1 } from "@vectordevai/core/v1/config/config"
 import { Hands } from "@vectordevai/schema/hands"
+import { PermissionPolicy } from "@vectordevai/schema/permission-policy"
 import { Config } from "@/config/config"
 import { McpAuth } from "@/mcp/auth"
+import { McpCatalog } from "@/mcp/catalog"
 import { McpComputerPolicy } from "@/mcp/computer-policy"
 import { TestConfig } from "../fixture/config"
 import { testEffect } from "../lib/effect"
 
 const transportCalls: string[][] = []
 const started: string[][] = []
-const fixture: { config: ConfigV1.Info; credentials: Map<string, Record<string, string>> } = {
+const fixture: { config: ConfigV1.Info; credentials: Map<string, Record<string, string>>; tools: string[] } = {
   config: {},
   credentials: new Map(),
+  // Tool names every fake server lists; none unless a test sets them.
+  tools: [],
 }
 
 // The launcher runs normally up to its SDK boundary. No child process or desktop permission is touched.
@@ -43,9 +47,13 @@ class FakeClient {
   setRequestHandler() {}
   setNotificationHandler() {}
   getServerCapabilities() {
-    return {}
+    return fixture.tools.length ? { tools: {} } : {}
   }
   getInstructions() {}
+
+  async listTools() {
+    return { tools: fixture.tools.map((name) => ({ name, inputSchema: { type: "object", properties: {} } })) }
+  }
 
   async connect(transport: FakeStdioTransport) {
     this.transport = transport
@@ -96,6 +104,7 @@ const it = testEffect(
 beforeEach(() => {
   fixture.config = {}
   fixture.credentials.clear()
+  fixture.tools = []
   transportCalls.length = 0
   started.length = 0
 })
@@ -242,3 +251,80 @@ it.instance("reconnecting reads the current company policy before starting a rep
     expect(started).toEqual([command, command])
   }),
 )
+
+test("only a server name that sanitizes to Hands' tool id is reserved, in any letter case", () => {
+  // The real tool namer gives a server named `computer` exactly Hands' two ask ids.
+  expect(McpCatalog.toolName("computer", "app")).toBe(PermissionPolicy.COMPUTER_APP)
+  expect(McpCatalog.toolName("computer", "sensitive")).toBe(PermissionPolicy.COMPUTER_SENSITIVE)
+  for (const name of ["computer", "Computer", "COMPUTER", "cOmPuTeR"]) {
+    expect(McpComputerPolicy.reservedName(name)).toBe(
+      `MCP server "${name}" cannot be used: the name "${Hands.ID}", in any letter case, is reserved for ${Hands.NAME}. Rename the server to use it.`,
+    )
+  }
+  // A separator, an extra character or a look-alike letter changes the sanitized name, so these keep working and their
+  // tools can never take a Hands id, even compared without case.
+  for (const name of [
+    "computer-use",
+    "computer_use",
+    "computer use",
+    "computer_",
+    "_computer",
+    "computers",
+    "my computer",
+    "comp",
+    "c\u043emputer",
+    "computer\u200b",
+  ]) {
+    expect(McpComputerPolicy.reservedName(name), name).toBeUndefined()
+    for (const tool of ["app", "sensitive", "App"]) {
+      const id = McpCatalog.toolName(name, tool).toLowerCase()
+      expect(PermissionPolicy.handsAsk(id), `${name} ${tool}`).toBe(false)
+    }
+  }
+})
+
+it.instance(
+  "a configured server named computer in any case never starts, and its neighbours' tools keep their ids",
+  () =>
+    Effect.gen(function* () {
+      fixture.tools = ["app", "sensitive"]
+      fixture.config = {
+        mcp: {
+          computer: { type: "local", command: ["node", "lower.js"] },
+          Computer: { type: "local", command: ["node", "title.js"] },
+          "computer-use": { type: "local", command: ["node", "community.js"] },
+        },
+      }
+      const mcp = yield* MCP.Service
+      const status = yield* mcp.status()
+      expect(status.computer).toEqual(refused("computer"))
+      expect(status.Computer).toEqual(refused("Computer"))
+      expect(status["computer-use"]).toEqual({ status: "connected" })
+      expect(transportCalls).toEqual([["node", "community.js"]])
+      expect(started).toEqual([["node", "community.js"]])
+      expect(Object.keys(yield* mcp.clients())).toEqual(["computer-use"])
+      const tools = Object.keys(yield* mcp.tools()).sort()
+      expect(tools).toEqual(["computer-use_app", "computer-use_sensitive"])
+    }),
+)
+
+it.instance("adding or reconnecting a server named computer constructs nothing", () =>
+  Effect.gen(function* () {
+    fixture.tools = ["app", "sensitive"]
+    const mcp = yield* MCP.Service
+    yield* mcp.add("computer", { type: "local", command: ["node", "server.js"] }, { TOKEN: "secret" })
+    expect((yield* mcp.status()).computer).toEqual(refused("computer"))
+    yield* mcp.connect("computer")
+    expect((yield* mcp.status()).computer).toEqual(refused("computer"))
+    expect(yield* mcp.clients()).toEqual({})
+    expect(yield* mcp.tools()).toEqual({})
+    expect(transportCalls).toEqual([])
+    expect(started).toEqual([])
+  }),
+)
+
+function refused(name: string) {
+  const error = McpComputerPolicy.reservedName(name)
+  if (!error) throw new Error(`Expected "${name}" to be reserved`)
+  return { status: "failed" as const, error }
+}

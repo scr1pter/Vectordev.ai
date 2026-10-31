@@ -65,8 +65,9 @@ test("computer app asks use the same branded title and verified app name instead
 })
 
 test("another tool's computer_ permission keeps the ordinary prompt, which can allow it once", () => {
-  // An MCP server configured as "computer" asks `computer_<tool>` with empty metadata. Only Hands' two asks get the
-  // Hands title and the verified-identity gate; the prefix still asks every time and never saves Always.
+  // A plugin tool or an MCP server named "computer use" (`computer_use_<tool>`) can ask such an id with empty
+  // metadata. Only Hands' two asks get the Hands title and the verified-identity gate; the prefix still asks every time
+  // and never saves Always.
   for (const permission of ["computer_screenshot", "computer_click", "computer_app_extra", "computer_observe"]) {
     expect(computerPermissionDetails({ permission, metadata: {}, always: ["*"] })).toBeUndefined()
     expect(canAutoApprovePermission(permission, ["*"], ["*"])).toBe(false)

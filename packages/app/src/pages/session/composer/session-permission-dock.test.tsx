@@ -323,7 +323,8 @@ describe("Hands permission dock", () => {
   })
 
   test("another tool's permission that shares the computer_ prefix keeps the ordinary dock", () => {
-    // An MCP server configured as "computer" asks `computer_<tool>` with empty metadata (mcp/catalog.ts toolName).
+    // A plugin tool can ask any id, and an MCP server named "computer use" asks `computer_use_<tool>` with empty
+    // metadata (mcp/catalog.ts toolName); the engine refuses a server named "computer" itself.
     for (const permission of ["computer_screenshot", "computer_click", "computer_app_extra", "computer_observe"]) {
       const view = mount({ ...app(permission), permission, patterns: ["*"], always: ["*"], metadata: {} })
       expect(view.host.textContent).toContain("Permission required")

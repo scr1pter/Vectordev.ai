@@ -63,8 +63,10 @@ export const COMPUTER_SENSITIVE = "computer_sensitive"
 
 /**
  * Whether a request is one of the two asks Vector Hands raises, which clients show as Hands asks. Another tool's
- * permission can share the `computer_` prefix (an MCP server named `computer` asks `computer_<tool>`), so the prefix
- * names no Hands ask; it still makes every such permission ask (`requiresApproval`) and never auto-approve.
+ * permission can share the `computer_` prefix (an MCP server named `computer use` asks `computer_use_<tool>`, and a
+ * plugin tool can take any id), so the prefix names no Hands ask; it still makes every such permission ask
+ * (`requiresApproval`) and never auto-approve. The engine refuses an MCP server named `computer` in any letter case,
+ * whose tools could otherwise take these two ids.
  */
 export function handsAsk(permission?: string) {
   return permission === COMPUTER_APP || permission === COMPUTER_SENSITIVE

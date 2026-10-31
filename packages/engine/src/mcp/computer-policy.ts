@@ -1,6 +1,7 @@
 import { ComputerCommunity } from "@vectordevai/core/computer/community"
 import type { ConfigComputerV1 } from "@vectordevai/core/v1/config/computer"
 import { Hands } from "@vectordevai/schema/hands"
+import { McpCatalog } from "./catalog"
 
 const WRAPPERS: Readonly<Record<string, readonly string[]>> = {
   env: ["-u", "--unset", "-C", "--chdir"],
@@ -34,6 +35,19 @@ const RUNNER_OPTIONS = [
 export function refusal(command: readonly string[], policy: ConfigComputerV1.Info | undefined) {
   if (!ComputerCommunity.restricted(policy) || !communityCommand(command)) return
   return `${Hands.NAME} is the supported path for computer use. Your company's computer policy does not allow the community computer-control MCP.`
+}
+
+/**
+ * Why a server name cannot be used, if it cannot. A server's tools are named `<server>_<tool>` after sanitizing
+ * (McpCatalog.toolName), so a server named `computer` would raise `computer_app` and `computer_sensitive`, the ids
+ * clients show as Hands asks (PermissionPolicy.handsAsk). Letter case is ignored because the ACP adapter lowercases
+ * permission ids and Windows matches permission rules without case. A separator keeps a name usable: `computer-use`
+ * and `computer use` give `computer-use_<tool>` and `computer_use_<tool>`. A refused name is exactly these eight
+ * ASCII letters, so echoing it is safe.
+ */
+export function reservedName(name: string) {
+  if (McpCatalog.sanitize(name).toLowerCase() !== Hands.ID) return
+  return `MCP server "${name}" cannot be used: the name "${Hands.ID}", in any letter case, is reserved for ${Hands.NAME}. Rename the server to use it.`
 }
 
 // Match the known server's executable/distribution, including the catalog's versioned uvx launch.

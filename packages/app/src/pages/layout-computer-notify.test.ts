@@ -46,7 +46,8 @@ test("a permission ask with no name, or a prefix elsewhere in the name, still no
 })
 
 test("another tool's permission that shares the computer_ prefix still notifies", () => {
-  // An MCP server configured as "computer" asks `computer_<tool>`; the desktop sends nothing for it.
+  // A plugin tool or an MCP server named "computer use" (`computer_use_<tool>`) can ask such an id; the desktop sends
+  // nothing for it.
   expect(rendererNotifies(permission("computer_screenshot"), true)).toBe(true)
   expect(rendererNotifies(permission("computer_observe"), true)).toBe(true)
   expect(rendererNotifies(permission("computer_app_extra"), true)).toBe(true)

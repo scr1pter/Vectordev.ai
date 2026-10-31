@@ -189,8 +189,9 @@ function permissionTitle(toolName: string, input: ToolInput) {
       return editTitle(input)
 
     default:
-      // Screen labels and the agent's intent remain metadata, never Vector's permission heading.
-      return tool.startsWith("computer_") ? `${Hands.NAME}: confirm computer use` : undefined
+      // Only the ids above take Hands' copy. Another tool's `computer_*` id (an MCP server named `computer use` asks
+      // `computer_use_<tool>`) is no Hands ask, so its heading is its id, as for any tool, never its metadata.
+      return undefined
   }
 }
 

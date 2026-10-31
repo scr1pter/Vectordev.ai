@@ -503,6 +503,10 @@ const layer = Layer.effect(
         if (mcp.enabled === false) {
           return DISABLED_RESULT
         }
+        // Startup, add, connect and finishAuth all connect through here; authenticate's direct store is refused in
+        // startAuth. Nothing is constructed for a name whose tools would take Hands' permission ids.
+        const reserved = McpComputerPolicy.reservedName(key)
+        if (reserved) return { status: { status: "failed", error: reserved } } satisfies CreateResult
         const { client: mcpClient, status } =
           mcp.type === "remote"
             ? yield* connectRemote(key, mcp as ConfigMCPV1.Info & { type: "remote" })
@@ -1132,6 +1136,9 @@ const layer = Layer.effect(
 
     const startAuth = Effect.fn("MCP.startAuth")(function* (mcpName: string) {
       const mcpConfig = yield* requireMcpConfig(mcpName)
+      // authenticate stores the client this connects without going through create, so refuse before any transport.
+      const reserved = McpComputerPolicy.reservedName(mcpName)
+      if (reserved) throw new Error(reserved)
       if (mcpConfig.type !== "remote") throw new Error(`MCP server ${mcpName} is not a remote server`)
       if (mcpConfig.oauth === false) throw new Error(`MCP server ${mcpName} has OAuth explicitly disabled`)
       const url = remoteURL(mcpConfig.url)
