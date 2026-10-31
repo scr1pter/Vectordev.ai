@@ -237,6 +237,7 @@ Tests:
 - `github.route-script.test.ts` › "bot comments and bot dispatches without a ticket route to none" (V14)
 - `packages/web/test/cloud-agents-mint-api.test.ts` › "dispatch tokens from github-actions[bot] and dependabot[bot] are refused, with and without the App" (V12)
 - `packages/web/test/cloud-agents-start.test.ts` › "a ticket is single-use and bound to its repository and binding" (V13)
+- `packages/web/test/cloud-agents-ledger.test.ts` › "a ticket starts one run: parallel mints from different check runs that peeked it reserve once" (V06)
 
 **INV-S3. Fork heads never run with a credential.** PR tasks whose head repository differs from the base are refused in the route job, before checkout, OIDC or a key. With the App, the server refuses them too.
 Tests:
@@ -285,9 +286,9 @@ Test: `packages/web/test/cloud-agents-run-token.test.ts` › "domain separation 
 
 Test: `cloud-agents-run-token.test.ts` › "rebind, unbind, settle, replacement, revocation and revokedBefore each invalidate" (V07)
 
-**INV-S9. One live token per check run.** A mint from a check run that already holds a live reservation keeps that reservation's start and deadline, charges nothing extra and returns a new token; the earlier token stops working. A re-run gets a new attempt and check-run id and so a new run.
+**INV-S9. One live token per check run.** A mint from a check run that already holds a live reservation keeps that reservation's start and deadline, charges nothing extra and returns a new token; the earlier token stops working. Once that deadline has passed, such a mint is refused (`at-once`) and the earlier token keeps working, so the run can still be settled. A re-run gets a new attempt and check-run id and so a new run.
 Tests:
-- `packages/web/test/cloud-agents-ledger.test.ts` › "minting again from the same check run keeps its deadline" (V06)
+- `packages/web/test/cloud-agents-ledger.test.ts` › "minting again from the same check run keeps its deadline"; "a re-mint at or after the deadline is refused and leaves the token that still settles the run alone" (V06)
 - `cloud-agents-run-token.test.ts` › "the replaced token is refused" (V07)
 
 **INV-S10. OIDC is strict per audience.**
@@ -393,11 +394,13 @@ reserved = Σ over live runs of (deadline − startedAt)
 A mint is refused when the second term is under 300 s. A re-mint from a live check run returns its existing deadline (INV-S9).
 Test: `cloud-agents-ledger.test.ts` › "deadline formula and the 5-minute floor" (V06)
 
-**INV-C3. Settled time is bounded, with one formula.** Every settle path, whether explicit, idle or after a generation change, charges `clamp(max(lastRequest ?? 0, lastReport) − startedAt, 0, deadline − startedAt)`, rounded up to whole seconds. A run is idle when `now − max(lastReport, lastRequest ?? 0) > IDLE_SECONDS`; idle runs are settled lazily, by the next ledger call for that account.
+**INV-C3. Settled time is bounded, with one formula.** Every settle path, whether explicit, idle or after a generation change, charges `clamp(max(lastRequest ?? 0, lastReport) − startedAt, 0, deadline − startedAt)`, rounded up to whole seconds. A run is idle when `now − max(lastReport, lastRequest ?? 0) > IDLE_SECONDS`; idle runs are settled lazily, by the account's next reserve or agent-time read (`reserveRun`, `cloudAgentSecondsUsed`; 2.6), however late: the live record is kept as long as the agent time it is charged to (2.7), so a run nobody settles (a cancelled job, a lost runner, a token a rebind, an unbind or a suspension killed) is still charged by the formula. The one exception is a run of another meter epoch than the settle names (an idle or replaced run that a reserve of another epoch removes, or a settle with a token of another epoch): it stays charged its whole reservation in its own epoch, because the settle cannot give back into an epoch it holds no key for (2.6).
 Test: `cloud-agents-ledger.test.ts` › "settle bounds and the idle window"; "a run with no heartbeats and a Codium request at +20 min, idle-settled at +31 min, is charged 20 minutes"; "a stale heartbeat with a recent request is not idle" (V06)
 
-**INV-C4. Scheduled runs are counted per UTC day from GitHub `schedule` events.** The count comes from the signed `event_name` alone and is 0 on Plus and Pro. It limits GitHub schedule events only: a dispatch from another workflow is a `github-dispatch` run and is not counted. That is an accepted risk (deviations file); the hours cap is the real limit, and copy never presents the scheduled cap as unbypassable.
-Test: `cloud-agents-ledger.test.ts` and `cloud-agents-mint-api.test.ts` › "Plus schedule refused; Max sixth schedule refused; resets at 00:00 UTC" (V06, V12)
+**INV-C4. Scheduled runs are counted per UTC day from GitHub `schedule` events.** The count comes from the signed `event_name` alone and is 0 on Plus and Pro. One check run is one schedule event: it is counted on the UTC day it first reserves, and a mint of the same check run that replaces its live record (after a generation change, or once it went idle) is not counted again. It limits GitHub schedule events only: a dispatch from another workflow is a `github-dispatch` run and is not counted. That is an accepted risk (deviations file); the hours cap is the real limit, and copy never presents the scheduled cap as unbypassable.
+Tests:
+- `cloud-agents-ledger.test.ts` and `cloud-agents-mint-api.test.ts` › "Plus schedule refused; Max sixth schedule refused; resets at 00:00 UTC" (V06, V12)
+- `cloud-agents-ledger.test.ts` › "a scheduled check run that mints again after a generation change is counted once" (V06)
 
 **INV-C5. Hours belong to a `meterEpoch`.** A new epoch, such as a renewal or an upgrade, starts at zero. Hours never carry over.
 Test: `cloud-agents-ledger.test.ts` › "new epoch starts fresh" (V06)
@@ -636,11 +639,11 @@ type RunTokenClaims = {
   sub: string                     // Vector account id (UUID)
   rid: string                     // GithubAgents.runId(...): "gh-<repositoryId>-<runId>-<runAttempt>-<checkRunId>"
   repo: string                    // repositoryId, decimal
-  thr: string                     // thread, GithubAgents.THREAD_PATTERN, fixed at mint
+  thr: string                     // thread, GithubAgents.THREAD_PATTERN, fixed at mint: reserveRun's `thread` (a renewal answers the record's)
   gen: number                     // binding generation at mint
   src: "github-comment" | "github-dispatch" | "github-schedule"
   pur: "task" | "review" | "scheduled"
-  epoch: string                   // meterEpoch
+  epoch: string                   // the live record's meter epoch, reserveRun's `epoch`; matches METER_EPOCH_PATTERN (2.6)
   dl: number                      // deadline, ms
   exp: number                     // dl + SETTLE_GRACE_SECONDS × 1000
   iat: number                     // ms
@@ -740,6 +743,7 @@ bindingKey(repositoryId: string): string; generationKey(repositoryId: string): s
 - The server stores `sha256(ticket)` with `{repositoryId, account, generation, source, purpose, exp}`, for 900 s.
 - `peekRunTicket(ticket, identity, binding)` is a GET at mint step 8. It requires `identity.repositoryId` to match, the event `workflow_dispatch`, the actor the App bot, `ticket.account === binding.account` and `ticket.generation === binding.generation`.
 - The ticket is deleted inside the `reserveRun` EVAL, only when the reservation succeeds. A refused attempt (at once, replay, rate limit) leaves it usable for the job's retries until it expires.
+- That EVAL is also where the ticket is single-use, since step 8 only peeks it: a fresh reservation is refused with `{ok: false, refusal: "ticket"}` when the ticket no longer exists, so of parallel mints from different check runs that peeked one ticket exactly one reserves, and the mint answers the others 403 `ACTOR_NOT_ALLOWED`. A renewal of the check run that consumed it needs no ticket.
 - **Claims mapping.** A ticket run signs `src = "github-dispatch"`. Its purpose maps `review` → `review`, and `task`, `incident` and `changes` → `task`. A `scheduled` trigger is refused by `startCloudRun` with `purpose-unavailable`. The trigger's own source and purpose are kept in the run record (`trigger`, 2.16).
 
 ```ts
@@ -752,38 +756,53 @@ startCloudRun(trigger: RunTrigger, deps?): Promise<{ ok: true; dispatchedAt: num
 
 ## 2.6 Hours, slots and the ledger: `api/_lib/cloud-agents-ledger.ts` (amendments 5, 10)
 
-Every function is one EVAL through `persistentStore`, so it fails closed. All times are milliseconds. Seconds are integers and never leave the server.
+Every function is one EVAL through `persistentStore`, so it fails closed, and its script gets every key it touches in `KEYS`. All times are milliseconds. Seconds are integers and never leave the server. Every function except the key builders and the hook takes a trailing `store = persistentStore`.
 
 ```ts
+type LedgerSource = Extract<RunSource, "github-comment" | "github-dispatch" | "github-schedule">
+type LedgerPurpose = "task" | "review" | "scheduled"
 type LiveRun = { startedAt: number; deadline: number; lastReport: number; lastRequest?: number
-  epoch: string; repo: string; thr: string; src: RunSource; pur: string; gen: number; jti: string }
-reserveRun(input: { account; rid; repositoryId; thread; generation; jti; source: RunSource; purpose
-  allowance: Extract<CloudAgentAllowance, {active: true}>; consumeKey?: string; now })
-  : Promise<{ ok: true; deadline: number; startedAt: number; renewed: boolean } | { ok: false; limit: "hours" | "at-once" | "scheduled" }>
-reportRun(account, rid, now): Promise<{ live: boolean; deadline?: number }>         // heartbeat
-recordCodiumRequest(account, rid, at): Promise<void>                                  // the gateway hook calls this
-settleRun(account, rid, now): Promise<{ settled: boolean; seconds: number }>          // idempotent
-releaseRun(account, rid): Promise<void>                                               // mint failed after a fresh reserve: charges 0
-cloudAgentSecondsUsed(accountId: string, meterEpoch: string): Promise<number>          // settles idle runs first
+  epoch: string; repo: string; thr: string; src: LedgerSource; pur: LedgerPurpose; counted?: true; gen: number; jti: string }
+const METER_EPOCH_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_:.-]{0,127}$/   // "p<ms>", Codium's "<subscription>:<periodStart>", "none"
+type ReserveInput = { account; rid; repositoryId; thread; generation; jti; source: LedgerSource; purpose: LedgerPurpose
+  allowance: Extract<CloudAgentAllowance, {active: true}>; consumeKey?: string; now }
+type Reserved = { startedAt; deadline; epoch; thread; source: LedgerSource; purpose: LedgerPurpose }   // the record's values
+reserveRun(input: ReserveInput): Promise<({ ok: true; renewed: false } & Reserved) | ({ ok: true; renewed: true } & Reserved)
+  | { ok: false; limit: "hours" | "at-once" | "scheduled" } | { ok: false; refusal: "ticket" }>
+reportRun(account, rid, token: { jti }, now): Promise<{ live: boolean; deadline?: number }>            // heartbeat
+recordCodiumRequest(account, rid, at): Promise<void>                                                  // the gateway hook calls this
+settleRun(account, rid, token: { jti; epoch }): Promise<{ settled: boolean; seconds: number }>          // idempotent
+releaseRun(account, rid, reservation: { renewed: false; jti; epoch; startedAt }): Promise<void>        // mint failed after a fresh reserve: charges 0
+cloudAgentSecondsUsed(accountId: string, meterEpoch: string, now = Date.now()): Promise<number>       // settles the epoch's idle runs first
 liveRun(account, rid): Promise<LiveRun | undefined>
-liveKey(account: string): string; usedKey(account: string, epoch: string): string     // key builders for V07
+liveKey(account: string): string; usedKey(account: string, epoch: string): string                     // key builders for V07
 ```
 
-**One charge formula.** Every settle path (explicit, idle, generation change) charges `clamp(max(lastRequest ?? 0, lastReport) − startedAt, 0, deadline − startedAt)`, rounded up to whole seconds, into `used:<account>:<epoch>`, and deletes the live record. A run is **idle** when `now − max(lastReport, lastRequest ?? 0) > IDLE_SECONDS`.
+**Inputs and stored data.** Every input is checked before any store command, and a bad one answers 400 `INVALID_REQUEST`: accounts are lowercase UUIDs; `rid` matches `RUN_ID_PATTERN`; `repositoryId` is a decimal with no leading zero; `thread` matches `THREAD_PATTERN`; `generation` is an integer of at least 1; `jti` is 22 base64url characters; `source` and `purpose` are in their sets, and the purpose is `scheduled` exactly when the source is `github-schedule`; the allowance is active, with integer limits (`atOnce` and `longestRunMin` at least 1, `scheduledPerDay` at least 0), an integer `allowanceSeconds` of at least 0, a `meterEpoch` matching the pattern and a `periodEnd` time; `consumeKey` is a `ticket:<sha256>` key (2.7); times are positive integers no later than a `Date` can hold. A stored record with an unknown, missing or malformed field, a deadline not after its start or not a whole number of seconds after it, activity before its start, or a `counted` field that is not `true` or is on a run whose source is not `github-schedule`, and a stored count that is not a decimal, answer 503 `PERSISTENT_STORE_UNAVAILABLE`, and the script writes nothing.
+
+**Reserved up front, one charge formula.** A fresh reserve adds its whole reservation, `(deadline − startedAt) / 1000`, to `used:<account>:<epoch>`. Every settle path (explicit, idle, generation change) gives back the reservation minus the charge `clamp(max(lastRequest ?? 0, lastReport) − startedAt, 0, deadline − startedAt)`, rounded up to whole seconds, and deletes the live record; the give-back goes only into the run's own epoch, and only when the settle names that epoch: a run of another epoch that a reserve removes (idle, or replaced after a generation change) and a run settled with a token of another epoch keep their whole reservation in the run's epoch. So `used` holds settled seconds plus the reservations of that epoch's live runs. The live hash outlives every `used` key its runs are charged to (2.7), so a run nobody settles is never read at its whole reservation: once idle, the next reserve or agent-time read of its epoch settles it by the formula before reading `used`. A run is **idle** when `now − max(lastReport, lastRequest ?? 0) > IDLE_SECONDS`.
 
 `reserveRun` does the following, in order, in one script:
-1. Settle every idle live run of the account, with the formula.
-2. If `rid` is already live with the same generation, keep its `startedAt` and `deadline`, store the new `jti`, consume `consumeKey` if given, and answer `{ok: true, renewed: true}` with no further checks and no extra charge (INV-S9). If it is live with an older generation, settle it with the formula and continue.
-3. If the live count is at least `atOnce`, answer `at-once`.
-4. If the source is `github-schedule` and the day key is at least `scheduledPerDay`, answer `scheduled`.
-5. Compute `left = allowanceSeconds − used(epoch) − Σ live (deadline − startedAt)`. If `left < 300`, answer `hours`.
-6. Otherwise:
-   - add the live record `{startedAt: now, deadline: now + min(longestRunMin·60, left)·1000, lastReport: now, epoch, repo, thr, src, pur, gen, jti}`;
-   - increment the day key for schedules;
+1. Note whether `rid` already has a live record of a `github-schedule` run (step 5). Settle every idle live run of the account with the formula. An idle run of another epoch than the allowance's is removed with no give-back: its reservation stays charged in its own epoch.
+2. If `rid` is already live with the same generation and `now` is before its deadline, store the new `jti` and change nothing else, consume `consumeKey` if given, and answer `{ok: true, renewed: true}` with the record's start, deadline, epoch, thread, source and purpose, with no further checks and no extra charge (INV-S9). At or after its deadline, answer `at-once` and leave the record and `consumeKey` alone: a token for that deadline would be dead at once, and a new `jti` would kill the token the run still settles with. If it is live with an older generation, settle it with the formula and continue; a run of another epoch than the allowance's is removed with no give-back, as in step 1. If it is live with a newer generation, answer `at-once` and leave it alone.
+3. If `consumeKey` is given and no longer exists (another check run's reservation consumed it, or it expired, after the mint peeked it), answer `{ok: false, refusal: "ticket"}`.
+4. If the live count is at least `atOnce`, answer `at-once`.
+5. If the source is `github-schedule`, `rid` had no live `github-schedule` record at step 1, and the day key is at least `scheduledPerDay`, answer `scheduled`. A check run that replaces its own record (step 2, or after step 1 swept it idle) is the schedule event already counted when it first reserved, so it is neither refused at the cap nor counted again (INV-C4).
+6. Compute `left = allowanceSeconds − used(epoch) − Σ (deadline − startedAt)` over the live runs of other epochs. `used(epoch)` already holds this epoch's live reservations, so this is the settled seconds and every live reservation subtracted from the allowance. If `left < 300`, answer `hours`.
+7. Otherwise:
+   - add the live record `{startedAt: now, deadline: now + min(longestRunMin·60, left)·1000, lastReport: now, epoch, repo, thr, src, pur, gen, jti}`, with `counted: true` when step 5 counts it;
+   - add its reservation to `used(epoch)`, and set `used` to expire `max(periodEnd − now, 0) + 40 days` from now;
+   - for a schedule step 5 counts, increment the day key and set it to expire 2 days from now;
    - `DEL consumeKey` when given (the ticket);
-   - set `used` to expire at `periodEnd + 40 days`.
+   - extend `live:<account>` to expire no sooner than `used` and than the new deadline plus 1 day.
 
-`recordCodiumRequest` sets `lastRequest = max(lastRequest, at)` on a live record and does nothing for a settled one.
+A refusal never consumes `consumeKey`, and a renewal needs none: the check run's own fresh reservation consumed it. Every `ok` answer's deadline is after `now`. Only `reserveRun` and `cloudAgentSecondsUsed` judge runs idle; the other functions touch only their own run.
+- `reportRun` sets `lastReport = max(lastReport, now)` and answers `{live: true, deadline}` only for the token that holds the run (its `jti` is the record's); otherwise `{live: false}`, and nothing is created.
+- `recordCodiumRequest` sets `lastRequest = max(lastRequest, at)` on a live record. It does nothing for a settled or unknown run, or for an `at` before the run's start (the gateway's clock and the mint's differ).
+- `settleRun` acts only for the token that holds the run. It gives back into the token's `epoch`; with an epoch other than the record's, the whole reservation stays charged. `seconds` is what the run stays charged.
+- `releaseRun` acts only on the reservation its caller made: a `renewed` result is refused (400, and its type does not compile), and the record's `jti`, `epoch` and `startedAt` must match. It gives back the whole reservation and, when the record is `counted`, the scheduled run on the start's UTC day; a reservation that replaced its check run's record counted none, and releasing it leaves the count of the event that ran.
+- `cloudAgentSecondsUsed` settles only the idle runs of the epoch it is asked about, which is the caller's and may be stale, and answers `used(epoch)` minus that epoch's live reservations: the seconds charged to settled runs.
+- Only a fresh reserve sets `live:<account>`'s expiry (step 7), and only ever later: renewals, heartbeats, requests, settles, sweeps and releases leave it, and the hash goes with its last run. So no `used` key outlives a record whose reservation it holds. Every expiry is a duration from the caller's `now`, so the API host's clock and the store's need not agree.
 
 **The gateway hook** (exported from this module):
 
@@ -791,11 +810,13 @@ liveKey(account: string): string; usedKey(account: string, epoch: string): strin
 type CloudAgentsGatewayCaller = { kind: string; account: { id: string }; run?: { id: string; service: string } }
 export const cloudAgentsGatewayHook = {
   id: "cloud-agents",
-  afterSettle: (caller: CloudAgentsGatewayCaller, context: { endedAt: number }) =>
-    caller.kind === "run" && caller.run?.service === "cloud-agents"
-      ? recordCodiumRequest(caller.account.id, caller.run.id, context.endedAt).catch(() => logLedgerMiss(caller.run!.id))
-      : Promise.resolve(),
+  afterSettle(caller: CloudAgentsGatewayCaller, context: { endedAt: number }): Promise<void> {
+    const run = caller.run
+    if (caller.kind !== "run" || run?.service !== "cloud-agents") return Promise.resolve()
+    return recordCodiumRequest(caller.account.id, run.id, context.endedAt).catch(() => logLedgerMiss(run.id))
+  },
 }
+// logLedgerMiss: console.warn("Vector cloud-agents ledger miss", { runId }), the id only when it matches RUN_ID_PATTERN
 ```
 
 It is typed locally and structurally against Codium's `GatewayHook` (`api/_lib/model-plan-gateway-hooks.ts`), so A59 adds one line, `registerGatewayHook(cloudAgentsGatewayHook)`. It ignores every caller that is not a cloud-agents run. It never throws into the gateway: a store failure is logged with the run id only, and the run's heartbeats still bound its charge. It reads `afterSettle` only as "a request ended at `endedAt`", never as proof that Codium's ledger holds the charge (`codium-deviations.md`).
@@ -812,9 +833,9 @@ It is typed locally and structurally against Codium's `GatewayHook` (`api/_lib/m
 | `ticket:<sha256>` | STRING | JSON | 900 s |
 | `binder-ok:<repositoryId>` | STRING | `1`: the binder's write access was verified through the App | 1 hour |
 | `default-branch:<repositoryId>` | STRING | a public repository's default branch, read without credentials | 1 hour |
-| `live:<account>` | HASH | `rid` → JSON `LiveRun` | refreshed to max deadline + 1 day |
-| `used:<account>:<meterEpoch>` | STRING | settled seconds | `periodEnd` + 40 days |
-| `sched:<account>:<YYYY-MM-DD>` | STRING | scheduled mints that UTC day | 2 days |
+| `live:<account>` | HASH | `rid` → JSON `LiveRun` | extended at each fresh reserve to at least that reserve's `used` expiry and its deadline + 1 day; never shortened; goes with its last run |
+| `used:<account>:<meterEpoch>` | STRING | seconds charged: settled runs, plus the reservations of live runs (a settle gives back the unused part; 2.6) | `max(periodEnd, now)` + 40 days, set at each fresh reserve |
+| `sched:<account>:<YYYY-MM-DD>` | STRING | scheduled check runs first reserved that UTC day | 2 days from the last counted mint |
 | `run:<rid>` | HASH | run record (2.16) | 90 days |
 | `run:<rid>:actor` | HASH | triggering GitHub login and id | 90 days |
 | `runs:<account>` | ZSET | `rid` by start time, trimmed to 200 | 90 days, refreshed |
@@ -879,11 +900,11 @@ Either way it is followed by `requireUnrevokedAccount`.
     - The purpose is `scheduled` for schedules, the ticket mapping (2.5) for ticket runs, otherwise `body.purpose`.
 11. `entitlement(binding.account, {source})`; refusals map as in 2.9.1. A `github-schedule` mint with `scheduledPerDay === 0` → 403 `CODIUM_PERK_REQUIRED {perk: "scheduled"}`.
 12. Mint rate limits, then `consumeGithubOidc` (replay → 409 `OIDC_REPLAYED`).
-13. `reserveRun` with the thread, generation, a fresh `jti` and the ticket key as `consumeKey`. A refusal → 429 `MODEL_PLAN_RUN_LIMIT {limit}`.
-14. `mintRunToken`, `touchBinding`, `recordRunStart`. A failure here → `releaseRun` (only when the reservation was fresh), then the error.
+13. `reserveRun` with the thread, generation, a fresh `jti` and, for a ticket run only (the one step 8 accepted), the ticket key as `consumeKey`. A `limit` refusal → 429 `MODEL_PLAN_RUN_LIMIT {limit}`; the `ticket` refusal (another check run's mint consumed the ticket after step 8, or it expired) → 403 `ACTOR_NOT_ALLOWED`.
+14. `mintRunToken` with the answer's `deadline`, `epoch`, `thread` (`thr`), `source` (`src`) and `purpose` (`pur`), which on a renewal are the live record's, not the body's; then `touchBinding`, `recordRunStart`. A failure here → `releaseRun(account, rid, {...answer, jti})` only when `answer.renewed` is false (a renewal does not compile there), then the error.
 15. Log `{repositoryId, runId, runAttempt, checkRunId, source, purpose}` only.
 
-**Settle** records the outcome and derives the run's `verdict` (2.16).
+**Heartbeat** calls `reportRun(claims.sub, claims.rid, claims, now)`, so only the token that holds the run reports. **Settle** calls `settleRun(claims.sub, claims.rid, claims)`, which gives the unused reservation back into the token's `epoch`, records the outcome and derives the run's `verdict` (2.16).
 
 **Bind order** (V10):
 1. `githubProof` with audience `bind`. The event must be `workflow_dispatch` (otherwise 403 `EVENT_NOT_ALLOWED`).
@@ -1285,8 +1306,8 @@ This list is exactly what we store (INV-P3). V11's test compares the store's key
 | Repositories whose binder lost access while bound to the account (repository ids only), so its bindings and run lists keep hiding their detail | `binder-left:<account>` | until the account binds that repository again, or account erasure |
 | Run record: run id, repository id and name, run URL, event, source, purpose, start and stop times, outcome, verdict, and for server-started runs the trigger's source and purpose | `run:<rid>`, `runs:<account>` | 90 days |
 | The triggering GitHub login and user id | `run:<rid>:actor` | 90 days |
-| Agent time per meter epoch (seconds) and scheduled runs per UTC day (a count) | `used:…`, `sched:…` | the period plus 40 days; 2 days |
-| Live run state: start, deadline, last activity, thread, token id | `live:<account>` | until settled, at most the deadline plus 1 day |
+| Agent time per meter epoch (seconds: settled runs plus live runs' reservations) and scheduled runs per UTC day (a count) | `used:…`, `sched:…` | 40 days past the period's end (or past the last reservation, when later); 2 days |
+| Live run state: start, deadline, last heartbeat, last Codium request, meter epoch, repository id, thread, source, purpose, whether it counted a scheduled run, binding generation, token id | `live:<account>` | until settled (by its token, or once idle by the account's next reserve or agent-time read), at most as long as the account's agent time (40 days past the period's end) or a run's deadline plus 1 day, when later |
 | One-time bind codes, stored under the code's hash with the account, the repository name and, when given, its id, the requesting GitHub user id and the default branch, and the expiry; run tickets (hashed) | `bind-code:…`, `ticket:…` | 10 and 15 minutes |
 | Short-lived caches: the binder's verified access, a public repository's default branch | `binder-ok:…`, `default-branch:…` | 1 hour |
 | Session artifacts | the repository's own GitHub Actions artifacts, encrypted per conversation | 7 days (GitHub's storage) |
@@ -1410,12 +1431,14 @@ Each package lists its files, changes, tests, done-criteria and the checks that 
   - a stale heartbeat with a recent request is not idle;
   - every settle path uses the one formula, capped at the deadline;
   - a re-mint from a live check run keeps `startedAt` and `deadline`, stores the new `jti` and charges nothing;
-  - a re-mint after a generation change settles the old run and reserves fresh;
-  - `consumeKey` is deleted only when the reservation succeeds;
+  - a re-mint after a generation change settles the old run and reserves fresh; a replaced run of another epoch keeps its whole reservation there; a scheduled check run that mints again is neither refused at the cap nor counted again, and releasing that mint uncounts nothing;
+  - a re-mint at or after the deadline is refused and leaves the `jti` and the ticket alone;
+  - `consumeKey` is deleted only when the reservation succeeds; a fresh reserve whose ticket is gone is refused, so parallel mints from different check runs with one ticket reserve once;
   - `recordCodiumRequest` after a settle is a no-op;
-  - releasing after a failed fresh mint charges 0;
+  - releasing after a failed fresh mint charges 0, and uncounts the schedule on its start's UTC day;
   - the scheduled count rolls over at 00:00 UTC;
   - `cloudAgentSecondsUsed` includes lazily settled runs;
+  - a run nobody settles is kept as long as its agent time, which nothing shortens, and the next reserve or read charges it by the formula, however late;
   - `cloudAgentsGatewayHook` records the end time for a cloud-agents run caller, ignores desktop, CLI and hosted callers, and never throws when the store fails (INV-K6).
 - **Done:** the test passes; each function is one EVAL (counted).
 
@@ -1929,7 +1952,7 @@ Each package lists its files, changes, tests, done-criteria and the checks that 
 |---|---|---|
 | A16 (callers, on `codium` and `codium-next`) | `cloudAgentsRunVerifier` (V07) | Codium registers it statically in A59. Our run id is `gh-<repositoryId>-<runId>-<runAttempt>-<checkRunId>`, in Codium's run-id grammar (`codium-deviations.md`, "One run-id grammar") and unique across services; `RunCaller.run.id === rid`. |
 | A17 (admission and chat) | `cloudAgentsGatewayHook` (V06), registered with `registerGatewayHook` in A59; it calls `recordCodiumRequest` from `afterSettle` | The gateway enforces the deadline, ceiling, daily limit, requests at once and the computer-use refusal (`MODEL_PLAN_BLOCKED`). We enforce mint-time limits. |
-| A18 and A24 (status, Settings → Usage) | `cloudAgentSecondsUsed` (V06) for `meters.cloudAgents {used, exhausted}` | A share only, no seconds, in responses. |
+| A18 and A24 (status, Settings → Usage) | `cloudAgentSecondsUsed` (V06) for `meters.cloudAgents {used, exhausted}` | A share only, no seconds, in responses. The two-argument call reads the clock itself and settles only that epoch's idle runs; it answers settled seconds, without live runs' reservations. |
 | A26 (label C11) | — | Edits `github.evidence.ts` and the `github.review.ts` log line. V19 and A26 assert the same label-plan §3.8 strings; whichever lands second rebases. |
 | A27 (listing) | — | We read its listed set (`GET /api/model-plans/config`) for INV-H2; a missing set means nothing is listed. |
 | A29 (docs) | anchors `/docs/vectorscope#github*` (V29) | `/docs/codium#github` shows no trigger syntax and links to us; our `#github-limits` links to `/docs/codium#plans`. |
@@ -1939,7 +1962,7 @@ Each package lists its files, changes, tests, done-criteria and the checks that 
 | A48 and A50 (Release Guard, On Call) | `startCloudRun` (V13) | Only on a user tap. These runs publish with `GITHUB_TOKEN` (their prompts carry third-party data), so their PRs start no CI by themselves. |
 | A49 (Ship Desk) | `CloudRun.verdict` (V11) found through the PR body's `<!-- vector:rid <rid> -->` marker; the capture job (V31) | The command is A49's. With `GITHUB_TOKEN` publishing (the default), Vector's PRs are authored by `github-actions[bot]`, not the App bot; A49 must recognise them by the rid marker plus a run record whose repository matches, or Ship Desk covers only repositories that opted in to App publishing. |
 | A57 (account deletion) | `eraseCloudAgentsAccount` (V11) | The revocation key already blocks mints and tokens after deletion. |
-| A59 (integration) | in `cloud-agents-entitlement.ts`: the `cloudAgentEntitlement` body (→ `cloudAgentAllowance`), the `cloudAgentRevokedBefore` body (→ `runTokensRevokedBefore`), types imported, `RUN_SOURCES` and `ENABLED_SOURCES` re-exported from `../../packages/schema/src/codium-run-trigger.js`, deletion of `CLOUD_AGENT_LIMITS` and `createCloudAgentEntitlement`; deletion of `packages/web/test/cloud-agents-entitlement.test.ts`; `registerRunVerifier(cloudAgentsRunVerifier.prefix, cloudAgentsRunVerifier.verify)`; `registerGatewayHook(cloudAgentsGatewayHook)`; the webhook registration if A47 landed first; meter wiring; the contract test | Needs this branch merged to `main` first. Only A59 edits `cloud-agents-entitlement.ts`, and we authorize it to delete that test. After A59 the kill switch is Codium's `cloudAgents` runtime switch. No audience change is needed. Its contract test, `packages/web/test/cloud-agents-entitlement-contract.test.ts`, matches the lane's `test/cloud-agents-*.test.ts` glob, so it also runs in `vector-at-mention.yml`'s web step (V04 deviation 1), which a pull request carrying A59's `api/**` or `packages/web/test/cloud-agents-*` changes starts: from `packages/web`, with `GITHUB_ACTIONS=false`, Valkey at `VECTOR_TEST_REDIS_URL` and no Postgres or Codium environment, in one Bun process after `github-oidc`, `github-app` and `github-app-api` (so it restores any environment it changes). It must pass there; if it needs more, Codium tells us before A59 builds and we change the step, because A59 does not edit this lane (1.6 item 8). |
+| A59 (integration) | in `cloud-agents-entitlement.ts`: the `cloudAgentEntitlement` body (→ `cloudAgentAllowance`), the `cloudAgentRevokedBefore` body (→ `runTokensRevokedBefore`), types imported, `RUN_SOURCES` and `ENABLED_SOURCES` re-exported from `../../packages/schema/src/codium-run-trigger.js`, deletion of `CLOUD_AGENT_LIMITS` and `createCloudAgentEntitlement` (the ledger imports the types `CloudAgentAllowance` and `RunSource` from this file, so A59 keeps exporting those names, and the ledger test never imports `createCloudAgentEntitlement`); deletion of `packages/web/test/cloud-agents-entitlement.test.ts`; `registerRunVerifier(cloudAgentsRunVerifier.prefix, cloudAgentsRunVerifier.verify)`; `registerGatewayHook(cloudAgentsGatewayHook)`; the webhook registration if A47 landed first; meter wiring; the contract test | Needs this branch merged to `main` first. Only A59 edits `cloud-agents-entitlement.ts`, and we authorize it to delete that test. After A59 the kill switch is Codium's `cloudAgents` runtime switch. No audience change is needed. Its contract test, `packages/web/test/cloud-agents-entitlement-contract.test.ts`, matches the lane's `test/cloud-agents-*.test.ts` glob, so it also runs in `vector-at-mention.yml`'s web step (V04 deviation 1), which a pull request carrying A59's `api/**` or `packages/web/test/cloud-agents-*` changes starts: from `packages/web`, with `GITHUB_ACTIONS=false`, Valkey at `VECTOR_TEST_REDIS_URL` and no Postgres or Codium environment, in one Bun process after `github-oidc`, `github-app` and `github-app-api` (so it restores any environment it changes). It must pass there; if it needs more, Codium tells us before A59 builds and we change the step, because A59 does not edit this lane (1.6 item 8). |
 | B08 (Brain in cloud runs) | the session artifact `manifest.files[]` (V27) | For owner-started desktop runs only. Coordinate the file split before B08 builds. |
 | Hands lane (E5) | `GithubAgents.onActionsRunner` and `withheldOnActions` (V03) | E5's `computer` registration must call them. `registry-actions.test.ts` proves the guard with a stub id before Hands merges. |
 
