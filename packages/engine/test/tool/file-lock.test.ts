@@ -78,15 +78,36 @@ describe("FileLock.key", () => {
     expect(FileLock.key(path.join(dir, "a.txt"), "linux")).toBe(path.join(dir, "a.txt"))
   })
 
-  test.skipIf(process.platform !== "darwin")("darwin folds case after probing a case-insensitive volume", () => {
-    const dir = tmp()
+  // The real probe stats the volume, so it runs on every host: a key computed as on a Mac follows whether the temp
+  // volume ignores case (default APFS and NTFS do, Linux file systems do not).
+  const ignoresCase = (dir: string) => {
     const file = path.join(dir, "Case.txt")
     fs.writeFileSync(file, "x")
-    const flipped = path.join(dir, "cASE.TXT")
-    const other = fs.statSync(flipped, { throwIfNoEntry: false })
-    // The temp volume is default APFS on a Mac, which ignores case; whatever it is, the key follows it.
-    const ignores = !!other && other.ino === fs.statSync(file).ino
-    expect(FileLock.key(flipped, "darwin") === FileLock.key(file, "darwin")).toBe(ignores)
+    const other = fs.statSync(path.join(dir, "cASE.TXT"), { throwIfNoEntry: false })
+    return !!other && other.ino === fs.statSync(file).ino
+  }
+
+  test("darwin folds case after probing a case-insensitive volume", () => {
+    FileLock.useProbe()
+    const dir = tmp()
+    const ignores = ignoresCase(dir)
+    expect(
+      FileLock.key(path.join(dir, "cASE.TXT"), "darwin") === FileLock.key(path.join(dir, "Case.txt"), "darwin"),
+    ).toBe(ignores)
+  })
+
+  test("the probe reads a volume's root by the names inside it, as a repository at a mount point is", () => {
+    FileLock.useProbe()
+    const dir = tmp()
+    const ignores = ignoresCase(dir)
+    // The highest folder above the temp folder on its volume: its own name belongs to the volume above.
+    const top = (current: string): string =>
+      path.dirname(current) !== current && fs.statSync(path.dirname(current)).dev === fs.statSync(dir).dev
+        ? top(path.dirname(current))
+        : current
+    // A file that does not exist, directly in that root, so the first folder probed is the root itself.
+    const file = path.join(top(dir), `Vector-Probe-${path.basename(dir)}.txt`)
+    expect(FileLock.key(file, "darwin") === file.normalize("NFC").toLowerCase()).toBe(ignores)
   })
 
   test("the probe is injectable and runs once per volume", () => {

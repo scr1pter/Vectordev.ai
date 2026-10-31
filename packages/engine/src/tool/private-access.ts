@@ -96,8 +96,10 @@ export function make(
     if (worktree && (yield* input.audience.isPrivateDirectory(worktree))) return yield* refused()
   })
 
+  // Shell output reaches this per chunk. Without a private root no text can name one, so the guest question (a family
+  // walk for an owner family, which is asked again each time) is skipped, as `read` and `git` skip it.
   const output = Effect.fn("PrivateAccess.output")(function* <A>(value: A) {
-    if (!(yield* guest())) return value
+    if (!(yield* guarded)) return value
     const text = yield* Effect.try({
       try: () => (typeof value === "string" ? value : (JSON.stringify(value) ?? "")),
       catch: refused,

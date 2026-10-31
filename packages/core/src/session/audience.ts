@@ -164,15 +164,15 @@ export function make(database: Database.Interface, platform: NodeJS.Platform = p
   // Tool output checks ask hasGuestInput often, so the legacy list is reread only when the file changes. A list that
   // exists but cannot be read (a scanner or backup holding it, say) is undefined: privacy decisions then fail closed,
   // and nothing else stops.
-  const cached: { key?: string; ids: string[] } = { ids: [] }
+  const cached: { key?: string; ids: string[]; set: Set<string> } = { ids: [], set: new Set() }
   const legacy = Effect.tryPromise(async () => {
-    if (!legacyFile) return []
+    if (!legacyFile) return cached
     const info = await stat(legacyFile).catch((error: NodeJS.ErrnoException) => {
       if (error.code === "ENOENT") return undefined
       throw error
     })
     const key = info ? `${info.mtimeMs}:${info.size}:${info.ino}` : "missing"
-    if (cached.key === key) return cached.ids
+    if (cached.key === key) return cached
     const text = info
       ? await readFile(legacyFile, "utf8").catch((error: NodeJS.ErrnoException) => {
           if (error.code === "ENOENT") return ""
@@ -192,7 +192,8 @@ export function make(database: Database.Interface, platform: NodeJS.Platform = p
     ]
     cached.key = key
     cached.ids = ids
-    return ids
+    cached.set = new Set(ids)
+    return cached
   }).pipe(
     Effect.catch((cause) =>
       Effect.logWarning("the legacy guest list could not be read", { cause }).pipe(Effect.as(undefined)),
@@ -226,20 +227,34 @@ export function make(database: Database.Interface, platform: NodeJS.Platform = p
   // it would refuse every later creation and fence there, the owner's own included. It stays in the list, which
   // hasGuestInput (so canIsolate) and FreeModelGuests still read. Each such conflict is logged once per instance.
   const conflicts = new Set<string>()
+  // Both marks only ever turn on, so an ID once found already marked guest, or found in a fenced family, needs no
+  // further reads. Only such reads count, never this call's own writes, which its transaction may still roll back.
+  // Once every listed ID is settled, a list unchanged since then costs nothing: register, fence and guest admits run
+  // this inside BEGIN IMMEDIATE, and FreeModelGuests only ever appends to the list.
+  const settled = new Set<string>()
+  const done: { key?: string } = {}
   // Whether the list could be read; one that could not is imported by a later call.
   const importLegacy = Effect.gen(function* () {
-    const ids = yield* legacy
-    for (const id of ids ?? []) {
+    const list = yield* legacy
+    if (!list) return false
+    if (list.key !== undefined && done.key === list.key) return true
+    const key = list.key
+    const pending = list.ids.filter((id) => !settled.has(id))
+    for (const id of pending) {
       const current = yield* db
         .get<{ guest_input: number }>(sql`SELECT guest_input FROM session_audience WHERE session_id = ${id}`)
         .pipe(Effect.orDie)
-      if (current?.guest_input) continue
+      if (current?.guest_input) {
+        settled.add(id)
+        continue
+      }
       if (yield* isPrivate(id)) {
         if (!conflicts.has(id))
           yield* Effect.logWarning("a legacy guest mark names a conversation already private to its owner", {
             sessionID: id,
           })
         conflicts.add(id)
+        settled.add(id)
         continue
       }
       yield* db
@@ -249,7 +264,8 @@ export function make(database: Database.Interface, platform: NodeJS.Platform = p
         )
         .pipe(Effect.orDie)
     }
-    return ids !== undefined
+    if (pending.length === 0) done.key = key
+    return true
   })
   // BEGIN IMMEDIATE serializes decisions across connections/processes before their first read.
   const serialized = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
@@ -267,9 +283,8 @@ export function make(database: Database.Interface, platform: NodeJS.Platform = p
       // ever after, so treating its owner as a guest would only refuse the owner's own isolated work.
       if (listed === undefined) return !(yield* isPrivate(sessionID))
       // Tool output checks ask this on every call; without a legacy list there is no second family walk to make.
-      const saved = new Set<string>(listed)
-      if (saved.size === 0) return false
-      return (yield* members(sessionID, guest)).some((member) => saved.has(member.id))
+      if (listed.set.size === 0) return false
+      return (yield* members(sessionID, guest)).some((member) => listed.set.has(member.id))
     })
   const hasGuestInput = (sessionID: string) => guestIn(sessionID, true)
   const register: Interface["register"] = (input) =>

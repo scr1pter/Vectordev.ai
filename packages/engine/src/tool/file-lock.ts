@@ -1,7 +1,7 @@
 export * as FileLock from "./file-lock"
 
 import path from "node:path"
-import { statSync } from "node:fs"
+import { lstatSync, readdirSync, statSync } from "node:fs"
 import { Duration, Effect, Schema } from "effect"
 import { KeyedMutex } from "@vectordevai/core/effect/keyed-mutex"
 import { FSUtil } from "@vectordevai/core/fs-util"
@@ -24,10 +24,35 @@ const stat = (file: string) => {
     return undefined
   }
 }
+const lstat = (file: string) => {
+  try {
+    return lstatSync(file, { throwIfNoEntry: false })
+  } catch {
+    return undefined
+  }
+}
+const list = (dir: string) => {
+  try {
+    return readdirSync(dir)
+  } catch {
+    return []
+  }
+}
+
+/** Whether a case-flipped spelling of the entry `name` in `parent` is the same entry; undefined with nothing to test. */
+const flipsTo = (parent: string, name: string, volume: number | undefined) => {
+  const flipped = flip(name)
+  if (flipped === name) return undefined
+  const self = lstat(path.join(parent, name))
+  if (!self || self.dev !== volume) return undefined
+  const other = lstat(path.join(parent, flipped))
+  return !!other && other.dev === self.dev && other.ino === self.ino
+}
 
 /**
  * Stats the case-flipped spelling of the nearest name on the volume that has letters: the same file means the volume
- * ignores case. With nothing to flip, a Mac volume is taken to be default APFS, which ignores case.
+ * ignores case. A folder at the volume's root has no such name (its own belongs to the volume above), so the entries
+ * inside that root are tried. With nothing to flip, a Mac volume is taken to be default APFS, which ignores case.
  */
 const statProbe: Probe = (dir) => {
   const volume = stat(dir)?.dev
@@ -35,15 +60,15 @@ const statProbe: Probe = (dir) => {
   for (;;) {
     const parent = path.dirname(current)
     const above = stat(parent)
-    // At the volume's root its own name belongs to the volume above, so flipping it would test that one.
-    if (parent === current || above?.dev !== volume) return true
-    const name = path.basename(current)
-    const flipped = flip(name)
-    if (flipped !== name) {
-      const self = stat(current)
-      const other = stat(path.join(parent, flipped))
-      return !!self && !!other && other.dev === self.dev && other.ino === self.ino
-    }
+    if (parent === current || above?.dev !== volume)
+      return (
+        list(current).reduce<boolean | undefined>(
+          (found, name) => found ?? flipsTo(current, name, volume),
+          undefined,
+        ) ?? true
+      )
+    const found = flipsTo(parent, path.basename(current), volume)
+    if (found !== undefined) return found
     current = parent
   }
 }

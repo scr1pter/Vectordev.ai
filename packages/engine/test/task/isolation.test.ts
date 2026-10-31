@@ -1,7 +1,8 @@
-import { afterEach, expect } from "bun:test"
+import { afterEach, expect, test } from "bun:test"
 import { Database } from "@vectordevai/core/database/database"
 import { SessionAudience } from "@vectordevai/core/session/audience"
 import fs from "node:fs/promises"
+import os from "node:os"
 import path from "node:path"
 import { Cause, Deferred, Effect, Exit, Fiber, Layer } from "effect"
 import { AppNodeBuilder } from "@vectordevai/core/effect/app-node-builder"
@@ -1719,6 +1720,30 @@ it.instance(
   { git: true },
 )
 
+it.instance(
+  "an agent's approval still merges after the owner's Changes view meanwhile, which only caches its assessment",
+  () =>
+    Effect.gen(function* () {
+      const f = yield* fixture
+      const started = yield* f.start
+      yield* write(started.work.directory, "one.txt", "one\n")
+      yield* f.settle()
+      const prompt = yield* promptedMerge(f.isolation, f.child.id, f.parent.id)
+      const before = (yield* f.isolation.get(f.child.id)).mergeKey
+      // Review (route 4 with diff=true) saves mergeKey and mergeable while the user has not answered.
+      const view = yield* f.isolation
+        .changes({ taskID: f.child.id, diff: true, control: true, review: true })
+        .pipe(Effect.timeout("10 seconds"))
+      expect(view.mergeable).toBe("clean")
+      expect((yield* f.isolation.get(f.child.id)).mergeKey).not.toBe(before)
+      const exit = yield* prompt.approve
+      expect(Exit.isSuccess(exit)).toBe(true)
+      expect(yield* contents(f.home.directory, "one.txt")).toBe("one\n")
+      expect((yield* f.isolation.get(f.child.id)).state).toBe("merged")
+    }),
+  { git: true },
+)
+
 for (const gitProject of [true, false])
   for (const action of ["edit", "delete"])
     it.instance(
@@ -1769,3 +1794,169 @@ for (const gitProject of [true, false])
       // runners before the final checkout removal, so the default 30 s leaves them no room there.
       60_000,
     )
+
+const gc = (directory: string) =>
+  git(directory, ["-c", "gc.reflogExpireUnreachable=now", "gc", "--prune=now", "--quiet"])
+const pinned = (directory: string, taskID: string) =>
+  git(directory, ["for-each-ref", "--format=%(refname)", `refs/vector/isolation/${taskID}`])
+
+it.instance(
+  "a partial merge's logical base survives Git's gc, so the rest can still be reviewed and merged",
+  () =>
+    Effect.gen(function* () {
+      const f = yield* fixture
+      const started = yield* f.start
+      yield* write(started.work.directory, "one.txt", "one\n")
+      yield* write(started.work.directory, "two.txt", "two\n")
+      yield* f.settle()
+      const partial = yield* f.isolation.merge({ taskID: f.child.id, files: ["one.txt"], by: { kind: "owner" } })
+      expect(partial.record.reviewBase).toBeDefined()
+      // Weeks of the user's own commits end in an automatic gc, which prunes every commit no ref reaches.
+      yield* gc(f.home.directory)
+      const view = yield* f.isolation.changes({ taskID: f.child.id, diff: true, control: true, review: true })
+      expect(view.patch).toContain("+two")
+      expect(view.patch).not.toContain("+one")
+      expect((yield* f.isolation.merge({ taskID: f.child.id, by: { kind: "owner" } })).record.state).toBe("merged")
+      expect(yield* contents(f.home.directory, "two.txt")).toBe("two\n")
+      // The pins go with the checkout.
+      expect(yield* pinned(f.home.directory, f.child.id)).toBe("")
+    }),
+  { git: true },
+)
+
+it.instance(
+  "a stacked task's pre-stack seed survives Git's gc through an includeStacked merge and a discard",
+  () =>
+    Effect.gen(function* () {
+      const dependency = yield* fixture
+      const dep = yield* dependency.start
+      yield* write(dep.work.directory, "dependency.txt", "dependency\n")
+      yield* dependency.settle()
+      const f = yield* fixture
+      // The parent's uncommitted change makes the pre-stack seed a commit of its own.
+      yield* write(f.home.directory, "parent.txt", "parent\n")
+      yield* f.isolation.reserve({
+        taskID: f.child.id,
+        parentSessionID: f.parent.id,
+        title: "Stacked",
+        agent: f.agent,
+        dependsOn: [dependency.child.id],
+      })
+      yield* f.isolation.start(f.child.id)
+      yield* write(f.workPath, "own.txt", "own\n")
+      yield* write(f.workPath, "later.txt", "later\n")
+      yield* f.settle()
+      yield* gc(f.home.directory)
+      yield* f.isolation.merge({ taskID: f.child.id, files: ["own.txt"], by: { kind: "owner" }, includeStacked: true })
+      yield* gc(f.home.directory)
+      const discarded = yield* f.isolation.discard({ taskID: f.child.id, by: { kind: "owner" } })
+      expect(discarded.record.state).toBe("discarded")
+      const saved = yield* Effect.promise(() => fs.readFile(discarded.saved!, "utf8"))
+      expect(saved).toContain("+later")
+      expect(saved).toContain("+dependency")
+      expect(yield* pinned(f.home.directory, f.child.id)).toBe("")
+    }),
+  { git: true },
+  // Two isolated starts, two saves, a stacked merge and a discard, with two full gc runs.
+  60_000,
+)
+
+test("a merge's link that cannot be made leaves the parent's file in place", async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "vector-isolation-place-"))
+  const target = path.join(dir, "linked.txt")
+  await fs.writeFile(target, "parent\n")
+  // A target with a NUL byte is refused by the link call itself, like a Windows account without the link privilege.
+  await expect(TaskIsolation.place(target, { symlink: "bad\0target" })).rejects.toThrow()
+  expect(await fs.readFile(target, "utf8")).toBe("parent\n")
+  expect(await fs.readdir(dir)).toEqual(["linked.txt"])
+  await TaskIsolation.place(target, { symlink: "other.txt" })
+  expect(await fs.readlink(target)).toBe("other.txt")
+  await fs.rm(dir, { recursive: true, force: true })
+})
+
+for (const via of ["settle", "reconcile"] as const)
+  it.instance(
+    `an isolated start that fails before its checkout exists ends unchanged with its error through ${via}`,
+    () =>
+      Effect.gen(function* () {
+        const dependency = yield* fixture
+        yield* write(dependency.home.directory, "same.txt", "base\n")
+        yield* git(dependency.home.directory, ["add", "same.txt"])
+        yield* git(dependency.home.directory, ["commit", "-m", "base"])
+        const dep = yield* dependency.start
+        yield* write(dep.work.directory, "same.txt", "dependency\n")
+        yield* dependency.settle()
+        const f = yield* fixture
+        // The parent changed the same line since, so stacking the dependency conflicts before any checkout exists.
+        yield* write(f.home.directory, "same.txt", "parent\n")
+        yield* f.isolation.reserve({
+          taskID: f.child.id,
+          parentSessionID: f.parent.id,
+          title: "Conflicting stack",
+          agent: f.agent,
+          dependsOn: [dependency.child.id],
+        })
+        expect(Exit.isFailure(yield* f.isolation.start(f.child.id).pipe(Effect.exit))).toBe(true)
+        const failed = yield* f.isolation.get(f.child.id)
+        expect(failed.state).toBe("failed")
+        // The job's save barrier settles the attempt (TaskIsolation.complete); a restart's recovery reconciles it.
+        const ended = via === "settle" ? yield* f.settle() : yield* f.isolation.reconcile(f.child.id)
+        expect(ended.state).toBe("unchanged")
+        expect(ended.error).toBe(failed.error)
+        expect(TaskIsolation.report(ended)).toContain("could not be prepared")
+        expect(yield* exists(f.workPath)).toBe(false)
+        expect((yield* f.settle()).state).toBe("unchanged")
+        expect((yield* f.isolation.discard({ taskID: f.child.id, by: { kind: "owner" } })).record.state).toBe(
+          "unchanged",
+        )
+      }),
+    { git: true },
+  )
+
+it.instance("a copy resume after an unchanged save copies a fresh baseline, with its links", () =>
+  Effect.gen(function* () {
+    const f = yield* fixture
+    const registry = path.dirname(f.recordPath)
+    yield* write(f.home.directory, "target.txt", "target\n")
+    yield* write(f.home.directory, "gone.txt", "gone\n")
+    yield* Effect.promise(() => fs.symlink("target.txt", path.join(f.home.directory, "link.txt")))
+    yield* f.start
+    expect((yield* f.settle()).state).toBe("unchanged")
+    // The removed copy takes its baseline with it.
+    expect(yield* exists(path.join(registry, "baseline"))).toBe(false)
+    expect(yield* exists(path.join(registry, "baseline.json"))).toBe(false)
+    // An earlier attempt's baseline left in place (by a crash mid-start, say) holds a link and a file since deleted.
+    yield* write(path.join(registry, "baseline"), "gone.txt", "gone\n")
+    yield* Effect.promise(() => fs.symlink("target.txt", path.join(registry, "baseline", "link.txt")))
+    yield* Effect.promise(() => fs.unlink(path.join(f.home.directory, "gone.txt")))
+    yield* f.isolation.resume({ taskID: f.child.id, attempt: 2, agent: f.agent })
+    expect(yield* exists(path.join(registry, "baseline", "gone.txt"))).toBe(false)
+    yield* write(f.workPath, "one.txt", "one\n")
+    const saved = yield* f.isolation.settle({ taskID: f.child.id, attempt: 2 })
+    expect(saved.state).toBe("changed")
+    expect(saved.files.map((file) => file.path)).toEqual(["one.txt"])
+  }),
+)
+
+it.instance("copy merges keep only the baseline they use, and none once the task is merged", () =>
+  Effect.gen(function* () {
+    const f = yield* fixture
+    const registry = path.dirname(f.recordPath)
+    const bases = Effect.promise(async () => (await fs.readdir(registry)).filter((name) => name.startsWith("base-")))
+    yield* f.start
+    for (const file of ["one.txt", "two.txt", "three.txt"]) yield* write(f.workPath, file, `${file}\n`)
+    yield* f.settle()
+    const first = yield* f.isolation.merge({ taskID: f.child.id, files: ["one.txt"], by: { kind: "owner" } })
+    expect(yield* bases).toEqual([first.record.copyBase!])
+    const second = yield* f.isolation.merge({ taskID: f.child.id, files: ["two.txt"], by: { kind: "owner" } })
+    expect(yield* bases).toEqual([second.record.copyBase!])
+    const rest = yield* f.isolation.merge({ taskID: f.child.id, by: { kind: "owner" } })
+    expect(rest.record.state).toBe("merged")
+    expect(yield* bases).toEqual([])
+    expect(yield* exists(path.join(registry, "baseline"))).toBe(false)
+    // The saved patch, the checkpoints and the record stay.
+    expect(yield* exists(rest.record.savedPatch)).toBe(true)
+    expect(yield* exists(f.recordPath)).toBe(true)
+    expect((yield* f.isolation.changes({ taskID: f.child.id, diff: true, control: true })).patch).toContain("three.txt")
+  }),
+)

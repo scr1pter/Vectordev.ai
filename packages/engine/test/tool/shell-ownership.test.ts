@@ -384,6 +384,7 @@ describe("git ownership policy", () => {
           ["git", "worktree", "remove", directory],
           ["git", "worktree", "prune"],
           ["git", "update-ref", "--stdin"],
+          ["git", "update-ref", "-d", `refs/vector/isolation/ses_kept/${"a".repeat(40)}`],
           ["git", "checkout", "-bvector/subagent/ses_kept"],
           ["git", "switch", "-cvector/subagent/ses_kept"],
         ]) {

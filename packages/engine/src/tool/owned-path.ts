@@ -40,8 +40,9 @@ function refKey(tree: string, ref: string) {
   return insensitive ? ref.normalize("NFC").toLowerCase() : ref
 }
 
+// Task branches, and the private refs that pin a kept task's partial-merge bases against Git's gc (TaskIsolation).
 function reservedRef(tree: string, ref: string) {
-  return /^(?:refs\/heads\/)?vector\/subagent(?:\/|$)/.test(refKey(tree, ref))
+  return /^(?:(?:refs\/heads\/)?vector\/subagent|refs\/vector\/isolation)(?:\/|$)/.test(refKey(tree, ref))
 }
 
 function sameRef(tree: string, left: string | undefined, right: string) {

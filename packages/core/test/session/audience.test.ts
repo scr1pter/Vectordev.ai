@@ -597,6 +597,53 @@ it.live("a legacy guest mark written after the fence leaves the fenced family wo
   }),
 )
 
+// Imports run inside each decision's write transaction, and a refused registration rolls its transaction back. What
+// it imported must then be imported again, however often the unchanged list has been read meanwhile.
+it.live("legacy guest marks a refused registration imported are imported again by the next decision", () =>
+  Effect.gen(function* () {
+    const database = yield* Database.Service
+    const temporary = yield* Effect.acquireRelease(Effect.promise(tmpdir), (value) =>
+      Effect.promise(() => value[Symbol.asyncDispose]()),
+    )
+    yield* Effect.acquireRelease(
+      Effect.sync(() => {
+        const previous = Flag.VECTOR_AGENT_DB
+        Flag.VECTOR_AGENT_DB = path.join(temporary.path, "fixture.db")
+        return previous
+      }),
+      (previous) =>
+        Effect.sync(() => {
+          Flag.VECTOR_AGENT_DB = previous
+        }),
+    )
+    const audience = SessionAudience.make(database)
+    yield* audience.register({ sessionID: "ses_rollback_root" })
+    yield* audience.fenceIsolation({ sessionID: "ses_rollback_root", actor: "owner", directory: temporary.path })
+    yield* Effect.promise(() =>
+      fs.writeFile(path.join(temporary.path, "free-model-guest-sessions.txt"), "ses_rollback_guest\n"),
+    )
+    expect(
+      Exit.isFailure(
+        yield* audience
+          .register({ sessionID: "ses_rollback_child", parentID: "ses_rollback_root", actor: "guest" })
+          .pipe(Effect.exit),
+      ),
+    ).toBe(true)
+    // The list is unchanged, and the listed conversation is still a guest's: it may not be fenced.
+    expect(
+      Exit.isFailure(
+        yield* audience.fenceIsolation({ sessionID: "ses_rollback_guest", actor: "owner" }).pipe(Effect.exit),
+      ),
+    ).toBe(true)
+    yield* audience.register({ sessionID: "ses_rollback_later" })
+    yield* audience.register({ sessionID: "ses_rollback_last" })
+    // The mark is durable: it holds once the list is gone.
+    yield* Effect.promise(() => fs.rm(path.join(temporary.path, "free-model-guest-sessions.txt")))
+    expect(yield* audience.hasGuestInput("ses_rollback_guest")).toBe(true)
+    expect(yield* audience.canIsolate("ses_rollback_guest", "owner")).toBe(false)
+  }),
+)
+
 it.live("an unreadable legacy guest list fails closed for privacy decisions and stops nothing else", () =>
   Effect.gen(function* () {
     const database = yield* Database.Service

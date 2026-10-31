@@ -233,6 +233,9 @@ export const UNREADABLE_REPORT =
 /** Vector's own line is kept outside the subagent's untrusted report and contains no filenames. */
 export function report(record: Record) {
   const place = record.mode === "worktree" ? "worktree" : "copy"
+  // A start that failed before its checkout existed ends unchanged with its error (TaskIsolation.vacate).
+  if (record.state === "unchanged" && record.error)
+    return `Vector: this task's isolated ${place} could not be prepared, so it changed no files.`
   if (record.state === "unchanged")
     return `Vector: this task worked in its own ${place} and changed no files, so the ${place} was removed.`
   if (record.state === "settling")
@@ -316,6 +319,29 @@ async function privateTree(directory: string) {
   }
 }
 
+/**
+ * Puts a file or a symbolic link at `target` through a new name in its folder and a rename, so a write that fails (a
+ * link Windows lacks the privilege to make, a full disk) leaves what was there. Merges and their rollback write this
+ * way, which lets recovery tell their writes from later changes.
+ */
+export async function place(target: string, entry: { symlink: string } | { bytes: Buffer; mode: number }) {
+  const temp = path.join(path.dirname(target), `.vector-merge-${randomUUID()}`)
+  if ("symlink" in entry) await symlink(entry.symlink, temp)
+  else await writeFile(temp, entry.bytes, { mode: entry.mode, flag: "wx" })
+  await (async () => {
+    // Windows renames neither a link to a folder over an entry nor anything over such a link, so there the old entry
+    // goes first. The new link exists by then, so only that rename is left to fail.
+    if ("symlink" in entry && process.platform === "win32")
+      await unlink(target).catch((cause) => {
+        if (!missing(cause)) throw cause
+      })
+    await rename(temp, target)
+  })().catch(async (cause) => {
+    await unlink(temp).catch(() => undefined)
+    throw cause
+  })
+}
+
 async function readRecord(ctx: InstanceContext, taskID: string): Promise<Record> {
   const expected = paths(ctx.project.id, taskID)
   await guarded(expected.file)
@@ -395,6 +421,21 @@ function baselinePaths(record: Record) {
         hashes: path.join(registry, record.copyBase, "hashes.json"),
       }
     : { directory: path.join(registry, "baseline"), hashes: path.join(registry, "baseline.json") }
+}
+/**
+ * A copy's baseline and each partial merge's version of it hold a full copy of the project. Nothing reads them once the
+ * copy is gone (a merged or discarded task reads its saved patch, and a resume starts again from current files), and a
+ * start must not copy into an earlier attempt's, so they go when the copy goes and before a start copies.
+ */
+async function dropBaselines(record: Record) {
+  const registry = paths(record.projectID, record.taskID).registry
+  await guarded(registry)
+  const names = await readdir(registry).catch((cause) => {
+    if (missing(cause)) return []
+    throw cause
+  })
+  for (const name of names.filter((name) => ["baseline", "baseline.json"].includes(name) || name.startsWith("base-")))
+    await rm(path.join(registry, name), { recursive: true, force: true })
 }
 const baselineHashes = (record: Record) =>
   io(async () => {
@@ -494,6 +535,12 @@ export const make = Effect.gen(function* () {
   })
   const text = (cwd: string, args: string[], options: Omit<Git.Options, "cwd"> = {}) =>
     command(cwd, args, options).pipe(Effect.map((out) => out.toString("utf8").trim()))
+  // A partial merge's logical base is a commit no branch reaches, so Git's gc would prune it while the task is kept.
+  // Each one gets its own private ref under its task before a record names it. A ref is never moved, so a merge that
+  // fails after pinning leaves the record's current base pinned as well; `remove` drops the task's refs.
+  const pins = (taskID: string) => `refs/vector/isolation/${taskID}`
+  const pin = (record: Record, commit: string) =>
+    command(record.parentDirectory, ["update-ref", `${pins(record.taskID)}/${commit}`, commit]).pipe(Effect.as(commit))
   const home = Effect.gen(function* () {
     const ctx = yield* TaskPlace.atHome()(InstanceRef)
     if (!ctx) return yield* err("context", "Task isolation requires a launching instance.")
@@ -851,17 +898,17 @@ export const make = Effect.gen(function* () {
     const sparse = repository.exitCode === 0 ? yield* run(cwd, ["config", "--bool", "core.sparseCheckout"]) : undefined
     if (sparse?.text().trim() === "true")
       return yield* err("sparse", "Task isolation does not support sparse checkouts.")
-    const size =
-      mode === "worktree"
-        ? (yield* text(cwd, ["ls-tree", "-r", "-l", "HEAD"]))
-            .split("\n")
-            .reduce((total, line) => total + (Number(line.split(/\s+/)[3]) || 0), 0)
-        : 0
+    const total = mode === "copy" ? yield* io(() => IsolationCopy.measureProject(cwd)) : undefined
+    // A worktree needs about HEAD's tracked files; a copy writes the project twice, as the copy and its baseline.
+    const needed = total
+      ? total.bytes * 2
+      : (yield* text(cwd, ["ls-tree", "-r", "-l", "HEAD"]))
+          .split("\n")
+          .reduce((sum, line) => sum + (Number(line.split(/\s+/)[3]) || 0), 0) * 1.5
     const disk = yield* io(() => statfs(Global.Path.data))
-    if (disk.bavail * disk.bsize < Math.max(limits.minFreeBytes, size * 1.5))
+    if (disk.bavail * disk.bsize < Math.max(limits.minFreeBytes, needed))
       return yield* err("disk", "There is not enough free disk space for task isolation.")
-    if (mode === "copy") {
-      const total = yield* io(() => IsolationCopy.measureProject(cwd))
+    if (total) {
       if (total.files > limits.copyFiles)
         return yield* err("copy_limit", "The project exceeds the isolation copy file limit.")
       if (total.bytes > limits.copyBytes)
@@ -1036,9 +1083,11 @@ export const make = Effect.gen(function* () {
             }
           }
           const tree = yield* text(record.parentDirectory, ["write-tree"], { env: { GIT_INDEX_FILE: index } })
+          // The stacked seed builds on the unstacked one, so the task's branch reaches it: an owner's includeStacked
+          // merge and discard read it later, and Git's gc prunes a commit that no branch or ref reaches.
           const commit =
-            tree === parentTree
-              ? head
+            tree === beforeStack
+              ? unstackedSeed
               : yield* text(
                   record.parentDirectory,
                   [
@@ -1047,9 +1096,9 @@ export const make = Effect.gen(function* () {
                     "commit-tree",
                     tree,
                     "-p",
-                    head,
+                    unstackedSeed,
                     "-m",
-                    `Vector: your uncommitted changes when ${record.title} started`,
+                    `Vector: the changes of ${record.stacked.join(", ")}, stacked when ${record.title} started`,
                   ],
                   { env: yield* identity(record.parentDirectory) },
                 )
@@ -1093,6 +1142,8 @@ export const make = Effect.gen(function* () {
                   )
                 )
                   return yield* err("exists", "The reserved copy directory already exists; it has not been changed.")
+                // A resume whose copy was removed starts here again; its earlier baselines describe older files.
+                yield* io(() => dropBaselines(record))
                 const copied = yield* io(() =>
                   IsolationCopy.copyProject(record.parentDirectory, record.directory, {
                     maxFiles: limits.copyFiles,
@@ -1242,12 +1293,24 @@ export const make = Effect.gen(function* () {
     yield* assertCaptured(valid)
     yield* unlinkLinks(valid)
     if (valid.mode === "worktree") {
+      // Whatever is removed has its patch saved or nothing left to merge, so its pinned bases go first: a removal that
+      // fails after them leaves nothing that needs them.
+      const pinned = (yield* text(valid.parentDirectory, ["for-each-ref", "--format=%(refname)", pins(valid.taskID)]))
+        .split("\n")
+        .filter(Boolean)
+      if (pinned.length)
+        yield* command(valid.parentDirectory, ["update-ref", "--stdin"], {
+          stdin: Stream.make(Buffer.from(pinned.map((ref) => `delete ${ref}\n`).join(""))),
+        })
       const service = yield* worktrees()
       const ctx = yield* home
       yield* service
         .removeForTask({ name: valid.taskID, directory: valid.directory, branch: valid.branch! })
         .pipe(Effect.provideService(InstanceRef, ctx))
-    } else yield* io(() => rm(valid.directory, { recursive: true, force: true }))
+    } else {
+      yield* io(() => rm(valid.directory, { recursive: true, force: true }))
+      yield* io(() => dropBaselines(valid))
+    }
     yield* io(() => WorkspaceTrust.forget(Global.Path.state, valid.directory))
     TaskClaims.unprotect(valid.taskID)
   })
@@ -1321,6 +1384,30 @@ export const make = Effect.gen(function* () {
       }
     })
   })
+  // A start that failed or was stopped before its checkout existed (a stacked dependency that conflicts, a Stop while
+  // seeding) has no saved tip, no checkout and no reserved branch: nothing to save, keep or recover.
+  const vacant = Effect.fnUntraced(function* (record: Record) {
+    if (record.tip || !["preparing", "failed"].includes(record.state) || (yield* io(() => present(record.directory))))
+      return false
+    if (record.mode === "copy") return true
+    return (
+      (yield* run(record.parentDirectory, ["show-ref", "--verify", "--quiet", `refs/heads/${record.branch}`]))
+        .exitCode !== 0
+    )
+  })
+  // Such a task ends unchanged and keeps start's error for the owner, so discard, sweep and recovery are done with it.
+  const vacate = Effect.fnUntraced(function* (record: Record, attempt: number) {
+    const empty = {
+      ...record,
+      state: "unchanged",
+      settledAttempt: attempt,
+      error: record.error ?? "The isolated checkout was never made.",
+    }
+    yield* save(empty)
+    yield* retire(empty)
+    TaskClaims.unprotect(record.taskID)
+    return empty
+  })
   const settle = Effect.fn("TaskIsolation.settle")(function* (input: {
     taskID: string
     attempt: number
@@ -1335,6 +1422,7 @@ export const make = Effect.gen(function* () {
         if (record.attempt !== input.attempt) return record
         // Recovery never saves work this process is still running; its own finalizer does that.
         if (input.recover && active.has(record.taskID)) return record
+        if (yield* vacant(record)) return yield* vacate(record, input.attempt)
         yield* verify(record)
         yield* save({ ...record, state: "settling" })
         const placed = active.get(record.taskID) ?? TaskPlace.get(record.taskID)?.work
@@ -1873,7 +1961,15 @@ export const make = Effect.gen(function* () {
         : saved?.isFile()
           ? { hash: yield* io(() => IsolationCopy.hashFile(backup)) }
           : undefined
-    return [file.written, before].some((state) => state !== undefined && stable(state) === stable(now))
+    // On Windows Node writes a relative link target with backslashes, so readlink there never returns the forward
+    // slashes of the Git blob the merge wrote.
+    const spelled = (state: typeof now) =>
+      state?.symlink !== undefined && process.platform === "win32"
+        ? { symlink: state.symlink.replaceAll("\\", "/") }
+        : state
+    return [file.written, before].some(
+      (state) => state !== undefined && stable(spelled(state)) === stable(spelled(now)),
+    )
   })
   const rollback = Effect.fn("TaskIsolation.rollback")(function* (record: Record) {
     const restore = yield* manifest(record)
@@ -1904,20 +2000,19 @@ export const make = Effect.gen(function* () {
         kept.push(file.path)
         continue
       }
-      if (info?.isSymbolicLink()) yield* io(() => unlink(target))
       if (!file.existed) {
-        yield* io(() => rm(target, { force: true }))
+        yield* io(() => (info?.isSymbolicLink() ? unlink(target) : rm(target, { force: true })))
         continue
       }
       yield* io(async () => {
         await mkdir(path.dirname(target), { recursive: true })
-        if (file.symlink !== undefined) {
-          await rm(target, { force: true })
-          await symlink(file.symlink, target)
-        } else {
-          await copyFile(path.join(record.checkpoint!, "overwritten", file.path), target)
-          if (file.mode !== undefined) await chmod(target, file.mode)
-        }
+        // A link goes back in one rename over whatever the merge left, so a failed restore still holds the merge's
+        // write, which a later recovery recognises.
+        if (file.symlink !== undefined) return place(target, { symlink: file.symlink })
+        // copyFile follows a link, so a link the merge wrote goes first.
+        if (info?.isSymbolicLink()) await unlink(target)
+        await copyFile(path.join(record.checkpoint!, "overwritten", file.path), target)
+        if (file.mode !== undefined) await chmod(target, file.mode)
       })
     }
     yield* save({
@@ -2023,10 +2118,13 @@ export const make = Effect.gen(function* () {
         ...original,
         stackedIncluded: true,
         patchBase: original.unstackedSeed,
-        reviewBase: yield* IsolationBase.advanceGit(
-          { parentDirectory: original.parentDirectory, registry, seed: original.unstackedSeed, tip: original.tip },
-          original.merged,
-          command,
+        reviewBase: yield* pin(
+          original,
+          yield* IsolationBase.advanceGit(
+            { parentDirectory: original.parentDirectory, registry, seed: original.unstackedSeed, tip: original.tip },
+            original.merged,
+            command,
+          ),
         ),
       }
     })
@@ -2069,7 +2167,16 @@ export const make = Effect.gen(function* () {
             )
             for (const target of plan.targets) yield* by.assertExternalDirectory(target)
             yield* by.assertWritable({ files: plan.targets })
-            yield* by.ask({ permission: "edit", patterns: plan.selected, always: ["*"], metadata: { diff: plan.diff } })
+            // Edit asks name files relative to the instance's worktree, as edit and write do: the chokepoint resolves
+            // them there for the prompt_source and memory_source asks. A project that is not a Git repository has the
+            // file system root as its worktree, while its merge targets sit in the project folder.
+            const ctx = yield* home
+            yield* by.ask({
+              permission: "edit",
+              patterns: plan.targets.map((target) => path.relative(ctx.worktree, target)),
+              always: ["*"],
+              metadata: { diff: plan.diff },
+            })
             return plan.record
           })
         : undefined
@@ -2143,16 +2250,19 @@ export const make = Effect.gen(function* () {
               // request waits for it, so no merge is left written but recorded as unfinished.
               const reviewBase =
                 !complete && record.mode === "worktree"
-                  ? yield* IsolationBase.advanceGit(
-                      {
-                        parentDirectory: record.parentDirectory,
-                        registry,
-                        seed: record.seed!,
-                        tip: record.tip!,
-                        reviewBase: record.reviewBase,
-                      },
-                      plan.selected,
-                      command,
+                  ? yield* pin(
+                      record,
+                      yield* IsolationBase.advanceGit(
+                        {
+                          parentDirectory: record.parentDirectory,
+                          registry,
+                          seed: record.seed!,
+                          tip: record.tip!,
+                          reviewBase: record.reviewBase,
+                        },
+                        plan.selected,
+                        command,
+                      ),
                     )
                   : undefined
               const copyBase =
@@ -2178,20 +2288,12 @@ export const make = Effect.gen(function* () {
                         return
                       }
                       await mkdir(path.dirname(target), { recursive: true })
-                      if (value.mode === "120000") {
-                        await rm(target, { force: true })
-                        await symlink(value.bytes.toString(), target)
-                        return
-                      }
-                      const temp = path.join(path.dirname(target), `.vector-merge-${randomUUID()}`)
-                      await writeFile(temp, value.bytes, {
-                        mode: value.mode === "100755" ? 0o755 : 0o644,
-                        flag: "wx",
-                      })
-                      await rename(temp, target).catch(async (cause) => {
-                        await rm(temp, { force: true })
-                        throw cause
-                      })
+                      await place(
+                        target,
+                        value.mode === "120000"
+                          ? { symlink: value.bytes.toString() }
+                          : { bytes: value.bytes, mode: value.mode === "100755" ? 0o755 : 0o644 },
+                      )
                     })
                   }
                   const next = {
@@ -2214,6 +2316,13 @@ export const make = Effect.gen(function* () {
                     : Effect.void,
                 ),
               )
+              // The copy base version this merge replaced is a full copy of the project that no record names now.
+              if (record.copyBase && next.copyBase !== record.copyBase)
+                yield* io(() => rm(path.join(registry, record.copyBase!), { recursive: true, force: true })).pipe(
+                  Effect.catchCause((cause) =>
+                    Effect.logWarning("a replaced copy base could not be removed", { taskID: record.taskID, cause }),
+                  ),
+                )
               const events = yield* Effect.serviceOption(EventV2Bridge.Service)
               const ctx = yield* home
               if (Option.isSome(events))
@@ -2372,6 +2481,7 @@ export const make = Effect.gen(function* () {
           copyBase: undefined,
           copyStacked: undefined,
           stackedIncluded: undefined,
+          error: undefined,
         }
         yield* save(preparing)
         return { existing: false as const }
@@ -2389,16 +2499,27 @@ export const make = Effect.gen(function* () {
           throw cause
         }),
     )
-    if (!present && initial.state === "preparing" && !initial.seed) {
+    // A start that failed, was stopped or crashed before its checkout existed (a checkout that was made has its Git
+    // binding) is done: see `vacant`.
+    if (
+      !present &&
+      !initial.tip &&
+      !initial.gitDirectory &&
+      ["preparing", "failed"].includes(initial.state) &&
+      !active.has(taskID)
+    ) {
       if (
         initial.mode === "worktree" &&
         (yield* run(initial.parentDirectory, ["show-ref", "--verify", `refs/heads/${initial.branch}`])).exitCode === 0
       )
         return yield* err("registry", "A reserved branch exists without a completed preparation; it has been retained.")
-      const empty = { ...initial, state: "unchanged", settledAttempt: initial.attempt }
-      yield* save(empty)
-      TaskClaims.unprotect(taskID)
-      return empty
+      return yield* lock(
+        taskID,
+        Effect.gen(function* () {
+          const record = yield* get(taskID)
+          return (yield* vacant(record)) ? yield* vacate(record, record.attempt) : record
+        }),
+      )
     }
     const original =
       initial.mode === "worktree" && (!initial.gitDirectory || !initial.gitCommonDirectory)
