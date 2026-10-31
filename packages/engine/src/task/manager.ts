@@ -183,6 +183,7 @@ const layer = Layer.effect(
           toolUses: Number(counts?.tools ?? 0),
           steps: Number(counts?.steps ?? 0),
           unpricedSteps: session.unpricedSteps,
+          codiumSteps: session.codiumSteps,
         },
         ownedPaths: current.ownedPaths ?? [],
         dependsOn: current.dependsOn ?? [],

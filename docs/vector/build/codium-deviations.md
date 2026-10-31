@@ -402,3 +402,52 @@ Intent-preserving corrections to label plan §7 C1, recorded with the A21 source
   (`packages/engine/src/session/session.ts:919-970`) clears a copied step's cost, tokens and `unpriced`, and must
   clear its `billing` too, or each copied Codium step counts as a Codium step of the fork. Details are in the A21
   record's A22 obligation.
+
+## A22 decisions (label plan C2 and C3, stamping and accounting)
+
+Intent-preserving corrections to label plan §7 C2 and C3, recorded with the A22 source. Details and validation are in
+[codium-a22-accounting-notes.md](codium-a22-accounting-notes.md).
+
+- **The `costKindOf({ codium })` callers move to A23.** C2 lists `packages/engine/src/session/processor.ts:195-211` and
+  the V2 cost kind in `runner/model.ts` `spendStep`, but `costKindOf` takes `codium` only in C4 (A23). Passing it
+  earlier would either not typecheck or pull C4's guard behaviour forward (D-3: no dollar cap and no 40-step stop for
+  Codium) without A23's spend-guard tests. A22 stamps and accounts only; A23 changes `costKindOf` and both callers
+  together, so the guard behaviour for Codium does not change in A22.
+- **A Codium record's contribution is fixed.** The projector counts any record carrying the flag as cost 0, one
+  unpriced step, one Codium step and no tokens, whatever its stored cost, tokens and `unpriced` say (§4.2). The stamps
+  write cost 0 and `unpriced: true` even for a zero-token step (§4.1, "cost 0, unpriced true"), unlike the "a step that
+  used no tokens owes nothing" rule for other models, so `codium_steps ≤ unpriced_steps` holds and
+  `unpricedSteps − codiumSteps` never goes negative.
+- **Records are routed by their own stored flag on both sides.** As the A21 decision says, `Billing.of` stays out of
+  accounting: the delta is `sign·contribution(new) − contribution(previous)`, each read from its own record, so a
+  replaced, reverted, removed or moved step takes back exactly what it added, and a flagless record (written before
+  A22) counts as ordinary on both sides. Only ancillary usage also routes on its model's provider id, as §4.2 asks;
+  nothing subtracts it.
+- **A second V1 writer is stamped.** Besides the contract's `processor.ts:668-686`, the processor's `settleStarted`
+  step-finish (a step stopped or failed mid-stream) also carries the flag, or an aborted Codium step would count as an
+  ordinary unpriced step with tokens. The V1 message flag is set only at the `Session.updateMessage` choke point (§4.1),
+  on the published copy, not again in the processor.
+- **V2 defensive pricing.** The runner's Step.Ended and the V2 compaction events force cost 0 and `unpriced` for
+  Codium, matching V1 `getUsage`, because V2 `calculateCost` prices any model from Copilot `totalNanoAiu` metadata; a
+  metadata-priced path can then never leak a dollar figure. The guard's `spendStep` stays untouched until A23.
+- **Fork clears copied `billing`** (from the A21 record). Copied step-finish parts clear `billing` with cost, tokens and
+  `unpriced`; the cloned message keeps its flag for display.
+- **The task notification's "Codium-only" rule.** §3.3 leaves it open. A child counts as Codium-only when
+  `codiumSteps > 0` and its own token total is 0; a child with Codium steps and own tokens is mixed. The "Pricing is
+  unknown" sentence counts only own unpriced steps (`unpricedSteps − codiumSteps`) and appears only when that is above 0.
+- **V1 projector cases live in the engine's `session.test.ts`.** The moved part, `PartRemoved`, `MessageRemoved`,
+  flagless-removal, stale-update and fork cases run through the engine `Session` service, which publishes the V1
+  events the core projector applies; `session-projector.test.ts` holds the V2 cases, including the flagless V2
+  revert.
+- **The migration's existing-database check is CI evidence.** Fresh databases are built from `schema.gen.ts` and only
+  record migration ids, so no local projector or core test runs the new `ALTER TABLE` file. Its test in
+  `database-migration.test.ts` runs in CI (the file starts a nested Bun process); locally, the generator's `--check`
+  and a single-process scratch script under `/tmp/vector-codium-A22/` (recorded in the notes) are the only evidence.
+- **The public-share regression (label plan §8) is folded into A22**, because A22 changes `archive.ts`'s info
+  mapping: `public-session-share.test.ts` asserts that no `billing`, `codiumSteps`, `subagentCodiumSteps`, `unpriced`,
+  `cost` or `tokens` key reaches the public archive.
+- **Anchor drift since the label plan** (lines after this change): engine `session.ts` `updateMessage` `:864-872`
+  (contract `:843-847`), `getUsage` from `:468` with the Codium return at `:513`, `fork` from `:932`; `processor.ts`
+  step-finish case `:653`, its writers `:672-682` and `:824-834`; `projector.ts` strip list `:348-370`, Step.Ended
+  `:532`, ancillary `:562`, compaction `:597` and `:615`; `message-updater.ts` `:213` and `:392`; `llm.ts` Step.Ended
+  `:412`; `compaction.ts` `spent` `:248`.

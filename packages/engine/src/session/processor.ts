@@ -678,6 +678,7 @@ const layer = Layer.effect(
               tokens: usage.tokens,
               cost: usage.cost,
               ...(usage.unpriced ? { unpriced: true } : {}),
+              ...(usage.billing ? { billing: usage.billing } : {}),
             }
             // The provider has billed this step, so its usage is recorded whole before the snapshot, which can wait
             // on the worktree's snapshot lock long enough for a cancel to land.
@@ -829,6 +830,7 @@ const layer = Layer.effect(
           tokens: usage.tokens,
           cost: usage.cost,
           ...(usage.unpriced ? { unpriced: true } : {}),
+          ...(usage.billing ? { billing: usage.billing } : {}),
         })
         yield* session.updateMessage(ctx.assistantMessage)
       })

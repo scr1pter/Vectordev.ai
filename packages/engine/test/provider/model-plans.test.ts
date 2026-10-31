@@ -247,7 +247,7 @@ it.instance("a Codium turn streams text and a tool call through the gateway and 
       usage: new Usage({ inputTokens: 1000, outputTokens: 50 }),
       metadata: finish.providerMetadata,
     })
-    expect(usage).toMatchObject({ cost: 0, unpriced: true, tokens: { input: 1000, output: 50 } })
+    expect(usage).toMatchObject({ cost: 0, unpriced: true, billing: "codium", tokens: { input: 1000, output: 50 } })
     const sent = gateway.seen.slice(before)
     expect(sent.map((item) => item.path)).toEqual(["/api/model-plans/chat"])
     expect(sent[0].authorization).toBe(`Bearer ${token}`)
@@ -469,7 +469,7 @@ it.instance("a Codium title stays on Codium, says it is a title and records its 
         usage: new Usage({ inputTokens: 200, outputTokens: 6 }),
         metadata: finish.providerMetadata,
       }),
-    ).toMatchObject({ cost: 0, unpriced: true, tokens: { input: 200, output: 6 } })
+    ).toMatchObject({ cost: 0, unpriced: true, billing: "codium", tokens: { input: 200, output: 6 } })
     expect(gateway.seen.slice(before)).toMatchObject([
       { path: "/api/model-plans/chat", purpose: "title", catalog: "2" },
     ])

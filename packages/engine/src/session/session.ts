@@ -52,6 +52,7 @@ import { ProviderV2 } from "@vectordevai/core/provider"
 import { ModelV2 } from "@vectordevai/core/model"
 import { SessionMessage } from "@vectordevai/schema/session-message"
 import { SessionEvent } from "@vectordevai/schema/session-event"
+import { Billing } from "@vectordevai/schema/billing"
 
 const parentTitlePrefix = "New session - "
 const childTitlePrefix = "Child session - "
@@ -105,8 +106,10 @@ export function fromRow(row: SessionRow): Info {
     summary,
     cost: row.cost,
     unpricedSteps: row.unpriced_steps || undefined,
+    codiumSteps: row.codium_steps || undefined,
     subagentCost: row.subagent_cost || undefined,
     subagentUnpricedSteps: row.subagent_unpriced_steps || undefined,
+    subagentCodiumSteps: row.subagent_codium_steps || undefined,
     subagentTokens: subagentTokens(row),
     tokens: {
       input: row.tokens_input,
@@ -153,8 +156,10 @@ export function toRow(info: Info) {
     metadata: info.metadata,
     cost: info.cost ?? 0,
     unpriced_steps: info.unpricedSteps ?? 0,
+    codium_steps: info.codiumSteps ?? 0,
     subagent_cost: info.subagentCost ?? 0,
     subagent_unpriced_steps: info.subagentUnpricedSteps ?? 0,
+    subagent_codium_steps: info.subagentCodiumSteps ?? 0,
     subagent_tokens_input: info.subagentTokens?.input ?? 0,
     subagent_tokens_output: info.subagentTokens?.output ?? 0,
     subagent_tokens_reasoning: info.subagentTokens?.reasoning ?? 0,
@@ -502,6 +507,10 @@ export const getUsage = (input: { model: Provider.Model; usage: Usage; metadata?
       read: cacheReadInputTokens,
     },
   }
+
+  // A Vector Codium step is billed to the account's plan on vectordev.ai, so it is never priced from what the provider
+  // metadata reports, and every step is unpriced and marked Codium: totals leave its tokens out and show "Codium".
+  if (Billing.isCodium(input.model.providerID)) return { unpriced: true, billing: "codium" as const, cost: 0, tokens }
 
   const costInfo = costAt(input.model.cost, inputTokens)
   const totalNanoAiu = input.metadata?.["copilot"]?.["totalNanoAiu"]
@@ -854,8 +863,12 @@ const layer: Layer.Layer<
 
     const updateMessage = <T extends SessionV1.Info>(msg: T): Effect.Effect<T> =>
       Effect.gen(function* () {
-        yield* events.publish(SessionV1.Event.MessageUpdated, { sessionID: msg.sessionID, info: msg })
-        return msg
+        // Every V1 assistant message, compaction included, is published here, so this is where a Vector Codium
+        // message gets its flag. The published copy carries it; the caller's object is left as it was.
+        const info =
+          msg.role === "assistant" && Billing.isCodium(msg.providerID) ? { ...msg, billing: "codium" as const } : msg
+        yield* events.publish(SessionV1.Event.MessageUpdated, { sessionID: info.sessionID, info })
+        return info
       }).pipe(Effect.withSpan("Session.updateMessage"))
 
     const updatePart = <T extends SessionV1.Part>(part: T): Effect.Effect<T> =>
@@ -953,6 +966,7 @@ const layer: Layer.Layer<
                   ...part,
                   cost: 0,
                   unpriced: undefined,
+                  billing: undefined,
                   tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
                 }
               : part),
