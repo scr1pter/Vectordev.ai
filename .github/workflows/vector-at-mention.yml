@@ -21,6 +21,7 @@ on:
       - packages/engine/src/cli/cmd/github*.ts
       - packages/desktop/src/main/github-*.ts
       - packages/web/test/github-*.ts
+      - packages/web/test/cloud-agents-*.ts
       - packages/engine/test/cli/github*.ts
       - packages/engine/test/tool/registry*.ts
       - packages/core/test/github-agents.test.ts
@@ -81,12 +82,14 @@ jobs:
         run: bun typecheck --project ../../tsconfig.json
 
       # Without VECTOR_TEST_REDIS_URL, github-app-api.test.ts registers a single skipped test and the step still passes.
+      # The cloud-agents API tests run here too, named by a glob: Codium's A59 deletes cloud-agents-entitlement.test.ts
+      # (contract 2.3), and the glob keeps this step and the lane policy valid without an edit from it.
       - name: Run GitHub API tests
         if: ${{ !cancelled() }}
         working-directory: packages/web
         env:
           VECTOR_TEST_REDIS_URL: redis://127.0.0.1:6379
-        run: GITHUB_ACTIONS=false bun test --timeout 30000 test/github-oidc.test.ts test/github-app.test.ts test/github-app-api.test.ts
+        run: GITHUB_ACTIONS=false bun test --timeout 30000 test/github-oidc.test.ts test/github-app.test.ts test/github-app-api.test.ts test/cloud-agents-*.test.ts
 
       # The repo-root test/ suite is not a workspace; these files cover the hosted API's module loading and CLI tokens.
       - name: Run hosted API tests

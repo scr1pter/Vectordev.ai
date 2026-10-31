@@ -235,6 +235,7 @@ describe("@vector CI lane", () => {
         ["packages/web", "test/github-oidc.test.ts"],
         ["packages/web", "test/github-app.test.ts"],
         ["packages/web", "test/github-app-api.test.ts"],
+        ["packages/web", "test/cloud-agents-*.test.ts"],
         ["packages/engine", "test/cli/github*.test.ts"],
         ["packages/engine", "test/tool/registry*.test.ts"],
         ["packages/core", "test/github-agents.test.ts"],
