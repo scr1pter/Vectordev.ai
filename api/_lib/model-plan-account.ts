@@ -475,8 +475,10 @@ const MISSING_STEP_MS = 200
  * The account's snapshot, by the read rules (contract §4.3; codium-entitlements.ts re-exports it): a fresh one as
  * stored; a stale one (over 6 hours old, past its period, or a `none` or `renewing` one over a minute old) served after
  * one reconcile, or as it is when another request is already reconciling or Stripe cannot be read; a missing one
- * reconciled on demand. Undefined only when there is none and the reconcile that would write it is running elsewhere
- * and did not finish in time. A snapshot from the other Stripe mode is refused (503). It lives beside
+ * reconciled on demand. When there is none and the reconcile that would write it is running elsewhere and did not
+ * finish in time, an account with a Codium record (every checkout makes one, so it may have just paid) is answered
+ * 503 `MODEL_PLAN_RENEWING` to read again shortly, never a final "choose a plan"; only an account without a record
+ * gets undefined, which has no plan. A snapshot from the other Stripe mode is refused (503). It lives beside
  * `reconcileOnDemand` so `holdPool` reads by the same rules as chat without an import cycle.
  */
 export async function readEntitlement(
@@ -498,6 +500,7 @@ export async function readEntitlement(
     const written = await readSnapshot(account, fetcher)
     if (written) return written
   }
+  if (await readModelPlanAccount(account, fetcher)) throw modelSpendStale()
   return undefined
 }
 

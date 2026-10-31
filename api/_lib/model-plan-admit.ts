@@ -129,11 +129,15 @@ export async function admitModelPlan(
     fetcher,
   ).catch(async (error: unknown) => {
     // The store may have run this admission and lost only its answer. Its caller dispatches nothing without a ticket,
-    // so the outcome is known: nothing to charge. The cancellation waits until a margin past the deadline (the store
-    // call itself gives up after 3 s), so an EVAL delayed on its way cannot land behind it; until then the reservation
-    // counts in full. SETTLE answers 'missing' when the admission never ran. An EVAL delayed even longer would land as
-    // an abandoned reservation, which only ever counts in full: never free money.
-    await queueSettlement(admission, { kind: "cancel" }, admission.deadline + LOST_ADMISSION_CANCEL_MS, fetcher)
+    // so the outcome is known: nothing to charge. It is cancelled at once, which frees its slot and reservation when
+    // the EVAL already ran ('ok'); SETTLE answers 'missing' when it has not run yet. Otherwise a cancellation is queued
+    // for a margin past the deadline (the store call itself gives up after 3 s), so an EVAL delayed on its way cannot
+    // land behind it; until then a late one counts in full. An EVAL delayed even longer would land as an abandoned
+    // reservation, and so would one whose cancel and queue writes both fail: either only ever counts in full until the
+    // period's ledger expires (logged with ids), never free money.
+    const cancelled = await settleModelPlan(admission, { kind: "cancel" }, fetcher, now).catch(() => undefined)
+    if (cancelled !== "ok")
+      await queueSettlement(admission, { kind: "cancel" }, admission.deadline + LOST_ADMISSION_CANCEL_MS, fetcher)
     throw error
   })
   if (result === "ok") return admission

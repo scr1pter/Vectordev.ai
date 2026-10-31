@@ -68,7 +68,9 @@ Beyond the handoff list:
   (the existing once-a-minute slot) and, if the snapshot version is unchanged, one more credential attempt; otherwise
   503 `MODEL_PLAN_RENEWING` (retry-after 1). `holdPool` uses the same credential with the caller's snapshot or the
   stored one read by `readEntitlement`'s rules (a missing or stale snapshot is reconciled on demand, exactly as chat's
-  `requireEntitlement` does, never a final 402 for a paying account), and the same one on-demand reconcile for a key
+  `requireEntitlement` does, never a final 402 for a paying account; P3 review: while another request is still writing
+  an account's first snapshot, `readEntitlement` answers `MODEL_PLAN_RENEWING` itself for an account with a Codium
+  record, where it used to return undefined and the caller refused 402), and the same one on-demand reconcile for a key
   that is not ready. `readEntitlement` moved beside `reconcileOnDemand` in `model-plan-account.ts` (no import cycle);
   `codium-entitlements.ts` re-exports both. A snapshot reconciled on demand (chat's recent-checkout refresh for a locked
   model, the credential retry, `holdPool`) gets `requireEntitlement`'s final answers for its plan state
@@ -81,11 +83,14 @@ Beyond the handoff list:
   SETTLE is idempotent (`done`/`missing`), so a repeated retry never charges or releases twice.
 - **Lost admission answer.** When the ADMIT EVAL's answer is lost (transport error, timeout or non-OK store reply),
   the store may still have run it while the gateway never dispatches anything for that ticket, so the outcome is known.
-  `admitModelPlan` queues `model-settle` with `{kind: "cancel"}` for that exact ticket at its deadline plus
+  `admitModelPlan` cancels that exact ticket at once (P3 review: this frees its in-flight slot and reservation
+  without waiting for the deadline when the EVAL already ran). When that cancel answers `missing` (not run yet) or is
+  lost too, it queues `model-settle` with `{kind: "cancel"}` for the ticket at its deadline plus
   `LOST_ADMISSION_CANCEL_MS` (60 s; the store call itself gives up after 3 s), so an EVAL delayed on its way cannot
-  land behind the cancel; SETTLE answers `missing` if it never ran. Until then the reservation and slot count in full.
-  An EVAL delayed past that margin would land already abandoned and keep counting in full (conservative, never free).
-  A store refusal (`monthly`, `daily`, `stale`, …) queues nothing.
+  land behind the cancel; until then a late EVAL counts in full. An EVAL delayed past that margin, or one whose cancel
+  and queue writes both fail too (an ids-only error is logged), is left as an abandoned reservation that counts in full
+  until the period's ledger expires (conservative, never free). A store refusal (`monthly`, `daily`, `stale`, …)
+  queues nothing.
 - **Hooks after settlement.** `afterSettle` runs once for every admitted request after `settleModelPlanDurably`,
   whether the settlement landed, was queued for the outbox or (both failing) left the reservation counting in full,
   with the outcome the gateway knows (`charge`, `streamed`). A request refused before admission never reaches it.

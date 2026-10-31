@@ -410,9 +410,13 @@ export type Failure = {
 const CAPACITY =
   "Vector Codium could not run this request: model capacity may be short for a moment. Vector will try again shortly."
 const UNAVAILABLE = "Vector Codium is not available right now."
+const DISPATCHED =
+  "The model provider could not finish this request. It counts toward your Codium usage, so Vector did not send it again. Try again shortly."
 
-// Only these codes are classified; any other answer stays an ordinary provider error, so a transient gateway failure
-// (MODEL_PLAN_UPSTREAM, MODEL_PLAN_STREAM, MODEL_PLAN_UNAVAILABLE and the like) keeps the usual 5xx retry.
+// Only these codes, and any answer the gateway marks `dispatched` (gatewayFailure), are classified; any other answer
+// stays an ordinary provider error, so a transient gateway failure before dispatch (MODEL_PLAN_UPSTREAM,
+// MODEL_PLAN_UNAVAILABLE and the like) keeps the usual 5xx retry. The retried codes here cost nothing when unmarked:
+// they are answered before anything reaches the provider.
 const CODES: Record<string, { kind: Kind; retry?: true; text?: string }> = {
   RATE_LIMITED: { kind: "busy", retry: true },
   MODEL_PLAN_BUSY: { kind: "busy", retry: true },
@@ -490,7 +494,12 @@ const DEFAULTS: Record<Kind, string> = {
 }
 
 const GatewayError = Schema.Struct({
-  error: Schema.Struct({ code: Schema.String, message: Schema.String, action: Schema.optional(Schema.String) }),
+  error: Schema.Struct({
+    code: Schema.String,
+    message: Schema.String,
+    action: Schema.optional(Schema.String),
+    dispatched: Schema.optional(Schema.Boolean),
+  }),
 })
 
 /**
@@ -503,6 +512,17 @@ export function gatewayFailure(status: number | undefined, body: string | undefi
     ? Option.getOrUndefined(Schema.decodeUnknownOption(Schema.fromJsonString(GatewayError))(body))
     : undefined
   const code = parsed?.error.code ?? ""
+  // The gateway sent this request to the provider before it failed, so it already counts in full toward the month
+  // (unknown outcomes are charged). Each resend would count again, so it is final whatever its code: the person
+  // decides whether to try again. The gateway itself retries Max and Ultra once before answering.
+  if (parsed?.error.dispatched === true)
+    return {
+      code,
+      kind: "unavailable",
+      action: "unavailable",
+      message: `${DISPATCHED}${suffix("unavailable", undefined)}`,
+      retry: false,
+    }
   const known = Object.hasOwn(CODES, code) ? CODES[code] : status === 401 ? CODES.SIGN_IN_REQUIRED : undefined
   if (!known) return undefined
   const kind = known.kind

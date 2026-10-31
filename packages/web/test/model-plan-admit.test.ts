@@ -214,35 +214,60 @@ describe("A17 admission adapter", () => {
       await expect(verified(id)).rejects.toMatchObject({ code: "MODEL_PLAN_RUN_EXPIRED", statusCode: 401 })
   })
 
-  test("an admission whose answer is lost queues the cancellation of that exact ticket past its deadline", async () => {
-    const fixture = data()
-    const commands: (string | number)[][] = []
-    const fetcher: typeof fetch = Object.assign(
-      async (_url: string | URL | Request, init?: RequestInit) => {
-        const command = JSON.parse(String(init?.body)) as (string | number)[]
-        commands.push(command)
-        if (command[1] === ADMISSION_SCRIPTS.ADMIT) return new Response(null, { status: 503 })
-        return Response.json({ result: 1 })
-      },
-      { preconnect: () => {} },
-    )
-    await expect(admitModelPlan(fixture.input, fetcher, fixture.now)).rejects.toMatchObject({
+  test("an admission whose answer is lost is cancelled at once, and queued past its deadline unless that lands", async () => {
+    const lost = (settled: unknown) => {
+      const commands: (string | number)[][] = []
+      const fetcher: typeof fetch = Object.assign(
+        async (_url: string | URL | Request, init?: RequestInit) => {
+          const command = JSON.parse(String(init?.body)) as (string | number)[]
+          commands.push(command)
+          if (command[1] === ADMISSION_SCRIPTS.ADMIT) return new Response(null, { status: 503 })
+          if (command[1] === ADMISSION_SCRIPTS.SETTLE) return Response.json({ result: settled })
+          return Response.json({ result: 1 })
+        },
+        { preconnect: () => {} },
+      )
+      return { commands, fetcher }
+    }
+    // The store ran the admission: the cancel at once frees it, and nothing is queued.
+    const ran = data()
+    const store = lost("ok")
+    await expect(admitModelPlan(ran.input, store.fetcher, ran.now)).rejects.toMatchObject({
       code: "PERSISTENT_STORE_UNAVAILABLE",
     })
-    expect(commands).toHaveLength(2)
-    const admitted = JSON.parse(String(commands[0]![3 + 12]))
-    const queue = commands[1]!
-    expect(queue[6]).toBe(`model-settle:${admitted.ticket}`)
-    expect(queue[8]).toBe(fixture.now + 660_000 + LOST_ADMISSION_CANCEL_MS)
-    expect(JSON.parse(String(queue[7]))).toMatchObject({
-      kind: "model-settle",
-      key: admitted.ticket,
-      payload: {
-        ticket: { ticket: admitted.ticket, member: admitted.member, deadline: admitted.deadline },
-        outcome: { kind: "cancel" },
-      },
+    expect(store.commands).toHaveLength(2)
+    const cancel = store.commands[1]!
+    const admittedTicket = JSON.parse(String(store.commands[0]![3 + 12]))
+    expect(cancel[1]).toBe(ADMISSION_SCRIPTS.SETTLE)
+    expect(JSON.parse(String(cancel[3 + 12]))).toMatchObject({
+      ticket: admittedTicket.ticket,
+      member: admittedTicket.member,
+      deadline: admittedTicket.deadline,
     })
-    expect(JSON.stringify(queue)).not.toContain("Bearer")
+    expect(cancel.slice(4 + 12)).toEqual(["cancel", 0, ran.now])
+    // Not run yet ('missing'), or the cancel's own answer lost: the cancellation is queued past the deadline.
+    for (const settled of ["missing", 1]) {
+      const fixture = data()
+      const { commands, fetcher } = lost(settled)
+      await expect(admitModelPlan(fixture.input, fetcher, fixture.now)).rejects.toMatchObject({
+        code: "PERSISTENT_STORE_UNAVAILABLE",
+      })
+      expect(commands).toHaveLength(3)
+      expect(commands[1]![1]).toBe(ADMISSION_SCRIPTS.SETTLE)
+      const admitted = JSON.parse(String(commands[0]![3 + 12]))
+      const queue = commands[2]!
+      expect(queue[6]).toBe(`model-settle:${admitted.ticket}`)
+      expect(queue[8]).toBe(fixture.now + 660_000 + LOST_ADMISSION_CANCEL_MS)
+      expect(JSON.parse(String(queue[7]))).toMatchObject({
+        kind: "model-settle",
+        key: admitted.ticket,
+        payload: {
+          ticket: { ticket: admitted.ticket, member: admitted.member, deadline: admitted.deadline },
+          outcome: { kind: "cancel" },
+        },
+      })
+      expect(JSON.stringify(queue)).not.toContain("Bearer")
+    }
   })
 
   test("unsafe period or timestamp arithmetic fails before storage", async () => {
@@ -559,9 +584,9 @@ describe.skipIf(!valkeyURL)("A17 actual admission/settlement Lua on Valkey", () 
       expect(await f.command(["HGET", codiumKey("day", ticket.pool, ticket.day), "total"])).toBe("7000")
     }))
 
-  test("an admission that ran but lost its answer is cancelled past its deadline, never kept as abandoned", () =>
+  test("an admission that ran but lost its answer is cancelled at once, freeing its slot before its deadline", () =>
     database(async (f) => {
-      await f.snapshot({ dailyShare: null })
+      await f.snapshot({ dailyShare: null, inFlight: 1 })
       const lost: typeof fetch = Object.assign(
         async (url: string | URL | Request, init?: RequestInit) => {
           const response = await f.fetcher(url, init)
@@ -573,10 +598,46 @@ describe.skipIf(!valkeyURL)("A17 actual admission/settlement Lua on Valkey", () 
       )
       await expect(admitModelPlan(f.input, lost, f.now)).rejects.toMatchObject({ code: "PERSISTENT_STORE_UNAVAILABLE" })
       const [ticket] = (await f.command(["HKEYS", modelSpendKeys(f.genesis.pool).reservations])) as string[]
+      // Nothing was dispatched for it, so nothing is charged: the month, the day and the slot are whole at once.
+      expect(await readModelSpendLedger(f.genesis.account, f.genesis.pool, f.now, f.fetcher)).toMatchObject({
+        committedMicro: 0,
+        reservedMicro: 0,
+      })
+      expect(
+        (await readModelSpendLedger(f.genesis.account, f.genesis.pool, f.now + 660_001, f.fetcher)).abandonedMicro,
+      ).toBe(0)
+      expect(
+        await f.command(["ZSCORE", codiumKey("inflight", f.genesis.account), `${f.genesis.account}:${ticket}`]),
+      ).toBeNull()
+      expect(await f.command(["ZCARD", codiumKey("held", f.genesis.pool)])).toBe(0)
+      expect(await f.command(["ZSCORE", codiumKey("outbox"), `model-settle:${ticket}`])).toBeNull()
+      // The account's only in-flight slot is free for the next request now, not 11 minutes later.
+      expect((await f.admit({ requiredMicro: 1_000_000 }, f.now + 1)).micro).toBe(1_000_000)
+    }))
+
+  test("an admission that lands after its cancel is cancelled past its deadline, never kept as abandoned", () =>
+    database(async (f) => {
+      await f.snapshot({ dailyShare: null })
+      // The EVAL is still on its way when the gateway gives up on it: the cancel at once finds nothing.
+      const delayed: (string | number)[][] = []
+      const lost: typeof fetch = Object.assign(
+        async (url: string | URL | Request, init?: RequestInit) => {
+          const command = JSON.parse(String(init?.body)) as (string | number)[]
+          if (command[1] !== ADMISSION_SCRIPTS.ADMIT) return f.fetcher(url, init)
+          delayed.push(command)
+          throw new Error("simulated store timeout")
+        },
+        { preconnect: () => {} },
+      )
+      await expect(admitModelPlan(f.input, lost, f.now)).rejects.toMatchObject({ code: "PERSISTENT_STORE_UNAVAILABLE" })
+      expect(await f.command(["HLEN", modelSpendKeys(f.genesis.pool).reservations])).toBe(0)
+      // Then it lands.
+      expect(await f.command(delayed[0]!)).toBe("ok")
+      const [ticket] = (await f.command(["HKEYS", modelSpendKeys(f.genesis.pool).reservations])) as string[]
       const deadline = f.now + 660_000
       const cancelAt = deadline + LOST_ADMISSION_CANCEL_MS
       const slot = `${f.genesis.account}:${ticket}`
-      // The store ran it: until the cancellation lands it counts in full and takes its slot, then turns abandoned.
+      // Until the queued cancellation lands it counts in full and takes its slot, then turns abandoned.
       expect(await readModelSpendLedger(f.genesis.account, f.genesis.pool, f.now, f.fetcher)).toMatchObject({
         reservedMicro: 10_000,
       })
@@ -587,7 +648,6 @@ describe.skipIf(!valkeyURL)("A17 actual admission/settlement Lua on Valkey", () 
       expect(Number(await f.command(["ZSCORE", codiumKey("outbox"), `model-settle:${ticket}`]))).toBe(cancelAt)
       expect(await drainOutbox({ now: cancelAt - 1, fetcher: f.fetcher })).toMatchObject({ applied: 0 })
       expect(await drainOutbox({ now: cancelAt, fetcher: f.fetcher })).toMatchObject({ applied: 1 })
-      // Nothing was dispatched for it, so nothing is charged: the month, the day and the slot are whole again.
       expect(await readModelSpendLedger(f.genesis.account, f.genesis.pool, cancelAt, f.fetcher)).toMatchObject({
         committedMicro: 0,
         reservedMicro: 0,
@@ -596,6 +656,37 @@ describe.skipIf(!valkeyURL)("A17 actual admission/settlement Lua on Valkey", () 
       expect(await f.command(["ZSCORE", codiumKey("inflight", f.genesis.account), slot])).toBeNull()
       expect(await f.command(["ZCARD", codiumKey("held", f.genesis.pool)])).toBe(0)
       expect((await f.admit({ requiredMicro: 1_000_000 }, cancelAt + 1)).micro).toBe(1_000_000)
+    }))
+
+  test("an admission whose answer, cancel and queue write are all lost keeps counting in full, never free", () =>
+    database(async (f) => {
+      await f.snapshot({ dailyShare: null })
+      // The ADMIT runs and its answer is lost; the store then stops answering anything for a while.
+      const down = { value: false }
+      const lost: typeof fetch = Object.assign(
+        async (url: string | URL | Request, init?: RequestInit) => {
+          if (down.value) throw new Error("simulated store outage")
+          const response = await f.fetcher(url, init)
+          if (JSON.parse(String(init?.body))[1] !== ADMISSION_SCRIPTS.ADMIT) return response
+          down.value = true
+          throw new Error("simulated lost store response")
+        },
+        { preconnect: () => {} },
+      )
+      await expect(admitModelPlan(f.input, lost, f.now)).rejects.toMatchObject({ code: "PERSISTENT_STORE_UNAVAILABLE" })
+      const [ticket] = (await f.command(["HKEYS", modelSpendKeys(f.genesis.pool).reservations])) as string[]
+      expect(await f.command(["ZSCORE", codiumKey("outbox"), `model-settle:${ticket}`])).toBeNull()
+      // Nothing cancels it: open past its deadline, it is an abandoned reservation that counts in full.
+      expect(await readModelSpendLedger(f.genesis.account, f.genesis.pool, f.now, f.fetcher)).toMatchObject({
+        reservedMicro: 10_000,
+      })
+      expect(await readModelSpendLedger(f.genesis.account, f.genesis.pool, f.now + 660_001, f.fetcher)).toMatchObject({
+        abandonedMicro: 10_000,
+        committedMicro: 0,
+      })
+      await expect(f.admit({ requiredMicro: 1_000_000 - 10_000 + 1 }, f.now + 660_001)).rejects.toMatchObject({
+        code: "MODEL_PLAN_EXHAUSTED",
+      })
     }))
 
   test("all accepted safe-integer charges retain exact micro values", () =>

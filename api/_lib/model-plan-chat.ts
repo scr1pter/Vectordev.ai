@@ -534,11 +534,16 @@ export async function handleModelPlanChat(
     )
   } catch (error) {
     if (response.destroyed) return
+    const code = error instanceof ApiError ? error.code : "MODEL_PLAN_UNAVAILABLE"
     const payload = {
       error: {
         ...(error instanceof ApiError ? error.detail : {}),
-        code: error instanceof ApiError ? error.code : "MODEL_PLAN_UNAVAILABLE",
+        code,
         message: error instanceof ApiError ? error.message : "Model access is temporarily unavailable.",
+        // Every attempt sent to the provider is committed in full below (unknown outcomes are charged), so an answer
+        // given after one says so, whatever its code: a client that resent it by itself would commit another whole
+        // reservation each time. A context refusal is not resent as it is; the client compacts the conversation first.
+        ...(state.dispatched && code !== "MODEL_PLAN_CONTEXT" ? { dispatched: true } : {}),
       },
     }
     if (response.headersSent) {

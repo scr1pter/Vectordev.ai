@@ -92,8 +92,9 @@ export function codiumGateway(token: string) {
   const state = {
     mode: "ok" as "ok" | "text" | "object" | "credits" | "disabled" | "context" | "capacity",
     // Set to answer every chat request with this status, code and headers instead of a reply.
+    // `dispatched` marks an answer given after the gateway sent the request to the provider, as the gateway does.
     answer: undefined as
-      | { status: number; code: string; message?: string; headers?: Record<string, string> }
+      | { status: number; code: string; message?: string; headers?: Record<string, string>; dispatched?: boolean }
       | undefined,
     // What the server answers (§4.11): shares, flags and timestamps, never an amount.
     status: {
@@ -155,7 +156,13 @@ export function codiumGateway(token: string) {
       if (url.pathname !== "/api/model-plans/chat") return new Response("not found", { status: 404 })
       if (state.answer)
         return Response.json(
-          { error: { code: state.answer.code, message: state.answer.message ?? "Gateway answer." } },
+          {
+            error: {
+              code: state.answer.code,
+              message: state.answer.message ?? "Gateway answer.",
+              ...(state.answer.dispatched ? { dispatched: true } : {}),
+            },
+          },
           { status: state.answer.status, headers: state.answer.headers },
         )
       if (state.mode === "disabled")

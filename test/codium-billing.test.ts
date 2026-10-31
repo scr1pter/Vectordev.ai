@@ -28,6 +28,7 @@ import { ApiError, handleApiError, type ApiResponse } from "../api/_lib/http"
 import {
   cancelModelPlanAccount,
   governingStanding,
+  holdPool,
   keyExpiresAt,
   modelPlanCheckout,
   modelPlanCredential,
@@ -813,6 +814,37 @@ describe("read rules and M4: no Stripe call on a hot path", () => {
     fakes.store.remove(snapshotKey(id))
     fakes.store.remove(codiumKey("reconcile", id))
     await expect(readEntitlement(id, fakes.fetcher, later)).rejects.toMatchObject({ code: "BILLING_UPSTREAM" })
+  })
+
+  test("a first snapshot another request is still writing answers RENEWING to a paying account, never a final 402", async () => {
+    const fixture = loadStripeFixture("active-paid")
+    const fakes = seed(fixture)
+    const id = fixture.accountId
+    const now = fixture.now * 1000
+    // Checkout made the account's record. Another request holds this minute's reconcile and has not written the first
+    // snapshot (Stripe, key creation and genesis can take longer than the 2 s a request waits for it).
+    fakes.store.set(codiumKey("reconcile", id), String(now))
+    await expect(requireEntitlement(id, "codium", fakes.fetcher, now)).rejects.toMatchObject({
+      statusCode: 503,
+      code: "MODEL_PLAN_RENEWING",
+      retryAfterSeconds: 1,
+    })
+    // A pool producer reads the same snapshot by the same rules, and gets the same retryable answer.
+    await expect(holdPool(id, 1, HOUR, "hosted", { fetcher: fakes.fetcher, clock: () => now })).rejects.toMatchObject({
+      statusCode: 503,
+      code: "MODEL_PLAN_RENEWING",
+    })
+    expect(fakes.stripe.calls).toEqual([])
+    // An account without a Codium record has no plan to wait for: its final answer stands.
+    const stranger = "22222222-2222-4222-8222-222222222222"
+    fakes.store.set(codiumKey("reconcile", stranger), String(now))
+    await expect(requireEntitlement(stranger, "codium", fakes.fetcher, now)).rejects.toMatchObject({
+      statusCode: 402,
+      code: "MODEL_PLAN_REQUIRED",
+    })
+    // Once the first snapshot is written, the paying account is served from it.
+    fakes.store.remove(codiumKey("reconcile", id))
+    expect((await requireEntitlement(id, "codium", fakes.fetcher, now)).state).toBe("active")
   })
 
   test("reconcileOnDemand runs once a minute per account", async () => {

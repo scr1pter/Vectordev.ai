@@ -431,7 +431,7 @@ describe("session.message-v2.fromError", () => {
 describe("session.retry Codium answers", () => {
   const codium = ProviderV2.ID.make("vector-plan")
   // A Codium gateway answer as the engine records it: through the AI SDK's APICallError and the provider parser.
-  const answer = (statusCode: number, code: string, headers: Record<string, string> = {}) => {
+  const answer = (statusCode: number, code: string, headers: Record<string, string> = {}, dispatched = false) => {
     const result = MessageV2.fromError(
       new APICallError({
         message: "Gateway answer",
@@ -439,7 +439,9 @@ describe("session.retry Codium answers", () => {
         requestBodyValues: {},
         statusCode,
         responseHeaders: headers,
-        responseBody: JSON.stringify({ error: { code, message: "Gateway answer." } }),
+        responseBody: JSON.stringify({
+          error: { code, message: "Gateway answer.", ...(dispatched ? { dispatched: true } : {}) },
+        }),
         isRetryable: statusCode === 429 || statusCode >= 500,
       }),
       { providerID: codium },
@@ -488,6 +490,22 @@ describe("session.retry Codium answers", () => {
       expect({ code, retry: SessionRetry.retryable(error, retryProvider) !== undefined }).toEqual({ code, retry: true })
       expect(error.data.metadata?.codium).toBeUndefined()
       expect(SessionRetry.delay(1, error)).toBe(30_000)
+    }
+  })
+
+  test("an answer given after the gateway dispatched the request is final, since each resend is committed again", () => {
+    for (const [status, code] of [
+      [429, "MODEL_PLAN_BUSY"],
+      [402, "MODEL_PLAN_CAPACITY"],
+      [503, "MODEL_PLAN_UPSTREAM"],
+      [503, "MODEL_PLAN_UNAVAILABLE"],
+    ] as const) {
+      const error = Schema.decodeUnknownSync(SessionV1.APIError.Schema)(
+        answer(status, code, { "retry-after": "30" }, true),
+      )
+      expect({ code, retry: SessionRetry.retryable(error, retryProvider) }).toEqual({ code, retry: undefined })
+      expect(error.data.metadata).toMatchObject({ codium: "unavailable", kind: "unavailable", code })
+      expect(error.data.message).not.toContain("See plans")
     }
   })
 

@@ -1464,6 +1464,8 @@ describe("model plan HTTP inference", () => {
       const body = await response.text()
       expect(body).not.toContain("PRIVATE")
       expect(body).not.toContain("fixture-paid-secret")
+      // The request reached the provider and is committed in full, so its answer says so and no client resends it.
+      expect(JSON.parse(body).error.dispatched).toBe(true)
     }
     expect(chats()).toHaveLength(3)
   })
@@ -1565,6 +1567,41 @@ describe("Codium credits used from Vector", () => {
     expect(empty).toMatchObject({ plan: { left: 0 }, empty: true })
     expect(ModelPlanStatus.notice(empty)?.kind).toBe("empty")
     state.charge = 0
+  })
+
+  test("a provider refusal after dispatch is committed once, and Vector's transport hands it on as final", async () => {
+    await paid()
+    await reconcileModelPlanAccount(user.id, fetcher)
+    const token = mintCliToken(user, Date.now(), "desktop").token
+    const committed = async () =>
+      (await readModelSpendLedger(user.id, "hash_fixture1", Date.now(), fetcher)).committedMicro
+    // Settlement runs in the gateway's finally, just after the answer is written.
+    const settled = async (from: number) => {
+      for (let tries = 0; tries < 200 && (await committed()) === from; tries++) await Bun.sleep(10)
+      return (await committed()) - from
+    }
+    // The provider's busy, other refusal and capacity answers, each sent once by the gateway (Plus does not retry).
+    for (const [upstream, status] of [
+      [429, 400],
+      [503, 400],
+      [402, 402],
+    ] as const) {
+      state.upstreamStatus = upstream
+      const sent = chats().length
+      const before = await committed()
+      const answer = await turn(token)
+      // A client error the AI SDK and the V2 executor never retry, final for the session's retry loop too.
+      expect(answer.status).toBe(status)
+      expect(ModelPlans.gatewayFailure(answer.status, await answer.text())).toMatchObject({
+        kind: "unavailable",
+        action: "unavailable",
+        retry: false,
+      })
+      expect(chats().length - sent).toBe(1)
+      // One attempt's whole reservation, committed for the period: the provider may have billed it.
+      expect(await settled(before)).toBe(12_288)
+    }
+    state.upstreamStatus = 200
   })
 
   test("the status Vector reads carries shares and flags, never an amount of credits", async () => {
@@ -2085,9 +2122,11 @@ describe("A17 admission and chat", () => {
     state.chatDelay = 150
     const plus = await Promise.all(Array.from({ length: 2 }, () => chat()))
     expect(plus.map((response) => response.status).sort()).toEqual([200, 429])
-    expect(await plus.find((response) => response.status === 429)!.json()).toMatchObject({
-      error: { code: "MODEL_PLAN_BUSY" },
-    })
+    const busy = await plus.find((response) => response.status === 429)!.json()
+    expect(busy).toMatchObject({ error: { code: "MODEL_PLAN_BUSY" } })
+    // Refused before dispatch: nothing is committed, so the client may retry it.
+    expect(busy.error.dispatched).toBeUndefined()
+    expect(ModelPlans.gatewayFailure(429, JSON.stringify(busy))).toMatchObject({ retry: true })
     await redis(["FLUSHDB"])
     keys.clear()
     await subscribed(100)

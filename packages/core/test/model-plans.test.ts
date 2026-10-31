@@ -578,6 +578,22 @@ test("gateway answers map by code to their kind, the stored action and whether t
     expect(ModelPlans.gatewayFailure(503, body(code))).toBeUndefined()
   expect(ModelPlans.gatewayFailure(402, "not json")).toBeUndefined()
   expect(ModelPlans.gatewayFailure(401, body("CLI_TOKEN_INVALID"))).toMatchObject({ kind: "sign-in", retry: false })
+  // An answer given after the gateway sent the request to the provider is committed in full, so it is final whatever
+  // its code, including the busy and capacity codes that are retried when refused before dispatch.
+  for (const [status, code] of [
+    [429, "MODEL_PLAN_BUSY"],
+    [402, "MODEL_PLAN_CAPACITY"],
+    [503, "MODEL_PLAN_UPSTREAM"],
+    [503, "MODEL_PLAN_UNAVAILABLE"],
+  ] as const)
+    expect(ModelPlans.gatewayFailure(status, body(code, { dispatched: true }))).toEqual({
+      code,
+      kind: "unavailable",
+      action: "unavailable",
+      message:
+        "The model provider could not finish this request. It counts toward your Codium usage, so Vector did not send it again. Try again shortly. Choose another model.",
+      retry: false,
+    })
   expect(ModelPlans.contextFailure(body("MODEL_PLAN_CONTEXT"))).toBe(true)
 })
 
@@ -622,10 +638,32 @@ test("the SDK transport passes only a known purpose and turns final answers into
   // A transient gateway failure is not a Codium answer and keeps its 503.
   answers.push(answer(503, "MODEL_PLAN_UPSTREAM"))
   expect((await send("cloud-agents")).status).toBe(503)
+  // The same failures after dispatch are committed in full, so the SDK must not resend them.
+  for (const [status, code] of [
+    [503, "MODEL_PLAN_UPSTREAM"],
+    [429, "MODEL_PLAN_BUSY"],
+  ] as const) {
+    answers.push(Response.json({ error: { code, message: "Server message.", dispatched: true } }, { status }))
+    const response = await send("title")
+    expect(response.status).toBe(400)
+    expect(ModelPlans.gatewayFailure(response.status, await response.text())).toMatchObject({ code, retry: false })
+  }
   answers.push(new Response("data: [DONE]\n\n", { headers: { "content-type": "text/event-stream" } }))
   expect((await send()).status).toBe(200)
   // Desktop and CLI callers cannot claim a run token's service purpose; unknown values read as chat.
-  expect(purposes).toEqual(["title", "title", "title", "title", "title", "brain", "judge", "chat", "chat"])
+  expect(purposes).toEqual([
+    "title",
+    "title",
+    "title",
+    "title",
+    "title",
+    "brain",
+    "judge",
+    "chat",
+    "title",
+    "title",
+    "chat",
+  ])
 })
 
 test("current clients decode the v2 catalog leniently and keep Codium Auto only when its models are usable", async () => {
@@ -753,6 +791,20 @@ test("a native Codium turn sends the client headers and fails once on a final an
   const start = gateway.seen.length
   await stream(modelPlanRoute(info, service(), credentials()))
   expect(gateway.seen.length - start).toBe(3)
+  // After dispatch the same answers are committed in full, so the executor sends each once.
+  for (const [status, code] of [
+    [503, "MODEL_PLAN_UPSTREAM"],
+    [429, "MODEL_PLAN_BUSY"],
+    [402, "MODEL_PLAN_CAPACITY"],
+  ] as const) {
+    gateway.state.answer = { status, code, dispatched: true }
+    const first = gateway.seen.length
+    const result = await stream(modelPlanRoute(info, service(), credentials()))
+    if (result._tag !== "Failure" || !(result.failure instanceof LLMError)) throw new Error(`Expected ${code} to fail`)
+    expect(result.failure.reason.retryable).toBe(false)
+    expect(codiumError(result.failure)).toMatchObject({ type: "codium", action: "unavailable", code })
+    expect(gateway.seen.length - first).toBe(1)
+  }
   gateway.state.answer = undefined
 })
 

@@ -320,3 +320,12 @@ warnings, 173 hints. Prettier check passed on every edited file. Not run here: `
 - **CI only.** `packages/engine/test/session/prompt.test.ts` and `packages/engine/test/cli/vector-account-usage.test.ts`
   (nested Bun processes), `packages/client` `check:generated` on the committed tree (a second local generator run
   changed nothing), Valkey 7.2.14 reply shapes and the browser specs.
+
+## P3 review
+
+The P3 phase review found that the retried codes above (`MODEL_PLAN_BUSY`, `MODEL_PLAN_CAPACITY`) and the 5xx retry of
+`MODEL_PLAN_UPSTREAM` also covered answers the gateway gives after it dispatched the request, each of which A17
+commits at a full reservation. The engine could resend one refused request up to ten times. The gateway now marks
+those answers `dispatched: true` and `gatewayFailure` makes a marked answer final whatever its code (kind and action
+`unavailable`); the unmarked codes keep their retry. Details, tests and the records changed are in
+[codium-p3-repairs.md](codium-p3-repairs.md) and `codium-deviations.md` ("P3 review decisions").
