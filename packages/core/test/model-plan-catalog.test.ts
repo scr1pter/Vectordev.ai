@@ -108,16 +108,20 @@ for (const shared of [true, false])
         Effect.provideService(ModelPlans.Service, plans),
         Effect.provideService(FreeModels.CredentialsService, credentials),
       )
-      // Only what the plan can use by any route is listed until sessions resolve Auto and pickers mark locks.
-      expect(
-        (yield* catalog.model.available())
-          .filter((model) => String(model.providerID) === ModelPlans.PROVIDER_ID)
-          .map((model) => String(model.id)),
-      ).toEqual([codiumModel.id])
-      // The listing carries what a picker shows of the entry, from the catalog.
-      expect(
-        (yield* catalog.model.available()).find((model) => String(model.providerID) === ModelPlans.PROVIDER_ID)?.codium,
-      ).toEqual({ lab: "deepseek", role: "default" })
+      // Every entry is listed, Auto, the locked model and the manual-only lane included, each with what a picker shows
+      // of it from the catalog; the default below still never picks Codium.
+      const listed = (yield* catalog.model.available()).filter(
+        (model) => String(model.providerID) === ModelPlans.PROVIDER_ID,
+      )
+      expect(Object.fromEntries(listed.map((model) => [String(model.id), model.codium]))).toEqual({
+        [codiumModel.id]: { lab: "deepseek", role: "default" },
+        [ModelPlans.AUTO_ID]: {
+          lab: "deepseek",
+          auto: { floor: codiumModel.id, default: codiumModel.id, ceiling: codiumModel.id },
+        },
+        "vendor/locked": { locked: { plan: "vector-100", name: "Max" } },
+        "vendor/long": { manualOnly: true },
+      })
       const resolved = yield* Effect.gen(function* () {
         const resolver = yield* SessionRunnerModel.Service
         return yield* resolver.resolve(session)

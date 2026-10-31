@@ -15,6 +15,7 @@ import { ModelPlanStatus } from "@vectordevai/core/model-plan-status"
 import { ProviderV2 } from "@vectordevai/core/provider"
 import { ModelV2 } from "@vectordevai/core/model"
 import { SessionV1 } from "@vectordevai/core/v1/session"
+import { ConfigV1 } from "@vectordevai/core/v1/config/config"
 import { SpendGuard } from "@vectordevai/core/spend-guard"
 import { CrossSpawnSpawner } from "@vectordevai/core/cross-spawn-spawner"
 import { Ripgrep } from "@vectordevai/core/ripgrep"
@@ -265,6 +266,8 @@ const free = testEffect(
       Layer.succeed(LLM.Service, {
         stream: (input) => {
           answered.push({ agent: input.agent.name, providerID: input.model.providerID, modelID: input.model.id })
+          // As LLM.stream does at the response's first event; a session's title waits for it.
+          input.answering?.()
           return Stream.make(
             LLMEvent.textStart({ id: "reply" }),
             LLMEvent.textDelta({ id: "reply", text: "Done." }),
@@ -390,6 +393,48 @@ it.instance("/compact on a session that is on Auto summarises on a model Auto pi
     expect(state.sent.length).toBeGreaterThan(1)
     expect(state.sent.every((item) => item.model !== ModelPlans.AUTO_ID)).toBe(true)
   }),
+)
+
+it.instance(
+  "a session on Auto that compacts by itself stays on Auto: the marker and the continue message keep the choice",
+  () =>
+    Effect.gen(function* () {
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const session = yield* sessions.create({
+        title: "Pinned",
+        permission: [{ permission: "*", pattern: "*", action: "allow" }],
+      })
+      // The first step (a tool call, 1,050 tokens) passes the ceiling model's 600-token window, so the run compacts
+      // before its next step; the summary and the reply after it (206 tokens each) fit.
+      state.replies = ["tool"]
+      yield* prompt.prompt({
+        sessionID: session.id,
+        agent: "build",
+        model: auto,
+        size: "thorough",
+        parts: [{ type: "text", text: "Rework the cache layer" }],
+      })
+      const messages = yield* sessions.messages({ sessionID: session.id })
+      const marker = messages.find((message) => message.parts.some((part) => part.type === "compaction"))
+      expect(marker?.info).toMatchObject({ model: { modelID: ceiling.id }, selected: autoRef })
+      const resumed = messages.find((message) =>
+        message.parts.some((part) => part.type === "text" && part.metadata?.compaction_continue === true),
+      )
+      expect(resumed?.info).toMatchObject({ model: { modelID: ceiling.id }, selected: autoRef })
+      // What the app and the TUI restore, and what the next message without a model runs on: Auto, picking again.
+      const last = (yield* users(session.id)).at(-1)
+      expect(last && ModelPlanStatus.sessionModel(last)).toEqual(autoRef)
+      yield* prompt.prompt({
+        sessionID: session.id,
+        agent: "build",
+        size: "thorough",
+        parts: [{ type: "text", text: "Now the tests" }],
+      })
+      expect((yield* users(session.id)).at(-1)).toMatchObject({ model: { modelID: ceiling.id }, selected: autoRef })
+      expect(state.sent.every((item) => item.model !== ModelPlans.AUTO_ID)).toBe(true)
+    }),
+  { config: { compaction: { reserved: 199_400 } } },
 )
 
 it.instance(
@@ -597,6 +642,66 @@ it.instance(
   { config: { shell: "/bin/sh" } },
 )
 
+it.instance(
+  "the turn after a shell message that kept Auto picks once, stores the pick beside Auto and stays on it",
+  () =>
+    Effect.gen(function* () {
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const session = yield* sessions.create({ title: "Pinned" })
+      yield* prompt.prompt({
+        sessionID: session.id,
+        agent: "build",
+        model: auto,
+        noReply: true,
+        parts: [{ type: "text", text: "Start" }],
+      })
+      // Auto could not pick when the command ran, so its message kept Auto.
+      state.catalog = withoutAuto
+      yield* prompt.shell({ sessionID: session.id, agent: "build", command: "echo hi" })
+      expect((yield* users(session.id)).at(-1)?.model).toMatchObject({ modelID: ModelPlans.AUTO_ID })
+      // Auto is back: the model turn answering the command picks a model once, and both of its steps (a tool call,
+      // then the reply) run on that model. Auto itself never reaches the gateway (the fake throws if it does).
+      state.catalog = withAuto
+      state.replies = ["tool"]
+      const { result, errors } = yield* errorsDuring(session.id, prompt.loop({ sessionID: session.id }))
+      expect(Exit.isSuccess(result)).toBe(true)
+      expect(errors).toEqual([])
+      expect(chat().map((item) => item.model)).toEqual([middle.id, middle.id])
+      expect((yield* users(session.id)).at(-1)).toMatchObject({ model: { modelID: middle.id }, selected: autoRef })
+      const assistants = (yield* sessions.messages({ sessionID: session.id })).flatMap((message) =>
+        message.info.role === "assistant" && message.info.modelID !== ModelPlans.AUTO_ID ? [message.info.modelID] : [],
+      )
+      expect(assistants.map(String)).toEqual([middle.id, middle.id])
+    }),
+  { config: { shell: "/bin/sh" } },
+)
+
+it.instance(
+  "the turn after a shell message that kept Auto fails with Auto's notice and sends nothing while Auto still cannot pick",
+  () =>
+    Effect.gen(function* () {
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const session = yield* sessions.create({ title: "Pinned" })
+      yield* prompt.prompt({
+        sessionID: session.id,
+        agent: "build",
+        model: auto,
+        noReply: true,
+        parts: [{ type: "text", text: "Start" }],
+      })
+      state.catalog = withoutAuto
+      yield* prompt.shell({ sessionID: session.id, agent: "build", command: "echo hi" })
+      const { errors } = yield* errorsDuring(session.id, prompt.loop({ sessionID: session.id }))
+      expect(errors).toHaveLength(1)
+      expect(state.sent).toEqual([])
+      // Nothing was stored: the message still names Auto for a later turn.
+      expect((yield* users(session.id)).at(-1)).not.toHaveProperty("selected")
+    }),
+  { config: { shell: "/bin/sh" } },
+)
+
 free.instance("a free conversation's subtask stays on the free model, even when the subtask names Codium Auto", () =>
   Effect.gen(function* () {
     const prompt = yield* SessionPrompt.Service
@@ -639,6 +744,123 @@ free.instance("a free conversation's subtask stays on the free model, even when 
     expect(general.every((item) => item.providerID === "vector" && item.modelID === freeModel.id)).toBe(true)
     expect(state.sent).toEqual([])
   }),
+)
+
+// A conversation on a provider of the user's own (a workspace's provider settings apply once it is trusted), with one
+// helper agent set to Codium Auto. Every model call in this stack is answered in-process, so the loopback URL is never
+// reached.
+const elsewhere = { providerID: ProviderV2.ID.make("lmstudio"), modelID: ModelV2.ID.make("test-model") }
+const onAuto = (agent: Partial<ConfigV1.Info>["agent"]): { trusted: true; config: Partial<ConfigV1.Info> } => ({
+  trusted: true,
+  config: {
+    agent,
+    provider: {
+      lmstudio: {
+        name: "Test",
+        env: [],
+        npm: "@ai-sdk/openai-compatible",
+        models: {
+          "test-model": {
+            id: "test-model",
+            name: "Test Model",
+            tool_call: true,
+            release_date: "2025-01-01",
+            limit: { context: 100_000, output: 10_000 },
+            cost: { input: 2, output: 8 },
+          },
+        },
+        options: { apiKey: "test-key", baseURL: "http://127.0.0.1:9/v1" },
+      },
+    },
+  },
+})
+const autoSelector = `${ModelPlans.PROVIDER_ID}/${ModelPlans.AUTO_ID}`
+
+free.instance(
+  "a title agent set to Codium Auto titles on Auto's helper model, or not at all, and never sends Auto",
+  () =>
+    Effect.gen(function* () {
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const titled = Effect.fn("test.titled")(function* () {
+        const session = yield* sessions.create({})
+        yield* prompt.prompt({
+          sessionID: session.id,
+          agent: "build",
+          model: elsewhere,
+          size: "standard",
+          parts: [{ type: "text", text: "Rework the cache layer" }],
+        })
+        yield* prompt.awaitTitles()
+        const title = answered.filter((item) => item.agent === "title")
+        answered.length = 0
+        return title
+      })
+      // Auto's floor, though the conversation is on another provider.
+      expect(yield* titled()).toEqual([{ agent: "title", providerID: ModelPlans.PROVIDER_ID, modelID: floor.id }])
+      // A plan with no usable Auto has no helper model: no title request, not one on the conversation's own model.
+      state.catalog = withoutAuto
+      expect(yield* titled()).toEqual([])
+    }),
+  onAuto({ title: { model: autoSelector } }),
+)
+
+free.instance(
+  "a compaction agent set to Codium Auto summarises on the model Auto picks, never on Auto itself",
+  () =>
+    Effect.gen(function* () {
+      const prompt = yield* SessionPrompt.Service
+      const compaction = yield* SessionCompaction.Service
+      const sessions = yield* Session.Service
+      const session = yield* sessions.create({ title: "Pinned" })
+      yield* prompt.prompt({
+        sessionID: session.id,
+        agent: "build",
+        model: elsewhere,
+        size: "standard",
+        parts: [{ type: "text", text: "Explain the cache layer" }],
+      })
+      yield* compaction.create({ sessionID: session.id, agent: "build", model: elsewhere, auto: false })
+      const { result, errors } = yield* errorsDuring(session.id, prompt.loop({ sessionID: session.id }))
+      expect(Exit.isSuccess(result)).toBe(true)
+      expect(errors).toEqual([])
+      expect(answered.filter((item) => item.agent === "compaction")).toEqual([
+        { agent: "compaction", providerID: ModelPlans.PROVIDER_ID, modelID: middle.id },
+      ])
+      const summary = (yield* sessions.messages({ sessionID: session.id })).find(
+        (message) => message.info.role === "assistant" && message.info.summary,
+      )
+      expect(summary?.info).toMatchObject({ providerID: ModelPlans.PROVIDER_ID, modelID: middle.id })
+      expect(answered.every((item) => item.modelID !== ModelPlans.AUTO_ID)).toBe(true)
+    }),
+  onAuto({ compaction: { model: autoSelector } }),
+)
+
+free.instance(
+  "a compaction agent set to Codium Auto stops with Auto's notice and sends nothing while Auto cannot pick",
+  () =>
+    Effect.gen(function* () {
+      const prompt = yield* SessionPrompt.Service
+      const compaction = yield* SessionCompaction.Service
+      const sessions = yield* Session.Service
+      const session = yield* sessions.create({ title: "Pinned" })
+      yield* prompt.prompt({
+        sessionID: session.id,
+        agent: "build",
+        model: elsewhere,
+        size: "standard",
+        parts: [{ type: "text", text: "Explain the cache layer" }],
+      })
+      answered.length = 0
+      state.catalog = withoutAuto
+      yield* compaction.create({ sessionID: session.id, agent: "build", model: elsewhere, auto: false })
+      const { errors } = yield* errorsDuring(session.id, prompt.loop({ sessionID: session.id }))
+      expect(errors.map((error) => ModelPlanStatus.failureAction(error))).toEqual(["unavailable"])
+      expect(JSON.stringify(errors[0])).toContain("Codium Auto is not available")
+      // No summary was requested, on Auto, on the session's own model or on any other.
+      expect(answered).toEqual([])
+    }),
+  onAuto({ compaction: { model: autoSelector } }),
 )
 
 const sessionID = SessionID.make("ses_codium_auto")

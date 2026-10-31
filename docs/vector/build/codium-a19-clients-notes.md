@@ -93,7 +93,15 @@ A20, beside the routing and swarm guards it depends on (option (a); A19 does not
    (`swarm-plan.ts`) skip locked, manual-only and Auto entries; then the `vector models` line names Codium Auto and the
    locked models from that listing (the CLI runtime cannot read the catalog service itself).
 
+A20 status (the A20 commit, see [codium-a20-plan-ui-notes.md](codium-a20-plan-ui-notes.md)): done. The engine
+provider and the V2 catalog list every entry with its metadata, after routing, swarms, pickers, restore and cycling
+skip locked, manual-only and Auto entries, and `vector models` names Codium Auto and the locked models.
+
 ## Obligations for A20 and later
+
+A20 status: the suffix stripping, the finer answers by code and suffix (no purchase for daily, run or Brain), restoring
+`selected` in the app and TUI, the badges, the routing and swarm guards and the desktop's desktop-only grant check are
+done in A20 ([codium-a20-plan-ui-notes.md](codium-a20-plan-ui-notes.md)). The server hardening below stays open (A16).
 
 - `codium-error.tsx` strips only the old `" Buy credits at <url>"` suffix; the engine now ends credit answers with
   `" See plans at <url>"`, `" Update your card at <url>"` or `" Confirm your payment at <url>"`, and upgrade and plan

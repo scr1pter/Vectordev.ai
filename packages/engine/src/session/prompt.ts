@@ -485,14 +485,19 @@ const layer = Layer.effect(
       const ag = yield* agents.get("title")
       if (!ag) return
       const primary = yield* provider.getModel(input.providerID, input.modelID)
+      // Codium Auto as the title agent's own model is a listing entry the gateway never serves: the title goes to the
+      // helper model a Codium conversation gets, whichever provider this conversation is on, or is not generated.
+      const own = SessionCodiumAuto.isAuto(ag.model) ? undefined : ag.model
+      const from =
+        own || !ag.model ? input : { providerID: ProviderV2.ID.make(ModelPlanStatus.PROVIDER_ID), modelID: undefined }
       const small =
-        isFreeModel(primary) || ag.model ? undefined : yield* provider.getSmallModel(input.providerID, input.modelID)
+        isFreeModel(primary) || own ? undefined : yield* provider.getSmallModel(from.providerID, from.modelID)
       // A Codium conversation without a helper model gets no generated title rather than one on its own model.
-      if (!isFreeModel(primary) && !ag.model && !small && input.providerID === ModelPlanStatus.PROVIDER_ID) return
+      if (!isFreeModel(primary) && !own && !small && from.providerID === ModelPlanStatus.PROVIDER_ID) return
       const mdl = isFreeModel(primary)
         ? primary
-        : ag.model
-          ? yield* provider.getModel(ag.model.providerID, ag.model.modelID)
+        : own
+          ? yield* provider.getModel(own.providerID, own.modelID)
           : (small ?? primary)
       // A shared free model allows a few requests a minute, so its title waits until the run is done rather than
       // compete with the run's own requests.
@@ -2277,6 +2282,15 @@ const layer = Layer.effect(
         }
 
         step++
+        // A shell message on Codium Auto keeps Auto when Auto could not pick a model then. The turn that answers it picks
+        // once, here, and stores the pick beside Auto, so every step of the request stays on one model and its cache.
+        // When Auto still cannot pick, the turn fails with its notice and nothing is sent.
+        if (SessionCodiumAuto.isAuto(lastUser.model)) {
+          const chosen = yield* autoModel({ sessionID, tier: "standard", visible: msgs })
+          lastUser.selected = { providerID: lastUser.model.providerID, modelID: lastUser.model.modelID }
+          lastUser.model = { providerID: chosen.providerID, modelID: chosen.modelID }
+          yield* sessions.updateMessage(lastUser)
+        }
         const selectedModel = yield* getModel(lastUser.model.providerID, lastUser.model.modelID, sessionID)
         const model =
           lastUser.executionMode === "fast" && !selectedModel.id.endsWith("-fast")
@@ -2373,7 +2387,13 @@ const layer = Layer.effect(
           lastFinished.summary !== true &&
           (yield* compaction.isOverflow({ tokens: lastFinished.tokens, model }))
         ) {
-          yield* compaction.create({ sessionID, agent: lastUser.agent, model: lastUser.model, auto: true })
+          yield* compaction.create({
+            sessionID,
+            agent: lastUser.agent,
+            model: lastUser.model,
+            ...(lastUser.selected ? { selected: lastUser.selected } : {}),
+            auto: true,
+          })
           continue
         }
 
@@ -2752,6 +2772,7 @@ const layer = Layer.effect(
               sessionID,
               agent: lastUser.agent,
               model: lastUser.model,
+              ...(lastUser.selected ? { selected: lastUser.selected } : {}),
               auto: true,
               overflow: !handle.message.finish,
             })

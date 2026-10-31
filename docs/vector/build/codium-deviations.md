@@ -208,3 +208,101 @@ the remaining A19 work are in [codium-a19-clients-notes.md](codium-a19-clients-n
 - **Not done in A19, with the listing (A20).** Listing Auto, locked and manual-only entries in the engine provider and
   the V2 catalog, and the `vector models` line naming Codium Auto and locked models, wait for A20's routing and swarm
   guards. The CLI command cannot read the catalog service from its runtime, so the line will come from the listing.
+
+## A20 decisions (app and desktop plan UI)
+
+Intent-preserving corrections to the contract text, recorded with the A20 source. Details, tests and the open items
+are in [codium-a20-plan-ui-notes.md](codium-a20-plan-ui-notes.md).
+
+- **Files beyond A20's list**, each needed for a listed change (second step: `packages/core/src/model-plans.ts`, the
+  engine control handler and route graph, `packages/engine/src/agent/agent.ts`, the desktop runtime, IPC and preload,
+  and three root-route test layers that mock the two services the control handler now binds; third step:
+  `packages/engine/src/session/compaction.ts`): `packages/core/src/model-plan-status.ts` (the shared,
+  browser-safe `Listing`, `isAuto`, `isLocked`, `automatic`, `listingBadge`, `sessionModel`, `failureCode` and
+  `failureParts`, the last read from the same table as the engine's suffix); `packages/engine/src/provider/provider.ts`,
+  `packages/core/src/plugin/provider/vector-plan.ts` and `packages/engine/src/cli/cmd/models.ts` (the listing and the
+  `vector models` line moved from A19); `packages/engine/src/session/prompt.ts` (the run-loop Auto resolution);
+  `packages/app/src/context/local.tsx`, `packages/tui/src/context/local.tsx` and
+  `packages/tui/src/component/prompt/index.tsx` (where a session's model is restored and cycled);
+  `packages/app/src/pages/layout-new.tsx`, `packages/app/src/app.tsx` and `packages/desktop/src/preload/types.ts`
+  (swarm flags, and providers re-read on `codiumChanged()`); `packages/app/src/context/notification.tsx` (the toast's
+  code); `packages/app/src/vector-premium.css`, `codium-purchase.css`, `settings-account.css` (badge, detail and
+  scheduled line); `packages/app/src/components/settings-vector-codium.tsx` (below).
+- **Interim listing resolved.** The A19 "Interim listing" entry no longer applies: the engine provider and the Core V2
+  catalog list every entry with its `codium` metadata, now that routing, swarms, pickers, restore and cycling tell them
+  apart. `vector models` names Codium Auto and the locked models from that listing.
+- **Swarms read "never a swarm target" as never added automatically.** A swarm never adds Codium Auto, a locked or a
+  manual-only entry to its pool. The primary the person chose stays when it is unlocked, Auto included (the engine
+  picks a model for each task's message) and manual-only included (they named it); a locked primary is refused, since
+  every request to it would be.
+- **Locked models are never restored, cycled to or picked by themselves.** Beyond the picker guard, the app's and the
+  TUI's restore, default and recent cycling treat a locked Codium entry as unavailable, so a model that was recent
+  before a downgrade is not selected silently. So do the engine's `Provider.defaultModel` (the CLI, agents, review and
+  ACP defaults; an explicit `cfg.model` stays as configured) and its `getSmallModel` for a `small_model` naming one (no
+  helper model, so a title runs on the conversation's own model, as before such entries were listed); the app's
+  Vectorscope review catalog (`reviewCatalog`: a review never runs on one, whether it comes from the agent's recents or
+  a review model in review.json, and neither does the model GitHub Actions reviews are set up with); and the model a
+  new automation takes from the recents (Home). The TUI still lists such a recent or favorite entry, with its badge;
+  choosing it asks to change plan, and a favorite stays removable. ACP clients list it too, named with the same badge
+  ("… (Codium · Ultra)", "… (Preview · Ultra)") and its explanation as the option's description, since an ACP client
+  has no Change plan of its own; choosing one there is the person's choice, and the gateway's answer names the step.
+- **Restoring `selected` lives in the restore paths, not in `pages/session`.** The app restores in
+  `context/local.tsx` (`session.restore`) and the TUI in `component/prompt/index.tsx`, both through
+  `ModelPlanStatus.sessionModel`; no `pages/session` file changed. Automatic compaction keeps the choice those paths
+  read: the run loop hands `SessionCompaction.create` the message's `selected` beside the model Auto picked for it, so
+  the compaction marker and the continue message after it keep Codium Auto as the choice while the summary and the
+  continuation run on that pick. `CodiumError` does render in Codium error rows, so
+  the packages/app benchmark is still owed (it needs the app running, which this lane may not do here); it is open in
+  the A20 notes.
+- **The error card's finer answer comes from the stored message.** The timeline files are unchanged: `CodiumError`
+  reads the engine's own suffix (`failureParts`) and, for a bare credit answer, whether the account has a plan (See
+  plans without one, Change plan with one); the toast uses the gateway code (`failureCode`, `failureKind`): REQUIRED is
+  See plans, EXHAUSTED and UPGRADE_REQUIRED Change plan, EXISTS Manage plan, a payment answer Update card or Confirm
+  payment. Daily, run and Brain limits, contact, wait, update and unavailable answers offer no button. The card's plan
+  read is one shared read a minute (`codiumSubscribed`) held in a signal, never a resource, so it cannot suspend the
+  session page around it.
+- **Confirm payment opens the portal home.** §4.4 names the invoice's `hosted_invoice_url`, which no endpoint returns
+  yet; the portal home lists that invoice. A28/A60 may add the direct link. The portal home ends as closed, so closing
+  it after Confirm payment starts the 5, 20 and 60 s reads too (`runBilling` with `paying`).
+- **No change while a smaller plan is scheduled.** vectordev.ai refuses every `/change` but the scheduled one while a
+  downgrade is scheduled, so the picker shows "Starts <date>" for that plan, no button for the others, and a line to
+  keep the plan first.
+- **Plan reads after a purchase are announced, not pulled.** `createCodiumBilling()` takes no refresh: it announces
+  `codiumChanged()`, and each page showing the plan (Settings Account, Settings Usage, the plans dialog) and the app
+  layout (providers) subscribes. After a finished purchase or card update `refreshAfterPurchase` announces again at 5,
+  20 and 60 s at module level, so closing the dialog does not stop it and a second purchase restarts it instead of
+  doubling it. Every billing request runs through `runBilling`, so a failed turn's card and toast get the same reads as
+  Settings, and say in a toast how the request ended. These reads overlap (each may take up to 10 s), so every screen
+  shows only its newest read's answer (`newestRead`): one started before Stripe's notification that answers last never
+  puts the plan from before the purchase back.
+- **The 5, 20 and 60 s model reads ride a credential write.** "Refreshes `/models`" needs the engine to read
+  vectordev.ai rather than serve the catalog it keeps for 60 s. Before each announcement the app asks the desktop's
+  `refreshModels`, which, in the account queue and with the token stored when it runs, writes that token to the app's
+  sidecar again (`PUT /auth/vector`, no reload); `ControlHttpApi.authSet` for `vector` then forces a catalog read
+  (`ModelPlans.credentialWritten`, waiting at most 2 s). A forced read never joins one already under way and plain
+  reads wait on it. No HttpApi route or schema changed, so nothing was generated; sign-in and account switches get the
+  same immediate read. A WSL server is not written: it holds the account only in its environment, so a write would
+  either restart it (`replaceAccount`) or store the token on the WSL disk, and a read-only refresh route would be a new
+  public HttpApi route. Its kept list (60 s) has lapsed by the 60 s read, which asks vectordev.ai again and, like
+  every provider listing, waits up to 1.5 s for the answer before showing the kept one.
+- **Codium Auto on direct-model paths.** `Agent.generate` resolves Auto with `codiumAuto` for standard work (Auto's
+  notice when the plan offers none), and a `small_model` naming Auto gives Auto's helper choice (floor, then default,
+  else no helper). `SessionDistill` already resolves Auto through `SessionPrompt.prompt`. `Agent.generate` also reads a
+  Codium model through `streamObject`: the Codium transport always streams, so the whole-answer call would have sent a
+  request, spending usage, that could not be parsed. A title agent whose own `model` is Codium Auto titles on that
+  same helper choice whichever provider the conversation is on, and makes no title request when there is none (never
+  one on the conversation's own model, since the person chose Codium for it). A compaction agent whose own `model` is
+  Auto summarises on the model `codiumAuto` picks for standard work over the history it summarises, as `/compact` on a
+  session on Auto does; when Auto cannot pick, the session gets Auto's notice and nothing is sent. The Codium branch of
+  `getSmallModel` now reads the listing itself (`refreshCodium`, as `getModel` does), so a helper agent on Auto beside a
+  conversation on another provider sees the current plan.
+- **Copy pulled from A24.** The picker access label "Codium credits" becomes "Codium" ("Included in your Vector Codium
+  plan"), and Settings → Usage (`settings-vector-codium.tsx`) loses its Purchased credits row and credits wording, so
+  that A20's done criterion holds; the rest of that page stays A24's. The core `Offers` type drops `topups` and
+  `formatPurchased` is removed; `Status.purchased` stays decoded for H7.
+- **The desktop keeps only a desktop grant.** The sign-in exchange reads the `vct_` claims unverified (only
+  vectordev.ai verifies) and stores nothing unless `client` is `"desktop"`. The A16 server hardening (checking the
+  expected purpose before consuming a code) is not done here: `api/account/cli-exchange.ts` and
+  `api/_lib/desktop-account.ts` are A16's and A20 does not otherwise touch them.
+- **Keep my plan is `DELETE /change` sent as JSON** (`content-type: application/json`, body `{}`), as
+  `requireTrustedJsonRequest` requires in production.

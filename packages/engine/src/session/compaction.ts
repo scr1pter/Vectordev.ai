@@ -167,6 +167,8 @@ export interface Interface {
     sessionID: SessionID
     agent: string
     model: { providerID: ProviderV2.ID; modelID: ModelV2.ID }
+    /** What the person chose when `model` is the one Codium Auto picked for the message (its `selected`). */
+    selected?: { providerID: ProviderV2.ID; modelID: ModelV2.ID }
     auto: boolean
     overflow?: boolean
   }) => Effect.Effect<void>
@@ -187,6 +189,19 @@ const layer = Layer.effect(
     const provider = yield* Provider.Service
     const events = yield* EventV2Bridge.Service
     const flags = yield* RuntimeFlags.Service
+
+    // The model Codium Auto picks for a summary: standard work over the history it summarises (`visible`, after the
+    // last compaction boundary). When Auto cannot run, the session gets the notice a turn would and nothing is sent.
+    const autoSummary = Effect.fnUntraced(function* (sessionID: SessionID, visible: readonly SessionV1.WithParts[]) {
+      return yield* provider
+        .codiumAuto({ tier: "standard", contextTokens: SessionCodiumAuto.contextTokens(visible) })
+        .pipe(
+          Effect.tapError((err) =>
+            events.publish(Session.Event.Error, { sessionID, error: SessionCodiumAuto.notice(err) }),
+          ),
+          Effect.orDie,
+        )
+    })
 
     const isOverflow = Effect.fn("SessionCompaction.isOverflow")(function* (input: {
       tokens: SessionV1.Assistant["tokens"]
@@ -364,10 +379,15 @@ const layer = Layer.effect(
       const primary = yield* provider
         .getModel(userMessage.model.providerID, userMessage.model.modelID)
         .pipe(Effect.orDie)
-      const model =
+      // Codium Auto as the compaction agent's own model is a listing entry the gateway never serves: the summary runs
+      // on the model Auto picks for it, whichever provider the session is on.
+      const own =
         isFreeModel(primary) || !agent.model
-          ? primary
-          : yield* provider.getModel(agent.model.providerID, agent.model.modelID).pipe(Effect.orDie)
+          ? undefined
+          : SessionCodiumAuto.isAuto(agent.model)
+            ? yield* autoSummary(input.sessionID, input.messages)
+            : agent.model
+      const model = own ? yield* provider.getModel(own.providerID, own.modelID).pipe(Effect.orDie) : primary
       // A summary gains little from the high reasoning budget a session may run at, so compaction stops at medium.
       const variant =
         ["high", "xhigh", "max"].includes(userMessage.model.variant ?? "") && model.variants?.medium
@@ -565,38 +585,29 @@ const layer = Layer.effect(
       sessionID: SessionID
       agent: string
       model: { providerID: ProviderV2.ID; modelID: ModelV2.ID }
+      selected?: { providerID: ProviderV2.ID; modelID: ModelV2.ID }
       auto: boolean
       overflow?: boolean
     }) {
-      // A summary for a session on Codium Auto runs on the model Auto picks for standard work over the history it
-      // summarises; the session stays on Auto. When Auto cannot run, the session gets the notice a turn would.
+      // A summary for a session on Codium Auto runs on the model Auto picks for it; the session stays on Auto. An
+      // automatic compaction hands over the model Auto already picked for the message, with Auto as `selected`: the
+      // summary and the continue message after it stay on that pick, and the session stays on Auto.
       const auto = SessionCodiumAuto.isAuto(input.model)
+      const selected = auto ? { providerID: input.model.providerID, modelID: input.model.modelID } : input.selected
       const model = auto
-        ? yield* provider
-            .codiumAuto({
-              tier: "standard",
-              contextTokens: SessionCodiumAuto.contextTokens(
-                MessageV2.filterCompacted(
-                  (yield* session.messages({ sessionID: input.sessionID }).pipe(Effect.orDie)).toReversed(),
-                ),
-              ),
-            })
-            .pipe(
-              Effect.tapError((err) =>
-                events.publish(Session.Event.Error, {
-                  sessionID: input.sessionID,
-                  error: SessionCodiumAuto.notice(err),
-                }),
-              ),
-              Effect.orDie,
-            )
+        ? yield* autoSummary(
+            input.sessionID,
+            MessageV2.filterCompacted(
+              (yield* session.messages({ sessionID: input.sessionID }).pipe(Effect.orDie)).toReversed(),
+            ),
+          )
         : input.model
       const msg = yield* session.updateMessage({
         id: MessageID.ascending(),
         role: "user",
         // Not rebuilt: the loop hands over the last user message's model with its variant.
         model,
-        ...(auto ? { selected: { providerID: input.model.providerID, modelID: input.model.modelID } } : {}),
+        ...(selected ? { selected } : {}),
         sessionID: input.sessionID,
         agent: input.agent,
         time: { created: Date.now() },

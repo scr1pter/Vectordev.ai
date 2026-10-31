@@ -41,6 +41,28 @@ export const textStream = [
   { id: "gen-2", choices: [], usage: { prompt_tokens: 200, completion_tokens: 6, total_tokens: 206 } },
 ]
 
+/** A structured answer streamed as JSON text, such as a generated agent. */
+export const objectStream = [
+  {
+    id: "gen-3",
+    choices: [
+      {
+        index: 0,
+        delta: {
+          role: "assistant",
+          content: JSON.stringify({
+            identifier: "migration-checker",
+            whenToUse: "Checks database migrations before they run.",
+            systemPrompt: "You check database migrations.",
+          }),
+        },
+      },
+    ],
+  },
+  { id: "gen-3", choices: [{ index: 0, delta: {}, finish_reason: "stop" }] },
+  { id: "gen-3", choices: [], usage: { prompt_tokens: 300, completion_tokens: 40, total_tokens: 340 } },
+]
+
 /** The v2 `/models` answer (§4.12) for a current client: the one model, Codium Auto naming it in every role, no locks. */
 export const codiumCatalogV2: ModelPlans.Catalog = {
   enabled: true,
@@ -68,7 +90,7 @@ export const codiumCatalogV2: ModelPlans.Catalog = {
  */
 export function codiumGateway(token: string) {
   const state = {
-    mode: "ok" as "ok" | "text" | "credits" | "disabled" | "context" | "capacity",
+    mode: "ok" as "ok" | "text" | "object" | "credits" | "disabled" | "context" | "capacity",
     // Set to answer every chat request with this status, code and headers instead of a reply.
     answer: undefined as
       | { status: number; code: string; message?: string; headers?: Record<string, string> }
@@ -176,7 +198,9 @@ export function codiumGateway(token: string) {
         )
       return new Response(
         [
-          ...(state.mode === "text" ? textStream : toolCallStream).map((chunk) => `data: ${JSON.stringify(chunk)}\n\n`),
+          ...(state.mode === "text" ? textStream : state.mode === "object" ? objectStream : toolCallStream).map(
+            (chunk) => `data: ${JSON.stringify(chunk)}\n\n`,
+          ),
           "data: [DONE]\n\n",
         ].join(""),
         { headers: { "content-type": "text/event-stream" } },

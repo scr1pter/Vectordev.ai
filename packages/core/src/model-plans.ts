@@ -3,7 +3,7 @@ export * as ModelPlans from "./model-plans"
 import path from "node:path"
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises"
 import { createHash, randomUUID } from "node:crypto"
-import { Context, Effect, Layer, Option, Schema } from "effect"
+import { Context, Duration, Effect, Layer, Option, Schema } from "effect"
 import { makeGlobalNode } from "./effect/app-node"
 import { Egress } from "./local-mode/egress"
 import { Flag } from "./flag/flag"
@@ -81,13 +81,24 @@ const RETRY = 10_000
 const MAX_ACCOUNTS = 32
 
 export type CatalogOptions = {
-  /** Read vectordev.ai now and wait for its answer. */
+  /**
+   * Read vectordev.ai now and wait for its answer: a read that starts after something that can change the account's
+   * models (a sign-in, a purchase), never one already under way. Until it answers, every read waits on it.
+   */
   force?: boolean
   /** A chat request: wait for vectordev.ai when this account has no catalog yet, instead of answering OFF. */
   wait?: boolean
 }
 
-type Entry = { digest: string; value?: Catalog; expires: number; pending?: Promise<Catalog>; restored: Promise<void> }
+type Entry = {
+  digest: string
+  value?: Catalog
+  expires: number
+  pending?: Promise<Catalog>
+  /** How many reads of this account have started; only the newest one's answer is kept. */
+  reads: number
+  restored: Promise<void>
+}
 
 export function createClient(
   input: {
@@ -112,7 +123,7 @@ export function createClient(
   }
   // A restored catalog is stale from the start: it is served only until vectordev.ai answers.
   const restore = (digest: string): Entry => {
-    const current: Entry = { digest, expires: 0, restored: Promise.resolve() }
+    const current: Entry = { digest, expires: 0, reads: 0, restored: Promise.resolve() }
     if (!input.file) return current
     current.restored = readFile(input.file, "utf8")
       .then((text) => Option.getOrUndefined(Schema.decodeUnknownOption(Schema.fromJsonString(Saved))(text)))
@@ -130,8 +141,9 @@ export function createClient(
       .then(() => rename(temporary, file))
       .catch(() => rm(temporary, { force: true }).catch(() => undefined))
   }
-  const load = (token: string, current: Entry) =>
-    request(CATALOG_URL, {
+  const load = (token: string, current: Entry) => {
+    const read = ++current.reads
+    const pending: Promise<Catalog> = request(CATALOG_URL, {
       headers: { ...clientHeaders(), Authorization: `Bearer ${token}`, accept: "application/json" },
       redirect: "error",
       signal: AbortSignal.timeout(10_000),
@@ -145,6 +157,9 @@ export function createClient(
       )
       .catch(() => undefined)
       .then(async (answer) => {
+        // A read that started before a newer one (a forced read after a purchase) may carry the models from before it,
+        // so it never replaces the catalog: it settles with the newer read instead.
+        if (read !== current.reads) return current.pending ?? current.value ?? OFF
         // Only an answer replaces the catalog: a refused token, enabled:false or a valid list. A slow, failed or
         // garbled refresh keeps serving the last catalog this account received, so a paid turn never fails on it.
         current.pending = undefined
@@ -153,13 +168,21 @@ export function createClient(
         if (answer && input.file) await save(input.file, { account: current.digest, catalog: answer })
         return current.value ?? OFF
       })
+    return pending
+  }
   const catalog = async (token: string | undefined, options: CatalogOptions = {}): Promise<Catalog> => {
     if (!token || input.disabled?.()) return OFF
     const current = account(token)
     await current.restored
-    if (!options.force && current.value && current.expires > now()) return current.value
+    if (options.force) {
+      // The kept catalog stops counting as fresh, so a plain read meanwhile joins this one as it would a lapsed entry.
+      current.expires = 0
+      current.pending = load(token, current)
+      return current.pending
+    }
+    if (current.value && current.expires > now()) return current.value
     current.pending ??= load(token, current)
-    if (options.force || (options.wait && !current.value)) return current.pending
+    if (options.wait && !current.value) return current.pending
     // Provider listing never waits long on vectordev.ai: it answers with the last catalog seen, here or on disk, or
     // OFF on a first read, and the refresh lands for the next caller.
     const fallback = Promise.withResolvers<Catalog>()
@@ -312,6 +335,21 @@ export const node = makeGlobalNode({
     })
   }),
   deps: [],
+})
+
+/** How long writing the account credential waits for that account's catalog; a slower answer still lands. */
+export const CREDENTIAL_READ = Duration.seconds(2)
+
+/**
+ * After the account credential is written (a sign-in, an account switch, or the desktop's reads after a purchase):
+ * reads that account's catalog from vectordev.ai now, so the next model list names what its plan includes instead of
+ * the catalog kept for up to a minute. It waits at most CREDENTIAL_READ; a slower answer still replaces the kept
+ * catalog when it lands, since the read is the client's and not this wait's. Vector Local, a desktop first run's hold
+ * and VECTOR_DISABLE_MODELS_FETCH keep it off vectordev.ai, as they do every catalog read.
+ */
+export const credentialWritten = Effect.fn("ModelPlans.credentialWritten")(function* (token: string | undefined) {
+  const plans = yield* Service
+  yield* plans.catalog(token, { force: true }).pipe(Effect.timeout(CREDENTIAL_READ), Effect.ignore)
 })
 
 /**

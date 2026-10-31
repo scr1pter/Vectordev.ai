@@ -111,6 +111,7 @@ import { projectHandlers } from "./handlers/project"
 import { projectCopyHandlers } from "./handlers/project-copy"
 import { providerHandlers } from "./handlers/provider"
 import { FreeModels } from "@vectordevai/core/free-models"
+import { ModelPlans } from "@vectordevai/core/model-plans"
 import { ptyConnectHandlers, ptyHandlers } from "./handlers/pty"
 import { questionHandlers } from "./handlers/question"
 import { sessionHandlers } from "./handlers/session"
@@ -245,6 +246,9 @@ const app = LayerNode.group([
   Plugin.node,
   ModelCatalog.node,
   FreeModels.node,
+  // The control routes read the Vector account's Codium models when its credential is written.
+  FreeModels.credentialsNode,
+  ModelPlans.node,
   FreeModelGuests.node,
   Brain.node,
   BrainKnowledge.node,

@@ -1772,9 +1772,9 @@ export function fromFreeModels(models: readonly FreeModelInfo[], providerID: "ve
 }
 
 /**
- * Vector Codium. Credentials are read at the fixed request boundary and never appear in provider info. Only models the
- * plan can use by any route are listed: Codium Auto, locked and manual-only entries wait until sessions resolve Auto
- * and the pickers, routing and swarms can tell them apart.
+ * Vector Codium. Credentials are read at the fixed request boundary and never appear in provider info. Every catalog
+ * entry is listed with its `codium` listing metadata, so the pickers, routing and swarms can tell Codium Auto, locked
+ * and manual-only entries apart.
  */
 export function fromModelPlans(models: readonly ModelPlans.Model[]): Info {
   return {
@@ -1784,7 +1784,10 @@ export function fromModelPlans(models: readonly ModelPlans.Model[]): Info {
     env: [],
     options: {},
     models: Object.fromEntries(
-      models.filter(ModelPlans.usableModel).map((model) => [
+      // Every entry, with what its listing says: Codium Auto (resolved per user message), models the plan does not
+      // include (choosing one opens Change plan) and manual-only lanes. Nothing automatic picks those (defaultModelIDs,
+      // getSmallModel through CodiumAuto.helper, task and image routing, swarms).
+      models.map((model) => [
         model.id,
         {
           id: ModelV2.ID.make(model.id),
@@ -2886,10 +2889,22 @@ const layer = Layer.effect(
       return undefined
     })
 
+    // The model a Codium conversation's helper calls run on: Auto's floor, then its default, never a locked, manual-only
+    // or Auto entry. Without either (signed out, Codium off, Vector Local, or a plan whose Auto is not usable) there is
+    // no helper model and the helper is skipped.
+    const codiumHelper = Effect.fnUntraced(function* () {
+      const listed = (yield* refreshCodium({ wait: true }))[planID]
+      const chosen = CodiumAuto.helper(yield* modelPlans.catalog(yield* freeCredentials.get("vector")))
+      return chosen ? listed?.models[chosen.id] : undefined
+    })
+
     const getSmallModel = Effect.fn("Provider.getSmallModel")(function* (
       providerID: ProviderV2.ID,
       primaryID?: ModelV2.ID,
     ) {
+      // An explicitly selected Codium conversation keeps helper calls on Codium. A helper agent set to Codium Auto asks
+      // with the provider alone and may run beside a conversation on another provider, so the listing is read here.
+      if (providerID === planID) return yield* codiumHelper()
       const s = yield* providerState
       const provider = s.providers[providerID]
       if (!provider) return undefined
@@ -2899,19 +2914,19 @@ const layer = Layer.effect(
       // A helper call never moves a conversation onto a free model whose provider may train on prompts.
       if (providerID === "vector")
         return Object.values(provider.models).find((model) => isFreeModel(model) && !freeModelMayTrain(model))
-      // An explicitly selected Codium conversation keeps helper calls on Codium: Auto's floor, then its default, never
-      // a locked, manual-only or Auto entry. Without either, there is no helper model and the helper is skipped.
-      if (providerID === ModelPlans.PROVIDER_ID) {
-        const chosen = CodiumAuto.helper(yield* modelPlans.catalog(yield* freeCredentials.get("vector")))
-        return chosen ? provider.models[chosen.id] : undefined
-      }
       const cfg = yield* config.get()
 
       if (cfg.small_model) {
         const parsed = parseModel(cfg.small_model)
-        return yield* getModel(parsed.providerID, parsed.modelID).pipe(
+        // Codium Auto is a listing entry and never a model the gateway serves: as the small model it gives the model a
+        // Codium conversation's helpers get.
+        if (parsed.providerID === planID && parsed.modelID === ModelPlans.AUTO_ID) return yield* codiumHelper()
+        const small = yield* getModel(parsed.providerID, parsed.modelID).pipe(
           Effect.catchTag("ProviderModelNotFoundError", () => Effect.succeed(undefined)),
         )
+        // A Codium model the plan no longer includes is listed, but every helper call to it would be refused: there is
+        // no helper model then, as when it was not listed, and the caller falls back (a title runs on its own model).
+        return parsed.providerID === planID && small?.codium?.locked ? undefined : small
       }
 
       const experimental = yield* plugin.trigger<"experimental.provider.small_model">(
@@ -3056,7 +3071,11 @@ const layer = Layer.effect(
         // models are off and every model left runs on a server on the list, so the next recent choice is taken.
         if (isFreeModelRef(entry) && !Config.local().enabled) return entry
         if (!provider) continue
-        if (!provider.models[entry.modelID]) continue
+        const model = provider.models[entry.modelID]
+        if (!model) continue
+        // A Codium model the plan no longer includes is listed (choosing it opens Change plan), but every turn on it
+        // would be refused, so it is never the default, as the app and the TUI never restore it.
+        if (entry.providerID === planID && model.codium?.locked) continue
         return { providerID: entry.providerID, modelID: entry.modelID }
       }
 

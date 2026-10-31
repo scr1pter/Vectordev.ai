@@ -27,9 +27,9 @@ export const VectorPlanPlugin = define({
           provider.disabled = false
           provider.api = { type: "aisdk", package: "@ai-sdk/openai-compatible", url: ModelPlans.API_URL }
         })
-        // Codium Auto, locked and manual-only entries wait until sessions resolve Auto and the pickers, routing and
-        // swarms can tell them apart (ModelPlans.usableModel).
-        for (const model of current.models.filter(ModelPlans.usableModel))
+        // Every entry, with what its listing says: Codium Auto (sent to its default model at prepare), models the plan
+        // does not include and manual-only lanes. Nothing automatic picks those (the V2 default skips Codium).
+        for (const model of current.models)
           catalog.model.update(ModelPlans.PROVIDER_ID, model.id, (draft) => {
             draft.name = model.name
             draft.api = { id: model.id, type: "aisdk", package: "@ai-sdk/openai-compatible", url: ModelPlans.API_URL }

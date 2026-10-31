@@ -153,7 +153,6 @@ const EMPTY: Status = {
   low: false,
 }
 const percent = new Intl.NumberFormat("en-US", { style: "percent", maximumFractionDigits: 0 })
-const PURCHASED = { available: "Available", low: "Running low", used: "Used up" } as const
 
 /** Reads the signed-in account's Codium plan and usage. The token is only ever sent to vectordev.ai. */
 export async function fetchStatus(token: string | undefined, request: Send): Promise<Status> {
@@ -190,20 +189,17 @@ export async function salesOpen(request: Send) {
 }
 
 const Offer = Schema.Struct({ id: Schema.String, name: Schema.String, price: Schema.Number, available: Schema.Boolean })
-const Config = Schema.Struct({
-  enabled: Schema.Boolean,
-  plans: Schema.Array(Offer),
-  topups: Schema.optional(Schema.Array(Offer)),
-})
+// An older site still lists top-ups beside the plans; Codium sells monthly plans only, so they are not read.
+const Config = Schema.Struct({ enabled: Schema.Boolean, plans: Schema.Array(Offer) })
 
 /**
- * A Codium plan or top-up as Vector offers it: its name and its public price. What it buys stays off every screen, as
- * does how purchases compare, since either beside the price would reveal the markup.
+ * A Codium plan as Vector offers it: its name and its public monthly price. What it buys stays off every screen, as
+ * does how plans compare, since either beside the price would reveal the markup.
  */
 export type Offer = { id: string; name: string; price: number; available: boolean }
-export type Offers = { enabled: boolean; plans: Offer[]; topups: Offer[] }
+export type Offers = { enabled: boolean; plans: Offer[] }
 
-/** The plans and top-ups vectordev.ai lists publicly, for buying inside Vector; undefined when they cannot be read. */
+/** The monthly plans vectordev.ai lists publicly, for subscribing inside Vector; undefined when they cannot be read. */
 export async function fetchOffers(request: Send): Promise<Offers | undefined> {
   const response = await request(CONFIG_URL, {
     headers: { accept: "application/json" },
@@ -222,11 +218,7 @@ export async function fetchOffers(request: Send): Promise<Offers | undefined> {
     price: item.price,
     available: decoded.value.enabled && item.available,
   })
-  return {
-    enabled: decoded.value.enabled,
-    plans: decoded.value.plans.map(offer),
-    topups: (decoded.value.topups ?? []).map(offer),
-  }
+  return { enabled: decoded.value.enabled, plans: decoded.value.plans.map(offer) }
 }
 
 /**
@@ -327,16 +319,6 @@ function defined<T extends Record<string, unknown>>(value: T) {
 /** "42%": the same rounding as the account page, so both show the same figure. */
 export function formatShare(value: number) {
   return percent.format(value)
-}
-
-/**
- * Purchased credits as a state, not a share: they pool every top-up ever bought, so a share of that pool would read
- * "8% left" for a repeat buyer right after a fresh purchase.
- */
-export function formatPurchased(purchased: Status["purchased"]) {
-  if (!purchased.bought) return "None"
-  if (purchased.state === undefined) return "Balance unavailable"
-  return PURCHASED[purchased.state]
 }
 
 export function formatDate(time: number) {
@@ -535,14 +517,40 @@ export function gatewayFailure(status: number | undefined, body: string | undefi
   }
 }
 
+// The sentence a final answer ends with, which the terminal needs; the app reads it back (failureParts) and offers the
+// same step as a button. The credit ones follow the answer's payment action, first match wins.
+const SUFFIXES = [
+  { kind: "credits", payment: "update-card", text: ` Update your card at ${MANAGE_URL}` },
+  { kind: "credits", payment: "confirm-payment", text: ` Confirm your payment at ${MANAGE_URL}` },
+  { kind: "credits", text: ` See plans at ${PURCHASE_URL}` },
+  { kind: "upgrade", text: ` Change plan at ${MANAGE_URL}` },
+  { kind: "plan", text: ` Manage your plan at ${MANAGE_URL}` },
+] as const satisfies readonly { kind: Kind; payment?: Payment; text: string }[]
+// What failed turns stored before Codium stopped selling top-ups end with.
+const LEGACY_CREDITS = ` Buy credits at ${PURCHASE_URL}`
+
+type Payment = "update-card" | "confirm-payment"
+
 function suffix(kind: Kind, action: string | undefined) {
-  if (kind === "credits" && action === "update-card") return ` Update your card at ${MANAGE_URL}`
-  if (kind === "credits" && action === "confirm-payment") return ` Confirm your payment at ${MANAGE_URL}`
-  if (kind === "credits") return ` See plans at ${PURCHASE_URL}`
-  if (kind === "upgrade") return ` Change plan at ${MANAGE_URL}`
-  if (kind === "plan") return ` Manage your plan at ${MANAGE_URL}`
   if (kind === "unavailable") return " Choose another model."
-  return ""
+  const found = SUFFIXES.find((item) => item.kind === kind && (!("payment" in item) || item.payment === action))
+  return found?.text ?? ""
+}
+
+/**
+ * A final answer's message split from the step it ends with: the text without that sentence, and the kind and payment
+ * action the sentence names. A message without one (or a run, daily or Brain answer, which never ends with a purchase)
+ * comes back whole.
+ */
+export function failureParts(message: string): { text: string; kind?: Kind; payment?: Payment } {
+  if (message.endsWith(LEGACY_CREDITS)) return { text: message.slice(0, -LEGACY_CREDITS.length), kind: "credits" }
+  const found = SUFFIXES.find((item) => message.endsWith(item.text))
+  if (!found) return { text: message }
+  return {
+    text: message.slice(0, -found.text.length),
+    kind: found.kind,
+    ...("payment" in found ? { payment: found.payment } : {}),
+  }
 }
 
 /** The §4.10 kind of a gateway code, for surfaces that show a finer answer than the stored action. */
@@ -565,9 +573,79 @@ export function failureAction(error: unknown): Action | undefined {
   return kind === "credits" || kind === "sign-in" || kind === "unavailable" ? kind : undefined
 }
 
-function codiumMetadata(data: unknown) {
+/** The gateway code a failed Codium turn recorded (engine metadata.code, or a Core V2 error's `code`), when it has one. */
+export function failureCode(error: unknown): string | undefined {
+  if (!error || typeof error !== "object") return
+  const code =
+    "type" in error && error.type === "codium" && "code" in error
+      ? error.code
+      : "name" in error && error.name === "APIError" && "data" in error
+        ? codiumMetadata(error.data, "code")
+        : undefined
+  return typeof code === "string" && code ? code : undefined
+}
+
+function codiumMetadata(data: unknown, key: "codium" | "code" = "codium") {
   const metadata = data && typeof data === "object" && "metadata" in data ? data.metadata : undefined
-  return metadata && typeof metadata === "object" && "codium" in metadata ? metadata.codium : undefined
+  return metadata && typeof metadata === "object" && key in metadata
+    ? (metadata as Record<string, unknown>)[key]
+    : undefined
+}
+
+/**
+ * What a listed Codium entry says about itself (Model.Codium), as the app, the TUI and the desktop read it from the
+ * model list: structural, so each surface passes its own model shape.
+ */
+export type Listing = {
+  lab?: string
+  role?: string
+  manualOnly?: boolean
+  locked?: { plan: string; name: string; previewUntil?: number }
+  preview?: { until: number }
+  auto?: unknown
+}
+
+/** Whether an entry is Codium Auto, which picks a model for each message and is never a model itself. */
+export function isAuto(model: { id: string; codium?: Listing }) {
+  return model.id === AUTO_ID || Boolean(model.codium?.auto)
+}
+
+/** Whether the account's plan does not include this entry: choosing it opens Change plan instead (label plan §10). */
+export function isLocked(model: { codium?: Listing }) {
+  return Boolean(model.codium?.locked)
+}
+
+/**
+ * Whether Vector may put a prompt on this entry by itself (task and image routing, swarms, a default it picks): never
+ * Codium Auto, a locked or a manual-only model (§4.12). The person can still choose an unlocked one by name.
+ */
+export function automatic(model: { id: string; codium?: Listing }) {
+  return !isAuto(model) && !isLocked(model) && !model.codium?.manualOnly
+}
+
+/**
+ * The badge a picker shows beside a Codium entry the plan does not include, or a preview it does: "Codium · Pro" (the
+ * plan that includes it), "Preview · Ultra" (only Ultra has it during its preview), or "Preview". None for the rest.
+ */
+export function listingBadge(codium: Listing | undefined): { label: string; title: string } | undefined {
+  const locked = codium?.locked
+  if (locked?.previewUntil !== undefined)
+    return { label: `Preview · ${locked.name}`, title: `Only in ${locked.name} during its preview` }
+  if (locked) return { label: `Codium · ${locked.name}`, title: `Included in ${locked.name} and above` }
+  if (codium?.preview) return { label: "Preview", title: "A preview model on your plan" }
+}
+
+/**
+ * The model a session continues on, from its last user message: the one the person selected (Codium Auto), else the one
+ * that message ran on with its variant. Auto picks again for the next message, so a variant of one of its models is not
+ * kept.
+ */
+export function sessionModel(message: {
+  model?: { providerID: string; modelID: string; variant?: string }
+  selected?: { providerID: string; modelID: string }
+}): { providerID: string; modelID: string; variant?: string } | undefined {
+  if (message.selected) return { providerID: message.selected.providerID, modelID: message.selected.modelID }
+  return message.model
 }
 
 /**

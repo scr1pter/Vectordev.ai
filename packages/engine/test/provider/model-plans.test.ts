@@ -1,7 +1,10 @@
 import { afterAll, afterEach, expect, test } from "bun:test"
+import fs from "fs/promises"
+import path from "path"
 import { APICallError } from "ai"
 import { Effect, Layer, Schema, Stream } from "effect"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
+import { Global } from "@vectordevai/core/global"
 import { FreeModels } from "@vectordevai/core/free-models"
 import { ModelPlans } from "@vectordevai/core/model-plans"
 import { ModelV2 } from "@vectordevai/core/model"
@@ -26,7 +29,7 @@ const gateway = codiumGateway(token)
 afterAll(() => gateway.stop())
 const entitlement = { enabled: true }
 // A current client's catalog: Codium Auto naming the model, plus a model this plan has not unlocked and a manual-only
-// lane, which are not listed until sessions resolve Auto and the pickers mark locks.
+// lane. All are listed with what their listing says; nothing automatic picks Auto, the locked or the manual-only one.
 const v2Catalog: ModelPlans.Catalog = {
   ...codiumCatalogV2,
   models: [
@@ -108,7 +111,19 @@ it.instance(
       const provider = yield* Provider.Service
       const listed = (yield* provider.list())[id]
       expect(listed.name).toBe("Vector Codium")
-      expect(Object.keys(listed.models)).toEqual([codiumModel.id])
+      // Every entry, in the catalog's order, each with what a picker shows of it and never its hidden weight.
+      expect(Object.keys(listed.models)).toEqual([codiumModel.id, ModelPlans.AUTO_ID, "vendor/locked", "vendor/long"])
+      expect(Object.fromEntries(Object.entries(listed.models).map(([key, model]) => [key, model.codium]))).toEqual({
+        [codiumModel.id]: { lab: "deepseek", role: "default" },
+        [ModelPlans.AUTO_ID]: {
+          lab: "deepseek",
+          auto: { floor: codiumModel.id, default: codiumModel.id, ceiling: codiumModel.id },
+        },
+        "vendor/locked": { locked: { plan: "vector-100", name: "Max" } },
+        "vendor/long": { manualOnly: true },
+      })
+      // Listing them makes none of them a default.
+      expect(Provider.defaultModelIDs({ [id]: listed })).toEqual({ [id]: codiumModel.id })
       expect(JSON.stringify(listed)).not.toContain(token)
       expect(listed.options).toEqual({})
       const selected = yield* provider.getModel(id, ModelV2.ID.make(codiumModel.id))
@@ -371,6 +386,46 @@ it.instance(
   },
 )
 
+// The recent models the TUI and the app keep, which the engine's default reads.
+const recents = path.join(Global.Path.state, "model.json")
+it.instance(
+  "a recent Codium model the plan no longer includes is never the default; the next recent choice is",
+  () =>
+    Effect.gen(function* () {
+      const provider = yield* Provider.Service
+      const recent = (...modelIDs: string[]) =>
+        Effect.promise(() =>
+          Bun.write(recents, JSON.stringify({ recent: modelIDs.map((modelID) => ({ providerID: id, modelID })) })),
+        )
+      // Chosen on Max, then the plan went down to one that lists it as locked: every turn on it would be refused.
+      expect((yield* provider.list())[id]?.models["vendor/locked"]?.codium?.locked).toBeDefined()
+      yield* recent("vendor/locked", codiumModel.id)
+      expect(yield* provider.defaultModel()).toEqual({ providerID: id, modelID: ModelV2.ID.make(codiumModel.id) })
+      // With no other recent choice, the default is the person's own provider, as when nothing was chosen.
+      yield* recent("vendor/locked")
+      expect(yield* provider.defaultModel()).toEqual({
+        providerID: ProviderV2.ID.make("local"),
+        modelID: ModelV2.ID.make("coder"),
+      })
+      // A manual-only lane the person chose by name is still theirs.
+      yield* recent("vendor/long")
+      expect(yield* provider.defaultModel()).toEqual({ providerID: id, modelID: ModelV2.ID.make("vendor/long") })
+    }).pipe(Effect.ensuring(Effect.promise(() => fs.rm(recents, { force: true })))),
+  {
+    trusted: true,
+    config: {
+      provider: {
+        local: {
+          name: "Local",
+          npm: "@ai-sdk/openai-compatible",
+          options: { baseURL: "http://127.0.0.1:9/v1" },
+          models: { coder: { name: "Local coder", tool_call: true } },
+        },
+      },
+    },
+  },
+)
+
 it.instance(
   "Codium alone is still not chosen automatically; the person is asked to pick a Codium model",
   () =>
@@ -419,6 +474,97 @@ it.instance("a Codium title stays on Codium, says it is a title and records its 
       { path: "/api/model-plans/chat", purpose: "title", catalog: "2" },
     ])
   }),
+)
+
+it.instance(
+  "a small model set to Codium Auto gives helpers Auto's floor, then its default, never Auto itself",
+  () =>
+    Effect.gen(function* () {
+      const provider = yield* Provider.Service
+      const floor = { ...codiumModel, id: "vendor/floor" }
+      const roles = { floor: floor.id, default: codiumModel.id, ceiling: codiumModel.id }
+      const autoEntry = { ...codiumModel, id: ModelPlans.AUTO_ID, auto: roles }
+      // A conversation on another provider: its helpers follow small_model, which names Codium Auto.
+      const small = () =>
+        provider
+          .getSmallModel(ProviderV2.ID.make("local"), ModelV2.ID.make("coder"))
+          .pipe(Effect.map((model) => model && `${model.providerID}/${model.id}`))
+      planCatalog.current = { enabled: true, models: [codiumModel, autoEntry, floor] }
+      expect(yield* small()).toBe(`${id}/${floor.id}`)
+      planCatalog.current = { enabled: true, models: [codiumModel, autoEntry, { ...floor, manualOnly: true }] }
+      expect(yield* small()).toBe(`${id}/${codiumModel.id}`)
+      // Neither is usable, or the catalog names no Auto: no helper model, so the helper is skipped.
+      planCatalog.current = {
+        enabled: true,
+        models: [
+          { ...codiumModel, locked: { plan: "vector-100", name: "Max" } },
+          autoEntry,
+          { ...floor, locked: { plan: "vector-100", name: "Max" } },
+        ],
+      }
+      expect(yield* small()).toBeUndefined()
+      planCatalog.current = { enabled: true, models: [codiumModel] }
+      expect(yield* small()).toBeUndefined()
+      // Signed out, Codium lists nothing.
+      planCatalog.current = { enabled: true, models: [codiumModel, autoEntry, floor] }
+      account.token = undefined
+      expect(yield* small()).toBeUndefined()
+      account.token = token
+      planCatalog.current = v2Catalog
+    }),
+  {
+    trusted: true,
+    config: {
+      small_model: `${ModelPlans.PROVIDER_ID}/${ModelPlans.AUTO_ID}`,
+      provider: {
+        local: {
+          name: "Local",
+          npm: "@ai-sdk/openai-compatible",
+          options: { baseURL: "http://127.0.0.1:9/v1" },
+          models: { coder: { name: "Local coder", tool_call: true } },
+        },
+      },
+    },
+  },
+)
+
+it.instance(
+  "a small model naming a Codium model the plan no longer includes gives no helper model, so the caller falls back",
+  () =>
+    Effect.gen(function* () {
+      const provider = yield* Provider.Service
+      const small = () =>
+        provider
+          .getSmallModel(ProviderV2.ID.make("local"), ModelV2.ID.make("coder"))
+          .pipe(Effect.map((model) => model && `${model.providerID}/${model.id}`))
+      // Listed with its lock (vendor/locked needs Max): every helper call to it would be refused.
+      planCatalog.current = v2Catalog
+      expect((yield* provider.list())[id]?.models["vendor/locked"]?.codium?.locked).toBeDefined()
+      expect(yield* small()).toBeUndefined()
+      // The plan includes it again: it is the helper model once more.
+      planCatalog.current = {
+        ...v2Catalog,
+        models: v2Catalog.models.map((model) =>
+          model.id === "vendor/locked" ? { ...model, locked: undefined } : model,
+        ),
+      }
+      expect(yield* small()).toBe(`${id}/vendor/locked`)
+      planCatalog.current = v2Catalog
+    }),
+  {
+    trusted: true,
+    config: {
+      small_model: `${ModelPlans.PROVIDER_ID}/vendor/locked`,
+      provider: {
+        local: {
+          name: "Local",
+          npm: "@ai-sdk/openai-compatible",
+          options: { baseURL: "http://127.0.0.1:9/v1" },
+          models: { coder: { name: "Local coder", tool_call: true } },
+        },
+      },
+    },
+  },
 )
 
 it.instance("Codium helpers use Auto's floor, then its default, and none when neither is usable", () =>

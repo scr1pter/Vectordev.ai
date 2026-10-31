@@ -2,7 +2,8 @@ import { afterAll, expect, test } from "bun:test"
 import { mkdtemp } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
-import { Effect, Layer, Stream } from "effect"
+import { Effect, Fiber, Layer, Stream } from "effect"
+import { TestClock } from "effect/testing"
 import { FetchHttpClient } from "effect/unstable/http"
 import { LLM, LLMError } from "@vectordevai/llm"
 import { LLMClient, RequestExecutor } from "@vectordevai/llm/route"
@@ -15,6 +16,7 @@ import { codiumError, modelPlanRoute } from "../src/session/runner/model-plan-ro
 import { SessionRunnerModel } from "../src/session/runner/model"
 import { InstallationVersion } from "../src/installation/version"
 import { codiumCatalogV2, codiumGateway, codiumModel } from "./fixture/codium-gateway"
+import { it } from "./lib/effect"
 
 const token = "vct_synthetic-private-account.token"
 const gateway = codiumGateway(token)
@@ -181,6 +183,99 @@ test("a hung catalog cannot stall model selection, and its late answer serves th
   await Bun.sleep(5)
   expect(await client.catalog("account")).toEqual(active)
 })
+
+// What vectordev.ai lists for the account after an upgrade: one model more than before it.
+const upgraded = { enabled: true, models: [codiumModel, { ...codiumModel, id: "vendor/upgraded", name: "Upgraded" }] }
+
+// Each catalog request waits until the test answers it.
+const held = () => {
+  const answers: PromiseWithResolvers<Response>[] = []
+  const request = () => {
+    const answer = Promise.withResolvers<Response>()
+    answers.push(answer)
+    return answer.promise
+  }
+  return { answers, request }
+}
+
+test("a forced read starts after what changed the plan: an older read never replaces it, and plain reads wait on it", async () => {
+  const clock = { now: 0 }
+  const gatewayReads = held()
+  const client = ModelPlans.createClient({ timeout: 1_000, now: () => clock.now, request: gatewayReads.request })
+  // A read starts its request once the account's saved catalog has been looked for.
+  const started = () => Bun.sleep(1)
+  const first = client.catalog("account")
+  await started()
+  gatewayReads.answers[0].resolve(Response.json(active))
+  expect(await first).toEqual(active)
+  // The kept minute lapses and a plain read starts a refresh, which vectordev.ai has not answered when the purchase
+  // lands; the forced read after it does not join that refresh but starts its own.
+  clock.now = 61_000
+  const older = client.catalog("account")
+  await started()
+  const forced = client.catalog("account", { force: true })
+  await started()
+  expect(gatewayReads.answers).toHaveLength(3)
+  // The refresh from before the purchase answers first: it is not kept, so a plain read still waits on the forced one.
+  gatewayReads.answers[1].resolve(Response.json(active))
+  await started()
+  const waiting = client.catalog("account")
+  await started()
+  expect(gatewayReads.answers).toHaveLength(3)
+  gatewayReads.answers[2].resolve(Response.json(upgraded))
+  expect(await Promise.all([older, forced, waiting])).toEqual([upgraded, upgraded, upgraded])
+  // The forced answer is the kept one now, for a minute, with no other request.
+  expect(await client.catalog("account")).toEqual(upgraded)
+  expect(gatewayReads.answers).toHaveLength(3)
+
+  // Within a fresh minute too, a forced read asks again, and a plain read meanwhile no longer gets the kept catalog.
+  const again = client.catalog("account", { force: true })
+  await started()
+  const meanwhile = client.catalog("account")
+  await started()
+  expect(gatewayReads.answers).toHaveLength(4)
+  gatewayReads.answers[3].resolve(Response.json(off))
+  expect(await Promise.all([again, meanwhile])).toEqual([off, off])
+})
+
+it.effect("writing the account credential reads its catalog now, waiting at most CREDENTIAL_READ for it", () =>
+  Effect.gen(function* () {
+    const gatewayReads = held()
+    const client = ModelPlans.createClient({ timeout: 5, request: gatewayReads.request })
+    const written = (value: string | undefined) =>
+      ModelPlans.credentialWritten(value).pipe(
+        Effect.provideService(ModelPlans.Service, {
+          catalog: (account, options) => Effect.promise(() => client.catalog(account, options)),
+          request: gateway.forward,
+        }),
+      )
+    const settle = Effect.promise(() => Bun.sleep(1))
+    // Signed out, there is no account to read.
+    yield* written(undefined)
+    expect(gatewayReads.answers).toEqual([])
+
+    // vectordev.ai answers in time: the write returns once the account's catalog is in place.
+    const prompt = yield* written("account").pipe(Effect.forkChild)
+    yield* settle
+    expect(gatewayReads.answers).toHaveLength(1)
+    expect(prompt.pollUnsafe()).toBeUndefined()
+    gatewayReads.answers[0].resolve(Response.json(active))
+    yield* Fiber.join(prompt)
+    expect(yield* Effect.promise(() => client.catalog("account"))).toEqual(active)
+    expect(gatewayReads.answers).toHaveLength(1)
+
+    // vectordev.ai is slow: the write stops waiting at the bound, and the answer still lands for the next read.
+    const slow = yield* written("account").pipe(Effect.forkChild)
+    yield* settle
+    expect(gatewayReads.answers).toHaveLength(2)
+    yield* TestClock.adjust(ModelPlans.CREDENTIAL_READ)
+    yield* Fiber.join(slow)
+    gatewayReads.answers[1].resolve(Response.json(upgraded))
+    yield* settle
+    expect(yield* Effect.promise(() => client.catalog("account"))).toEqual(upgraded)
+    expect(gatewayReads.answers).toHaveLength(2)
+  }),
+)
 
 test("the catalog reads the signed-in account's models from the gateway as a current client", async () => {
   const client = ModelPlans.createClient({ request: gateway.forward })
@@ -849,24 +944,20 @@ test("the offers Vector shows carry names and prices only, and nothing is availa
     ],
   })
   const offers = await ModelPlanStatus.fetchOffers(answer(config(true)))
-  // A plan Vector knows shows its current name; anything else keeps the name the site gave it. Codium has no top-ups
-  // any more, so an old site's top-up is not renamed.
+  // A plan Vector knows shows its current name, whatever name the site gave it.
+  // Codium sells monthly plans only: an old site's top-ups are not read, so nothing can offer one.
   expect(offers).toEqual({
     enabled: true,
     plans: [
       { id: "vector-10", name: "Plus", price: 10, available: true },
       { id: "vector-50", name: "Pro", price: 50, available: true },
     ],
-    topups: [
-      { id: "codium-topup-10", name: "Retired top-up 10", price: 10, available: true },
-      { id: "vector-team", name: "Team", price: 30, available: true },
-    ],
   })
-  expect(JSON.stringify(offers)).not.toMatch(/multiple|tasks|5\.2|credits/)
+  expect(JSON.stringify(offers)).not.toMatch(/multiple|tasks|5\.2|credits|topup|Team/)
   // While Codium is off, an item the server marks available still cannot be bought.
   const off = await ModelPlanStatus.fetchOffers(answer(config(false)))
   expect(off?.enabled).toBe(false)
-  expect([...off!.plans, ...off!.topups].every((offer) => !offer.available)).toBe(true)
+  expect(off!.plans.every((offer) => !offer.available)).toBe(true)
   expect(await ModelPlanStatus.fetchOffers(answer({ error: "unavailable" }, 503))).toBeUndefined()
   expect(await ModelPlanStatus.fetchOffers(answer({ enabled: true }))).toBeUndefined()
   expect(await ModelPlanStatus.fetchOffers(() => Promise.reject(new Error("offline")))).toBeUndefined()
@@ -907,19 +998,9 @@ test("status keeps no amount, even from a server that still sends one", async ()
   gateway.state.status = saved
 })
 
-test("purchased credits read as a state, not as a share of every top-up ever bought", () => {
-  // A long-time buyer's share of every top-up ever bought would read "under 1% left" right after a fresh purchase.
+test("purchased credits are decoded for old answers but never shown", () => {
   const buyer = (purchased: { bought: boolean; state?: "available" | "low" | "used" }) =>
     ModelPlanStatus.fromRemote({ enabled: true, access: true, purchased, empty: false, low: false })
-  expect(
-    [
-      buyer({ bought: true, state: "available" }),
-      buyer({ bought: true, state: "low" }),
-      buyer({ bought: true, state: "used" }),
-      buyer({ bought: true }),
-      buyer({ bought: false }),
-    ].map((status) => ModelPlanStatus.formatPurchased(status.purchased)),
-  ).toEqual(["Available", "Running low", "Used up", "Balance unavailable", "None"])
   // Codium sells no top-ups any more, so the text surfaces leave purchased credits out.
   expect(ModelPlanStatus.describe(buyer({ bought: true, state: "available" })).join(" ")).not.toMatch(/purchased/i)
   // A state is kept only for credits that were bought.
@@ -938,6 +1019,94 @@ test("the app recognises a failed Codium turn from the engine's error and from a
     undefined,
   )
   expect(ModelPlanStatus.failureAction({ type: "codium", action: "capacity", message: "x" })).toBeUndefined()
+})
+
+test("the app reads a failed turn's code and splits off the step the engine's message ends with", () => {
+  expect(
+    ModelPlanStatus.failureCode({
+      name: "APIError",
+      data: { message: "x", metadata: { codium: "credits", kind: "credits", code: "MODEL_PLAN_EXHAUSTED" } },
+    }),
+  ).toBe("MODEL_PLAN_EXHAUSTED")
+  expect(ModelPlanStatus.failureCode({ type: "codium", action: "credits", code: "MODEL_PLAN_REQUIRED" })).toBe(
+    "MODEL_PLAN_REQUIRED",
+  )
+  expect(ModelPlanStatus.failureCode({ name: "APIError", data: { metadata: { codium: "credits" } } })).toBeUndefined()
+  expect(ModelPlanStatus.failureCode("MODEL_PLAN_EXHAUSTED")).toBeUndefined()
+
+  const body = (code: string, action?: string) =>
+    JSON.stringify({ error: { code, message: "Server message.", ...(action ? { action } : {}) } })
+  const parts = (status: number, code: string, action?: string) =>
+    ModelPlanStatus.failureParts(ModelPlanStatus.gatewayFailure(status, body(code, action))!.message)
+  // Every sentence the engine ends a final answer with comes back as its kind and payment step, and only the server's
+  // own message is left.
+  expect(parts(402, "MODEL_PLAN_REQUIRED")).toEqual({ text: "Server message.", kind: "credits" })
+  expect(parts(402, "MODEL_PLAN_EXHAUSTED")).toEqual({ text: "Server message.", kind: "credits" })
+  expect(parts(402, "MODEL_PLAN_PAYMENT_REQUIRED", "update-card")).toEqual({
+    text: "Server message.",
+    kind: "credits",
+    payment: "update-card",
+  })
+  expect(parts(402, "MODEL_PLAN_PAYMENT_REQUIRED", "confirm-payment")).toEqual({
+    text: "Server message.",
+    kind: "credits",
+    payment: "confirm-payment",
+  })
+  expect(parts(403, "MODEL_PLAN_UPGRADE_REQUIRED")).toEqual({ text: "Server message.", kind: "upgrade" })
+  expect(parts(409, "MODEL_PLAN_EXISTS")).toEqual({ text: "Server message.", kind: "plan" })
+  // A daily, run or Brain limit, or a sign-in, ends with no purchase step, so nothing is split off.
+  for (const code of ["MODEL_PLAN_DAILY_LIMIT", "MODEL_PLAN_RUN_LIMIT", "MODEL_PLAN_BRAIN_SHARE"])
+    expect(parts(429, code)).toEqual({ text: "Server message." })
+  expect(parts(401, "CODIUM_SIGN_IN_REQUIRED").kind).toBeUndefined()
+  // Turns stored before Codium stopped selling top-ups end "Buy credits at"; the link is a credit step too.
+  expect(ModelPlanStatus.failureParts(`Out of credits. Buy credits at ${ModelPlanStatus.PURCHASE_URL}`)).toEqual({
+    text: "Out of credits.",
+    kind: "credits",
+  })
+  // Only an ending counts: a URL inside the text is the server's.
+  const inside = `See plans at ${ModelPlanStatus.PURCHASE_URL} first.`
+  expect(ModelPlanStatus.failureParts(inside)).toEqual({ text: inside })
+})
+
+test("a Codium entry the plan does not include is badged, and only usable entries are ever picked automatically", () => {
+  const locked = { plan: "vector-50", name: "Pro" }
+  expect(ModelPlanStatus.listingBadge({ locked })).toEqual({
+    label: "Codium · Pro",
+    title: "Included in Pro and above",
+  })
+  expect(
+    ModelPlanStatus.listingBadge({ locked: { plan: "vector-200", name: "Ultra", previewUntil: 1_900_000_000_000 } }),
+  ).toEqual({ label: "Preview · Ultra", title: "Only in Ultra during its preview" })
+  expect(ModelPlanStatus.listingBadge({ preview: { until: 1_900_000_000_000 } })?.label).toBe("Preview")
+  for (const plain of [undefined, {}, { manualOnly: true }, { auto: { floor: "a", default: "b", ceiling: "c" } }])
+    expect(ModelPlanStatus.listingBadge(plain)).toBeUndefined()
+  // No badge names credits, a price or an amount.
+  expect(JSON.stringify(ModelPlanStatus.listingBadge({ locked }))).not.toMatch(/credit|\$|\d/)
+
+  const entry = (codium?: ModelPlanStatus.Listing, id = "vendor/model") => ({ id, codium })
+  expect(ModelPlanStatus.automatic(entry())).toBe(true)
+  expect(ModelPlanStatus.automatic(entry({ lab: "deepseek", role: "default" }))).toBe(true)
+  expect(ModelPlanStatus.automatic(entry({ locked }))).toBe(false)
+  expect(ModelPlanStatus.automatic(entry({ manualOnly: true }))).toBe(false)
+  expect(ModelPlanStatus.automatic(entry({ auto: { floor: "a", default: "b", ceiling: "c" } }))).toBe(false)
+  // Auto by its id alone, as an older listing without metadata names it.
+  expect(ModelPlanStatus.automatic(entry(undefined, ModelPlanStatus.AUTO_ID))).toBe(false)
+  expect(ModelPlanStatus.isAuto(entry(undefined, ModelPlanStatus.AUTO_ID))).toBe(true)
+  expect(ModelPlanStatus.isLocked(entry({ locked }))).toBe(true)
+  expect(ModelPlanStatus.isLocked(entry({ manualOnly: true }))).toBe(false)
+})
+
+test("a session continues on the model its last message selected, else on the one it ran with its variant", () => {
+  const ran = { providerID: "vector-plan", modelID: "vendor/default", variant: "high" }
+  expect(ModelPlanStatus.sessionModel({ model: ran })).toEqual(ran)
+  // Codium Auto picks again for the next message, so neither the model it picked nor that model's variant is kept.
+  expect(
+    ModelPlanStatus.sessionModel({
+      model: ran,
+      selected: { providerID: "vector-plan", modelID: ModelPlanStatus.AUTO_ID },
+    }),
+  ).toEqual({ providerID: "vector-plan", modelID: ModelPlanStatus.AUTO_ID })
+  expect(ModelPlanStatus.sessionModel({})).toBeUndefined()
 })
 
 test("automatic choices try connected providers, then shared free models, and never Codium", () => {
