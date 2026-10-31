@@ -32,6 +32,16 @@ export async function pushState(page: Page, state: Computer.ComputerState) {
   }, state)
 }
 
+/** Stands in for desktop main storing an Always reply it observed (D15, D16); the renderer never writes this list. */
+export async function grantAlways(page: Page, app: Computer.AlwaysAllowed) {
+  await page.waitForFunction(() => !!(window as ComputerTestWindow).__vectorE2E?.computerControl)
+  await page.evaluate((next) => {
+    const control = (window as ComputerTestWindow).__vectorE2E?.computerControl
+    if (!control) throw new Error("The computer fixture was not installed before navigation")
+    control.grantAlways(next)
+  }, app)
+}
+
 export async function calls(page: Page): Promise<readonly FakeComputerCall[]> {
   await page.waitForFunction(() => !!(window as ComputerTestWindow).__vectorE2E?.computerControl)
   return page.evaluate(() => {

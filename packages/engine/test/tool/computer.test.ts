@@ -1915,6 +1915,8 @@ toolTests.instance("declining a pending batch action suppresses its suffix and l
       const before = bridge.commands().filter((command) => command !== "heartbeat")
       const second = yield* execute({ action: "click", ref: "ui_3" }, { messageID })
       expect(second.output).toBe(batchFailure)
+      // The suppressed call is marked failed, so the timeline never shows or counts it as done.
+      expect(second.metadata).toEqual({ truncated: false, action: "click", code: "failed" })
       expect(bridge.commands().filter((command) => command !== "heartbeat")).toEqual(before)
       expect(desktop.requests.filter((request) => request.permission === "computer_sensitive")).toHaveLength(1)
     }),

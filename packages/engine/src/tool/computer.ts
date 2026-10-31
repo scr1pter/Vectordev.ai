@@ -290,6 +290,8 @@ export const ComputerTool = Tool.define(
           Effect.gen(function* () {
             if (state.failedMessageID === ctx.messageID) {
               yield* notExecuted("failed")
+              // The part says it did not run, so the timeline marks it Failed and counts none of its actions.
+              metadata.code = "failed"
               return result(Computer.BATCH_FAILURE)
             }
             const request = <R extends Computer.BridgeRequest>(body: R) =>

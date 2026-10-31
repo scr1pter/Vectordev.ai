@@ -26,6 +26,7 @@
     "./regression/free-models.spec.ts",
     "./regression/host-locally.spec.ts",
     "./regression/hands-asks.spec.ts",
+    "./regression/hands-journey.spec.ts",
     "./regression/hands-mention.spec.ts",
     "./regression/hands-onboarding.spec.ts",
     "./regression/hands-overlay-pages.spec.ts",

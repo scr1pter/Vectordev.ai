@@ -49,6 +49,12 @@ export interface FakeComputer extends Computer.ComputerPlatform {
   readonly calls: readonly FakeComputerCall[]
   /** Answers the apps() calls held by `holdApps`; later calls answer at once. */
   releaseApps(): void
+  /**
+   * Stores an Always-allowed app, replacing any entry with its key, as desktop main does when it observes an Always
+   * reply (D15, D16). A fixture emission like `emit`: it is not a renderer command, so it is not logged, and it applies
+   * no policy, because the fake is not the settings resolver.
+   */
+  grantAlways(app: Computer.AlwaysAllowed): void
 }
 
 export function createFakeComputer(script: FakeComputerScript = {}): FakeComputer {
@@ -194,6 +200,9 @@ export function createFakeComputer(script: FakeComputerScript = {}): FakeCompute
       return permissionView("reset")
     },
     releaseApps: () => releaseApps(),
+    grantAlways: (app) => {
+      settings.always = [...settings.always.filter((item) => item.key !== app.key), structuredClone(app)]
+    },
     apps: async (query) => {
       await held
       return structuredClone(

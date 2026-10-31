@@ -299,6 +299,27 @@ describe("fake computer platform", () => {
     expect((await locked.prefs()).prefs.blocked).toEqual([])
   })
 
+  test("grantAlways stores a detached grant once per key, logs nothing, and Remove takes it off", async () => {
+    const fake = createFakeComputer({ always: [{ key: "app:macos:com.apple.mail", name: "Mail", addedAt: 1 }] })
+    const grant = { key, name: "Notes", publisher: "Apple Inc.", addedAt: 2 }
+    fake.grantAlways(grant)
+    grant.name = "Changed after the grant"
+    expect((await fake.prefs()).always).toEqual([
+      { key: "app:macos:com.apple.mail", name: "Mail", addedAt: 1 },
+      { key, name: "Notes", publisher: "Apple Inc.", addedAt: 2 },
+    ])
+    // A second Always for the same app replaces its entry rather than listing it twice.
+    fake.grantAlways({ key, name: "Notes", publisher: "Apple Inc.", addedAt: 3 })
+    expect((await fake.prefs()).always.filter((app) => app.key === key)).toEqual([
+      { key, name: "Notes", publisher: "Apple Inc.", addedAt: 3 },
+    ])
+    // It stands in for desktop main observing the reply, not for a renderer command.
+    expect(fake.calls).toEqual([])
+    await fake.removeAlways(key)
+    expect((await fake.prefs()).always.map((app) => app.key)).toEqual(["app:macos:com.apple.mail"])
+    expect(fake.calls).toEqual([{ method: "removeAlways", key }])
+  })
+
   test("held app answers wait for releaseApps, and later lookups answer at once", async () => {
     const fake = createFakeComputer({ holdApps: true, apps: [{ key, name: "Notes", running: true }] })
     const answers: string[] = []
