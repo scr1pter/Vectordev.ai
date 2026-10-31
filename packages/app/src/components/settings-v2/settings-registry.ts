@@ -14,6 +14,7 @@ export type SettingsTab =
   | "subagents"
   | "memory"
   | "local"
+  | "shortcuts"
 
 export type SettingsItem = {
   value: SettingsTab
@@ -52,7 +53,19 @@ export const settingsGroups: readonly SettingsGroup[] = [
         value: "general",
         label: "General",
         icon: "sliders",
-        keywords: ["data", "judge", "routing", "diagnostics", "privacy"],
+        // The Terminal shell picker lives here too.
+        keywords: [
+          "data",
+          "judge",
+          "routing",
+          "diagnostics",
+          "privacy",
+          "shell",
+          "terminal",
+          "bash",
+          "zsh",
+          "powershell",
+        ],
       },
       {
         value: "memory",
@@ -148,6 +161,12 @@ export const settingsGroups: readonly SettingsGroup[] = [
         label: "Repository trust",
         icon: "circle-check",
         keywords: ["trusted", "vector.json", ".vector", "repository settings", "project settings", "security"],
+      },
+      {
+        value: "shortcuts",
+        label: "Keyboard shortcuts",
+        icon: "keyboard",
+        keywords: ["keybindings", "keybinds", "key bindings", "hotkeys", "command palette"],
       },
       { value: "notifications", label: "Notifications", icon: "status", keywords: ["alerts", "sound", "completion"] },
       {

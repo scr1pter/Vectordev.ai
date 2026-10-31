@@ -420,6 +420,15 @@ function taskAgent(
   }
 }
 
+// What a terminal call does, as its card's subtitle: the text it types (⏎ for the Enter it presses) or the keys it
+// presses, then the terminal's title, its command, its id or the action.
+function terminalSubtitle(input: any): string | undefined {
+  if (input.action === "type" && typeof input.text === "string" && (input.text || input.enter))
+    return (input.text.replace(/\r?\n/g, " ⏎ ") + (input.enter ? " ⏎" : "")).trim()
+  if (input.action === "keys" && Array.isArray(input.keys) && input.keys.length > 0) return input.keys.join(" ")
+  return input.title ?? input.command ?? input.id ?? input.action
+}
+
 export function getToolInfo(tool: string, input: any = {}): ToolInfo {
   const i18n = useI18n()
   switch (tool) {
@@ -489,6 +498,8 @@ export function getToolInfo(tool: string, input: any = {}): ToolInfo {
         title: i18n.t("ui.tool.shell"),
         subtitle: input.command,
       }
+    case "terminal":
+      return { icon: "console", title: "Terminal", subtitle: terminalSubtitle(input) }
     case "edit":
       return {
         icon: "code-lines",

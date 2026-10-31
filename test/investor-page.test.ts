@@ -77,11 +77,12 @@ test("the investor page quotes the efficiency archive's first- and second-sessio
   expect(markup).not.toMatch(/MiB|peak memory|wall[- ]time|faster|Codex [^,]*cheaper/i)
 })
 
+// The footnote dates the runtime it measured rather than naming a commit or where the archive sits in Vector's
+// repository: readers of the public page cannot open either.
 test("the benchmark footnote keeps its caveats", () => {
   const method = markup.match(/<strong>\* Benchmark method\.<\/strong>([^<]*)<\/p>/)?.[1] ?? ""
   ;[
-    "docs/benchmarks/vector-efficiency-2026-10",
-    "an 11 October 2026 revision (commit 6f7f3c2ea)",
+    "Vector's runtime as of 11 October 2026",
     "Claude Code 2.1.215",
     "identical scripted tool steps against a local fake model server",
     "the same number of model requests",
@@ -91,6 +92,9 @@ test("the benchmark footnote keeps its caveats", () => {
     "not the quality of answers",
     "does not show that Vector is cheaper than other agents in general",
   ].forEach((caveat) => expect(method).toContain(caveat))
+  expect(markup.slice(markup.indexOf('<div class="ip-page">'))).not.toMatch(
+    /docs\/benchmarks|\b(?:commit|revision) [0-9a-f]{7,40}\b/,
+  )
 })
 
 test("the investor page counts the built-in subagents that ship and describes Vectorscope's verify pass", async () => {

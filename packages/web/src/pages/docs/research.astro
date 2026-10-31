@@ -1,7 +1,7 @@
 ---
 import DocsPage from "../../layouts/DocsPage.astro"
 import { researchCapRows } from "../../data/docs-content"
-import { release111 } from "../../data/vector-releases"
+import { release111, release112 } from "../../data/vector-releases"
 
 export const prerender = true
 ---
@@ -146,6 +146,11 @@ export const prerender = true
             <code>.vector/research/&lt;date&gt;-&lt;question&gt;.md</code>, <strong>Keep this format</strong> and
             <strong>Forget this research</strong>.
           </p>
+          <p>
+            {release112.since} asking Vector to save or keep the research does what <strong>Keep in brain</strong> does,
+            after you say yes. Its report was written from web pages, so Vector asks every time, whatever your permission
+            settings or auto-accept allow.
+          </p>
 
           <h2 id="sources">The Sources tab</h2>
           <p>
@@ -182,7 +187,8 @@ export const prerender = true
             <strong>Settings → Memory → Research</strong> lists this repository's runs: open the report, keep, export or
             forget a run. <strong>Erase all research in this repository</strong> removes every run's pages, notes and
             reports, and so does erasing this repository's memory in <strong>Tidy and erase</strong>. In the terminal,
-            <code>vector memory erase</code> does not remove research runs yet.
+            <code>vector memory erase</code> removes this repository's runs too, <code>--everywhere</code> removes every
+            run, and <code>--personal</code> keeps them.
           </p>
 
           <h2 id="local">With Vector Local</h2>

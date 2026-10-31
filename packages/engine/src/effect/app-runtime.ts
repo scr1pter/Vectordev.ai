@@ -68,6 +68,7 @@ import { TaskLimits } from "@/task/limits"
 import { TaskRecovery } from "@/task/recovery"
 import { TaskAttention } from "@/task/attention"
 import { TaskSignals } from "@/task/signals"
+import { ResearchStore } from "@vectordevai/core/research/store"
 
 export const AppLayer = AppNodeBuilderV1.build(
   LayerNode.group([
@@ -114,6 +115,8 @@ export const AppLayer = AppNodeBuilderV1.build(
     BrainWorkflow.node,
     LearnedSkill.node,
     BrainEmbed.node,
+    // `vector memory erase` forgets research with the memory it erases.
+    ResearchStore.node,
     Instruction.node,
     LLM.node,
     LSP.node,

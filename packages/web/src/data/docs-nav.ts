@@ -10,6 +10,12 @@ export const docsNav: DocGroup[] = [
     label: "Get started",
     links: [
       {
+        id: "first-launch",
+        title: "First launch, step by step",
+        blurb:
+          "For anyone new to Vector: download it, get past the first-launch warnings, sign in, pick a model and run a first task.",
+      },
+      {
         id: "install",
         title: "Install Vector",
         blurb: "Create a free account, download the installer for your computer and run it.",
@@ -115,7 +121,8 @@ export const docsNav: DocGroup[] = [
       {
         id: "models",
         title: "Models, free models and your own keys",
-        blurb: "Sign in to Vector for free models, or connect a provider account or API key.",
+        blurb:
+          "Sign in to Vector for free models, connect a provider account or API key, or add an OpenAI-compatible server of your own.",
       },
       {
         id: "local",
@@ -157,6 +164,12 @@ export const docsNav: DocGroup[] = [
   {
     label: "Reference",
     links: [
+      {
+        id: "configuration",
+        title: "Configuration files",
+        blurb:
+          "Where vector.json lives for the desktop app, the terminal and a repository, how it takes values from the environment, and where each key is described.",
+      },
       {
         id: "permissions",
         title: "Permissions",

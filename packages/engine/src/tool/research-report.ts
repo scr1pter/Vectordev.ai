@@ -44,7 +44,7 @@ type Metadata = {
   refused?: boolean
 }
 
-export const HELD = "This report and its sources stay private and out of later sessions until you keep them."
+export const HELD = "This report and its sources stay private and out of later sessions until you keep them (Keep in brain, or ask Vector to keep it)."
 
 export const ResearchReportTool = Tool.define<
   typeof Parameters,

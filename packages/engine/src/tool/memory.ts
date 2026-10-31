@@ -7,8 +7,10 @@ import { BrainKnowledge } from "@vectordevai/core/brain/knowledge"
 import { BrainSchema } from "@vectordevai/core/brain/schema"
 import { BrainSkill } from "@vectordevai/core/brain/skill"
 import { FreeModelGuests } from "@vectordevai/core/free-model-guests"
+import { ResearchStore } from "@vectordevai/core/research/store"
 import { FSUtil } from "@vectordevai/core/fs-util"
 import { SessionV1 } from "@vectordevai/core/v1/session"
+import { PermissionPolicy } from "@vectordevai/schema/permission-policy"
 import { SessionID } from "@vectordevai/schema/session-id"
 import { Git } from "@/git"
 import { Session } from "@/session/session"
@@ -24,7 +26,7 @@ export { DOCUMENTS }
 // Every Work request carries this definition, so it stays small: a search reads `text`, and an entry about a file takes
 // the cited file as its path scope instead of a parameter of its own.
 export const Parameters = Schema.Struct({
-  action: Schema.Literals(["search", "get", "add", "update", "forget"]),
+  action: Schema.Literals(["search", "get", "add", "update", "forget", "keep"]),
   id: Schema.optional(Schema.String),
   text: Schema.optional(Schema.String),
   kind: Schema.optional(BrainSchema.LearnedKind),
@@ -58,7 +60,7 @@ type Metadata = {
 export const MemoryTool = Tool.define<
   typeof Parameters,
   Metadata,
-  Brain.Service | BrainKnowledge.Service | Instruction.Service | FreeModelGuests.Service | Git.Service | Session.Service
+  Brain.Service | BrainKnowledge.Service | Instruction.Service | FreeModelGuests.Service | Git.Service | Session.Service | ResearchStore.Service
 >(
   "memory",
   Effect.gen(function* () {
@@ -68,6 +70,7 @@ export const MemoryTool = Tool.define<
     const guests = yield* FreeModelGuests.Service
     const git = yield* Git.Service
     const sessions = yield* Session.Service
+    const research = yield* ResearchStore.Service
 
     return {
       description: DESCRIPTION,
@@ -80,6 +83,33 @@ export const MemoryTool = Tool.define<
           // prompts, nor for a role whose output leaves the machine or reaches the web (section 6.4a). The session
           // runtime says which the model is; without its word, personal memory stays out.
           const personal = !guest && ctx.extra?.mayTrain === false && ctx.extra?.outward !== true
+
+          // keep: the user asked to save research. The report came from web pages, so the user says yes every time
+          // (PermissionPolicy.RESEARCH_KEEP); without an id it is this session's latest run.
+          if (params.action === "keep") {
+            const runs = (yield* research.list(place)).map((summary) => summary.run)
+            const run = params.id
+              ? runs.find((item) => item.id === params.id)
+              : runs.find((item) => item.session_id === ctx.sessionID)
+            if (!run) return refused("keep", params.id ? `No research run ${params.id} here.` : "This session has no research run to keep.")
+            if (run.kept)
+              return { title: "Research already kept", output: `"${run.question}" is already kept in this repository's brain.`, metadata: { action: "keep", id: run.id } }
+            if (guest) return refused("keep", ResearchStore.GUEST)
+            yield* ctx.ask({
+              permission: PermissionPolicy.RESEARCH_KEEP,
+              patterns: [run.id],
+              always: [],
+              metadata: { runID: run.id, question: run.question },
+            })
+            const kept = yield* research.keep(place, run.id)
+            if (!kept) return refused("keep", `No research run ${run.id} here.`)
+            if (kept.type === "refused") return refused("keep", kept.message)
+            return {
+              title: "Kept research",
+              output: `Kept "${run.question}" in this repository's brain. Later requests can recall its report.`,
+              metadata: { action: "keep", id: run.id },
+            }
+          }
 
           if (params.action === "search") {
             const found = yield* brain.search(place, {

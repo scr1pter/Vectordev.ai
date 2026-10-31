@@ -1,20 +1,17 @@
 import { ModelPlanStatus } from "@vectordevai/core/model-plan-status"
-import { BrowserWindow, safeStorage, shell } from "electron"
+import { BrowserWindow, shell } from "electron"
 import { focusBillingWindow, isBillingWindow, openBillingWindow } from "./billing-window"
 import { getStore, removeStoreFileIfEmpty } from "./store"
+import { vaultSecrets } from "./vault-secrets"
 import { createVectorAccount, syncVectorAccount } from "./vector-account"
 import { createManagedAccountLifecycle } from "./vector-account-lifecycle"
 
 const STORE = "vector-account"
+const TOKEN_PURPOSE = "vector-account-token"
 const engine: {
   ready?: () => Promise<{ url: string; username: string | null; password: string | null }>
 } = {}
 const managed = createManagedAccountLifecycle()
-
-async function available() {
-  if (process.platform === "linux" && safeStorage.getSelectedStorageBackend() === "basic_text") return false
-  return (await safeStorage.isAsyncEncryptionAvailable().catch(() => false)) || safeStorage.isEncryptionAvailable()
-}
 
 export const vectorAccount = createVectorAccount({
   read: () => getStore(STORE).get("account"),
@@ -23,20 +20,16 @@ export const vectorAccount = createVectorAccount({
     getStore(STORE).delete("account")
     await removeStoreFileIfEmpty(STORE)
   },
-  available,
-  encrypt: async (token) => {
-    if (!(await available())) throw new Error("Secure storage is unavailable.")
-    const encrypted = (await safeStorage.isAsyncEncryptionAvailable().catch(() => false))
-      ? await safeStorage.encryptStringAsync(token)
-      : safeStorage.encryptString(token)
-    return encrypted.toString("base64")
-  },
+  available: async () => vaultSecrets.available(),
+  encrypt: async (token) => vaultSecrets.seal(token, TOKEN_PURPOSE),
   decrypt: async (ciphertext) => {
-    if (!(await available())) throw new Error("Secure storage is unavailable.")
-    const encrypted = Buffer.from(ciphertext, "base64")
-    if (await safeStorage.isAsyncEncryptionAvailable().catch(() => false))
-      return (await safeStorage.decryptStringAsync(encrypted)).result
-    return safeStorage.decryptString(encrypted)
+    const opened = await vaultSecrets.open(ciphertext, TOKEN_PURPOSE)
+    const account = getStore(STORE).get("account")
+    // An earlier release's token moves into the vault unless the person signed out or in again meanwhile. Restoring
+    // the account at launch reads it first, before anything else holds on to the old ciphertext.
+    if (opened.resealed && account instanceof Object && "ciphertext" in account && account.ciphertext === ciphertext)
+      getStore(STORE).set("account", { ...account, ciphertext: opened.resealed })
+    return opened.text
   },
   openBrowser: (url) => shell.openExternal(url),
   fetch: (url, init) => fetch(url, init),

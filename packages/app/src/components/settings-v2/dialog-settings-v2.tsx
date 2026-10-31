@@ -1,4 +1,4 @@
-import { Component, For, Show, createMemo, createSignal, onCleanup, onMount } from "solid-js"
+import { Component, For, Show, Suspense, createMemo, createSignal, onCleanup, onMount } from "solid-js"
 import { createStore, reconcile } from "solid-js/store"
 import { Dialog } from "@vectordevai/ui/v2/dialog-v2"
 import { TabsV2 } from "@vectordevai/ui/v2/tabs-v2"
@@ -19,6 +19,7 @@ import { SettingsSubagentsV2 } from "./subagents"
 import { SettingsSpendLimitsV2 } from "./spend-limits"
 import { SettingsMemoryV2 } from "./memory"
 import { SettingsLocalV2 } from "./local"
+import { SettingsKeybinds } from "../settings-keybinds"
 import { spendLimitsApi } from "@/features/economics/spend-limits-api"
 import {
   filterSettingsGroups,
@@ -95,6 +96,13 @@ export const SettingsWorkspace: Component<SettingsWorkspaceProps> = (props) => {
     if (item === "providers") return <SettingsProvidersV2 />
     if (item === "models") return <SettingsModelsV2 />
     if (item === "servers") return <SettingsServersV2 />
+    // The editor loads its v2 controls lazily; its own boundary keeps that from suspending whatever opened Settings.
+    if (item === "shortcuts")
+      return (
+        <Suspense>
+          <SettingsKeybinds v2 />
+        </Suspense>
+      )
     return <SettingsGeneralV2 section={item} sessionID={props.sessionID} />
   }
 

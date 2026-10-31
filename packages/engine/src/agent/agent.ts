@@ -138,6 +138,8 @@ const RESEARCH_DENIED = [
   "websearch",
   "skill",
   "escalate",
+  "terminal",
+  "terminal_input",
 ]
 
 const GeneratedAgent = Schema.Struct({
@@ -249,6 +251,11 @@ const layer = Layer.effect(
           // A learned skill Vector put in use on its own, after two matching runs, asks before it first loads.
           learned_skill: "ask",
           unsandboxed_shell: "ask",
+          // Terminals the agent did not open (the user's, or another session's) ask before the agent reads, waits
+          // on, types into, resizes or closes them, and a submitted line also goes through the shell's own rules.
+          // Its own terminals ask nothing to read.
+          terminal: { "*": "allow", "other:*": "ask" },
+          terminal_input: { "*": "allow", "other:*": "ask" },
           browser_external: "ask",
           browser_interact: "ask",
           browser_sensitive: "ask",
@@ -461,6 +468,8 @@ const layer = Layer.effect(
                 },
               }),
               user,
+              // After the user's rules: plan mode never types into a terminal, whatever they allow.
+              Permission.fromConfig({ terminal_input: "deny" }),
             ),
             mode: "primary",
             native: true,

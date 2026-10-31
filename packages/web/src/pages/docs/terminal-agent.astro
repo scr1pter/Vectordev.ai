@@ -112,6 +112,10 @@ vector attach http://localhost:4096 --dir ~/code/myapp</code><button class="doc-
             computer, or any website, including vectordev.ai, cannot drive it.
           </p>
           <p>
+            To work on such a server from the desktop app, add it in Settings → Environment &amp; servers; see
+            <a href="/docs/desktop-app#remote-servers">Connect to a Vector server on another machine</a>.
+          </p>
+          <p>
             <code>vector acp</code> starts an Agent Client Protocol server for compatible editors. For programmatic HTTP
             use, see the <a href="/docs/sdk">SDK guide</a>; first public SDK publication remains pending.
           </p>
@@ -128,13 +132,12 @@ vector attach http://localhost:4096 --dir ~/code/myapp</code><button class="doc-
             through the managed process's stdin and stops stale processes when the account changes or signs out. It does
             not put the token in command arguments, an installer receipt or a new credential file. Provider credentials
             remain separate; connect your chosen provider inside that environment when needed. Startup binds to Linux
-            loopback, checks health and requires an unauthenticated request to be rejected before connecting. Actual
-            Windows/WSL and published-installer validation remain release requirements.
+            loopback, checks health and requires an unauthenticated request to be rejected before connecting.
           </p>
           <h3 id="public-transcripts-and-teams">Public transcripts and teams</h3>
           <p>
-            Vector's source includes public transcript sharing on Vector's own service; it stays off until Vector
-            completes its setup. Preview the content, explicitly choose
+            Vector can share public transcripts on Vector's own service; sharing stays off until Vector completes its
+            setup. Preview the content, explicitly choose
             publication and future updates, and set an expiry before sharing. Public links can expose visible prompts,
             code and tool output; importing creates passive local history. Removing a new Vector share does not remove a
             historical copy on another service. <code>vector invite</code> remains the separate live-workspace feature.
