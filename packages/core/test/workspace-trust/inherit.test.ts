@@ -168,6 +168,44 @@ describe("workspace trust inheritance", () => {
     expect(await WorkspaceTrust.inherit(state, parent, child)).toBe(false)
   })
 
+  // A task checkout is forgotten after it is removed, under the data folder's spelling, which may pass through a link
+  // (macOS /var, a Windows 8.3 short temp path). Its removal may take its parent folder with it.
+  test("forget revokes a removed workspace through the link its path names, however much of it is gone", async () => {
+    await using root = await tmpdir()
+    const source = path.join(root.path, "source")
+    const state = path.join(root.path, "state")
+    const data = path.join(root.path, "data")
+    const link = path.join(root.path, "data-link")
+    const leaf = path.join(link, "copy")
+    const nested = path.join(link, "project", "copy")
+    await settings(source)
+    await fs.mkdir(data)
+    await fs.symlink(data, link, process.platform === "win32" ? "junction" : "dir")
+    try {
+      await fs.cp(source, leaf, { recursive: true })
+      await fs.cp(source, nested, { recursive: true })
+      const parent = await WorkspaceTrust.snapshot(source, [])
+      const first = await WorkspaceTrust.snapshot(leaf, [])
+      const second = await WorkspaceTrust.snapshot(nested, [])
+      await WorkspaceTrust.approve(state, parent)
+      expect(await WorkspaceTrust.inherit(state, parent, first)).toBe(true)
+      expect(await WorkspaceTrust.inherit(state, parent, second)).toBe(true)
+
+      await fs.rm(path.join(data, "copy"), { recursive: true })
+      await WorkspaceTrust.forget(state, leaf)
+      expect((await WorkspaceTrust.status(state, first)).trusted).toBe(false)
+      expect((await WorkspaceTrust.status(state, second)).trusted).toBe(true)
+
+      await fs.rm(path.join(data, "project"), { recursive: true })
+      await WorkspaceTrust.forget(state, nested)
+      expect((await WorkspaceTrust.status(state, second)).trusted).toBe(false)
+      expect((await WorkspaceTrust.status(state, parent)).trusted).toBe(true)
+    } finally {
+      // Bun's rm of a link to a folder fails on Windows, so the link goes before the folder is disposed.
+      await fs.unlink(link)
+    }
+  })
+
   test("forget never follows an unvalidated stored fingerprint to delete cache files", async () => {
     await using root = await tmpdir()
     const state = path.join(root.path, "state")

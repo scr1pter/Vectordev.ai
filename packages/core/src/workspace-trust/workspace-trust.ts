@@ -418,9 +418,19 @@ export function hostExecutable(current: TrustedSnapshot, command: string) {
 }
 
 async function canonicalize(workspace: string) {
-  const resolved = await fs.realpath(workspace).catch(() => path.resolve(workspace))
-  const normalized = path.normalize(resolved)
+  const normalized = path.normalize(await realpath(path.resolve(workspace)))
   return process.platform === "win32" ? normalized.toLowerCase() : normalized
+}
+
+// A workspace that is gone, such as a removed task checkout, keys as it did while it existed: its deepest existing
+// ancestor resolves through the same realpath, so a data folder reached through a link or a Windows 8.3 short temp
+// path still meets the key stored under the real path.
+async function realpath(target: string): Promise<string> {
+  const resolved = await fs.realpath(target).catch(() => undefined)
+  if (resolved) return resolved
+  const parent = path.dirname(target)
+  if (parent === target) return target
+  return path.join(await realpath(parent), path.basename(target))
 }
 
 async function collect(

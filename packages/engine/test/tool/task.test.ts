@@ -6421,12 +6421,26 @@ describe("task isolation saves", () => {
         const manager = yield* TaskManager.Service
         const isolation = yield* TaskIsolation.Service
         const definition = yield* (yield* TaskTool).init()
+        // A parent's task note comes through the ops of the launch it reports on, and the parent works at home. Every
+        // ops here answers the parent's turns apart, so only the isolated child writes, in its own checkout.
+        const notes: SessionPrompt.PromptInput[] = []
         yield* definition.execute(
           brief,
           taskContext({
             sessionID: seeded.chat.id,
             messageID: seeded.assistant.id,
-            promptOps: stubOps({ onPrompt: edit }),
+            promptOps: {
+              ...stubOps(),
+              prompt: (input) =>
+                Effect.sync(() => {
+                  if (input.sessionID === seeded.chat.id) {
+                    notes.push(input)
+                    return reply(input, "noted")
+                  }
+                  edit(input)
+                  return reply(input, "done")
+                }),
+            },
           }),
         )
         const child = (yield* sessions.children(seeded.chat.id))[0].id
@@ -6436,6 +6450,13 @@ describe("task isolation saves", () => {
           isolation.find(child).pipe(Effect.map((record) => (record?.state === "changed" ? true : undefined))),
           "the first run's save never finished",
           ISOLATED,
+        )
+        // The first run's note follows its save after the quiet window. On hosted Windows the resume below starts later
+        // than that, so the note comes first there; waiting for it gives every host that order.
+        yield* pollWithTimeout(
+          Effect.sync(() => (notes.length > 0 ? true : undefined)),
+          "the parent never heard back",
+          "5 seconds",
         )
         const directory = (yield* isolation.get(child)).directory
         // The stubbed run wrote no transcript; a real one starts with its brief.
@@ -6464,6 +6485,7 @@ describe("task isolation saves", () => {
             ...stubOps(),
             prompt: (input) =>
               Effect.sync(() => {
+                if (input.sessionID === seeded.chat.id) return reply(input, "noted")
                 const work = TaskPlace.get(input.sessionID)?.work.directory
                 placements.push(work)
                 if (work) require("node:fs").writeFileSync(path.join(work, "summary.txt"), "summary\n")
@@ -6489,6 +6511,7 @@ describe("task isolation saves", () => {
             ...stubOps(),
             prompt: (input) =>
               Effect.gen(function* () {
+                if (input.sessionID === seeded.chat.id) return reply(input, "noted")
                 const work = TaskPlace.get(input.sessionID)?.work.directory
                 if (work) require("node:fs").writeFileSync(path.join(work, "more.txt"), "more\n")
                 yield* Deferred.succeed(running, undefined)
