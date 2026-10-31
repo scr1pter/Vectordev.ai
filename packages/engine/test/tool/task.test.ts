@@ -6018,6 +6018,10 @@ describe("task isolation", () => {
         expect(placements[0]).not.toBe(home.directory)
         const brief = prompts[0].parts.map((part) => ("text" in part ? part.text : "")).join("\n")
         expect(brief).toContain("You work in an isolated copy of the repository at")
+        // Its terminals are in its checkout's location: the user's panel does not show them and the save closes them,
+        // whatever the terminal tool's own text says about the panel and leaving a server running.
+        expect(brief).toContain("the ones you open are not shown in the user's terminal panel")
+        expect(brief).toContain("do not leave a program running for anyone to use, and do not report one as running")
         // A normal completion waits for the save, so the record is settled when the call returns.
         const record = yield* isolation.get(child.id)
         expect(record.state).toBe("changed")

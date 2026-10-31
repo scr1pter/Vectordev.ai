@@ -253,8 +253,14 @@ export function report(record: Record) {
   return `Vector: this task worked in its own ${place}. ${counts.files} files changed (+${counts.additions} −${counts.deletions})${record.branch ? ` on branch ${record.branch}` : ""}; they are not in your files yet. Review them with task_manage inspect (diff: true), then task_manage merge, or discard.`
 }
 
+// Main's terminal tool text tells every agent that its terminals appear in the user's terminal panel and may stay open
+// for the user. A checkout's terminals are in the checkout's own location, which the app's panel (it follows the open
+// project's folder) does not show, and `quiesce` closes them when the work is saved, so an isolated helper is told so.
+const TERMINALS =
+  "Unlike other conversations' terminals, the ones you open are not shown in the user's terminal panel, so revealing one shows nothing, and they are closed, their programs ended, when your work is saved at the end of your run: do not leave a program running for anyone to use, and do not report one as running or visible."
+
 export function brief(record: Record) {
-  return `You work in an isolated copy of the repository at ${record.directory} (${record.mode === "worktree" ? `git worktree on branch ${record.branch}` : "independent file copy"}), made from the parent's files when you started, including their uncommitted changes${record.stacked.length ? `, plus the changes of ${record.stacked.join(", ")}` : ""}. Paths under ${record.parentDirectory} in this conversation are under ${record.directory} for you. Edit and run checks here; nothing reaches the parent's files until the parent merges your work. ${record.mode === "worktree" ? "You may commit on your branch; do not switch branches, stash or push. " : ""}Ignored files such as node_modules are not here${record.links.length ? `; linked: ${record.links.join(", ")}` : ""}${record.skipped.length ? `; left out: ${record.skipped.join(", ")}` : ""}. List the files you changed in your report.`
+  return `You work in an isolated copy of the repository at ${record.directory} (${record.mode === "worktree" ? `git worktree on branch ${record.branch}` : "independent file copy"}), made from the parent's files when you started, including their uncommitted changes${record.stacked.length ? `, plus the changes of ${record.stacked.join(", ")}` : ""}. Paths under ${record.parentDirectory} in this conversation are under ${record.directory} for you. Edit and run checks here; nothing reaches the parent's files until the parent merges your work. ${record.mode === "worktree" ? "You may commit on your branch; do not switch branches, stash or push. " : ""}Ignored files such as node_modules are not here${record.links.length ? `; linked: ${record.links.join(", ")}` : ""}${record.skipped.length ? `; left out: ${record.skipped.join(", ")}` : ""}. ${TERMINALS} List the files you changed in your report.`
 }
 const paths = (projectID: string, taskID: string) => {
   if (!safeID(projectID) || !safeID(taskID)) throw err("registry", "Invalid isolation registry identifier.")
@@ -555,6 +561,11 @@ const closeTerminals = Effect.fn("TaskIsolation.closeTerminals")(function* (
 // its process group, after a second; on Windows the close already ends the console's processes. Waiting probes with
 // signal 0, which sends nothing.
 const ended = Effect.fn("TaskIsolation.ended")(function* (pid: number) {
+  // The pid comes from the terminal library unchecked (bun-pty reports -1 until it has one), and `process.kill` reads
+  // 0 or less as a process group or every process: 0 would probe and then kill the engine's own group, -1 every
+  // process the user may signal. Such a pid is neither probed nor killed. `alive` and `kill` are reached only here.
+  if (!Number.isInteger(pid) || pid <= 0)
+    return yield* Effect.logWarning("a closed terminal reported no usable pid; its program was not waited for", { pid })
   if (yield* exited(pid, 50)) return
   if (process.platform !== "win32") kill(pid)
   if (yield* exited(pid, 100)) return
@@ -1316,7 +1327,7 @@ export const make = Effect.gen(function* () {
           return {
             record: ready,
             work,
-            brief: `You work in an isolated copy of the repository at ${linked.directory}${linked.branch ? ` (git worktree on branch ${linked.branch})` : ""}, made from the parent's files when you started, including their uncommitted changes${linked.stacked.length ? `, plus the changes of ${linked.stacked.join(", ")}` : ""}. Paths under ${linked.parentDirectory} in this conversation are under ${linked.directory} for you. Edit and run checks here; nothing reaches the parent's files until the parent merges your work. You may commit on your branch; do not switch branches, stash or push. Ignored files such as node_modules are not here${links.length ? `; linked: ${links.join(", ")}` : ""}${linked.skipped.length ? `; left out: ${linked.skipped.join(", ")}` : ""}. List the files you changed in your report.`,
+            brief: `You work in an isolated copy of the repository at ${linked.directory}${linked.branch ? ` (git worktree on branch ${linked.branch})` : ""}, made from the parent's files when you started, including their uncommitted changes${linked.stacked.length ? `, plus the changes of ${linked.stacked.join(", ")}` : ""}. Paths under ${linked.parentDirectory} in this conversation are under ${linked.directory} for you. Edit and run checks here; nothing reaches the parent's files until the parent merges your work. You may commit on your branch; do not switch branches, stash or push. Ignored files such as node_modules are not here${links.length ? `; linked: ${links.join(", ")}` : ""}${linked.skipped.length ? `; left out: ${linked.skipped.join(", ")}` : ""}. ${TERMINALS} List the files you changed in your report.`,
           }
         }).pipe(
           Effect.scoped,

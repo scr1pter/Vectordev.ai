@@ -161,10 +161,21 @@ const alive = (pid: number) => {
 }
 
 // The program's pid, as the open's result shows it.
+const shown = (opened: Output) => Number(/\(pid (\d+)\)/.exec(opened.output)?.[1]) || undefined
 const pid = (opened: Output) => {
-  const found = /\(pid (\d+)\)/.exec(opened.output)?.[1]
+  const found = shown(opened)
   if (!found) throw new Error(`no pid in ${opened.output}`)
-  return Number(found)
+  return found
+}
+
+// Kills a counter and its process group if it still runs. A result with no pid has nothing to kill, and a program that
+// ends between the probe and the kill needs none.
+const stop = (opened: Output) => {
+  const found = shown(opened)
+  if (!found || !alive(found)) return
+  try {
+    process.kill(-found, "SIGKILL")
+  } catch {}
 }
 
 const read = (file: string) => Effect.promise(() => fs.readFile(file, "utf8"))
@@ -225,18 +236,19 @@ if (process.platform !== "win32")
           const started = yield* isolation.start(child.id)
           expect(started.work.directory).toBe(workPath)
 
+          // A failing run must not leave a counter running after the test: the deaf one ignores the hangup the terminal
+          // service's own teardown sends. Each open is recorded as it returns, and this finalizer, added before the
+          // first, kills whichever still runs.
+          const opened: Output[] = []
+          yield* Effect.addFinalizer(() => Effect.sync(() => opened.forEach(stop)))
+          const track = (result: Output) => Effect.sync(() => void opened.push(result))
+
           // The helper's two counters in its checkout, and the parent's own at home.
           const helper = yield* terminal(child, started.work)
-          const plain = yield* helper(counter("plain.txt"))
-          const deaf = yield* helper(counter("deaf.txt", true))
+          const plain = yield* helper(counter("plain.txt")).pipe(Effect.tap(track))
+          const deaf = yield* helper(counter("deaf.txt", true)).pipe(Effect.tap(track))
           const own = yield* terminal(parent, home)
-          const kept = yield* own(counter("parent.txt"))
-          // A failing run must not leave the deaf counter running after the test.
-          yield* Effect.addFinalizer(() =>
-            Effect.sync(() => {
-              for (const opened of [plain, deaf, kept]) if (alive(pid(opened))) process.kill(-pid(opened), "SIGKILL")
-            }),
-          )
+          const kept = yield* own(counter("parent.txt")).pipe(Effect.tap(track))
           // Each has counted a few times before the save.
           for (const file of ["plain.txt", "deaf.txt"])
             for (let poll = 0; poll < 400 && (yield* count(path.join(workPath, file))) < 3; poll++)
